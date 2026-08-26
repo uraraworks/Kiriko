@@ -68,6 +68,9 @@ python3 -m http.server 8901
 | <kbd>Delete</kbd> | 選択中のクリップ・テロップ・ぼかし・音源を削除 |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | プロジェクト保存 |
 
+タイムラインはホイールで横スクロール、<kbd>⌘</kbd>（Windows は <kbd>Ctrl</kbd>）＋ホイールで拡大縮小。
+Mac のトラックパッドはピンチがそのまま拡大縮小になる。
+
 ## ファイル構成
 
 | ファイル | 役割 |

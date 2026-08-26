@@ -866,7 +866,8 @@ const secToX = (t) => (t - S.scrollSec) * S.pxPerSec;
 const xToSec = (x) => x / S.pxPerSec + S.scrollSec;
 
 function zoomFit() {
-  const total = P.totalDuration(S.project);
+  // クリップだけでなく、末尾に伸びたテロップ・ぼかし・BGM まで含めて収める
+  const total = contentEndSec();
   const w = $('tlWrap').clientWidth || 800;
   S.scrollSec = 0;
   S.pxPerSec = total > 0 ? Math.max(0.5, (w - 20) / total) : 8;
@@ -1279,16 +1280,40 @@ tlCanvas.addEventListener('dblclick', (e) => {
   renderAll();
 });
 
+/** タイムラインの中身が終わる秒（クリップ・テロップ・ぼかし・音源すべての末尾） */
+function contentEndSec() {
+  let end = P.totalDuration(S.project);
+  for (const t of S.project.telops) end = Math.max(end, t.end);
+  for (const b of S.project.blurs) end = Math.max(end, b.end);
+  for (const a of S.project.audioClips) end = Math.max(end, a.start + a.duration);
+  return end;
+}
+
+function clampScroll(sec) {
+  const visible = ($('tlWrap').clientWidth || 800) / S.pxPerSec;
+  // 全体が収まっているならスクロールさせない。
+  // 収まらない時は、末尾で編集しやすいよう少しだけ先まで送れるようにする。
+  const end = contentEndSec();
+  const margin = Math.min(visible * 0.3, 10);
+  const max = end <= visible ? 0 : end - visible + margin;
+  return Math.max(0, Math.min(max, sec));
+}
+
 $('tlWrap').addEventListener('wheel', (e) => {
   e.preventDefault();
   const r = tlCanvas.getBoundingClientRect();
-  const anchorSec = xToSec(e.clientX - r.left);
-  if (e.ctrlKey || e.metaKey || !e.shiftKey) {
+  if (e.ctrlKey || e.metaKey) {
+    // ⌘ / Ctrl ＋ ホイールで拡大縮小（カーソル位置を固定したまま）。
+    // Mac のトラックパッドのピンチも ctrlKey 付きの wheel として届くのでそのまま効く。
+    const px = e.clientX - r.left;
+    const anchorSec = xToSec(px);
     const f = Math.exp(-e.deltaY * 0.002);
     S.pxPerSec = Math.max(0.2, Math.min(400, S.pxPerSec * f));
-    S.scrollSec = Math.max(0, anchorSec - (e.clientX - r.left) / S.pxPerSec);
+    S.scrollSec = Math.max(0, anchorSec - px / S.pxPerSec);
   } else {
-    S.scrollSec = Math.max(0, S.scrollSec + e.deltaY / S.pxPerSec);
+    // ホイールは横スクロール。トラックパッドの横スワイプ（deltaX）も拾う。
+    const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    S.scrollSec = clampScroll(S.scrollSec + d / S.pxPerSec);
   }
   renderTimeline();
 }, { passive: false });
@@ -1437,8 +1462,17 @@ $('fontInput').onchange = async (e) => {
   renderOverlay();
 };
 $('btnExport').onclick = () => doExport().catch((e) => status(e.message, true));
-$('btnZoomIn').onclick = () => { S.pxPerSec = Math.min(400, S.pxPerSec * 1.5); renderTimeline(); };
-$('btnZoomOut').onclick = () => { S.pxPerSec = Math.max(0.2, S.pxPerSec / 1.5); renderTimeline(); };
+function zoomBy(f) {
+  // 画面中央を固定したまま拡大縮小する
+  const visible = ($('tlWrap').clientWidth || 800) / S.pxPerSec;
+  const centerSec = S.scrollSec + visible / 2;
+  S.pxPerSec = Math.max(0.2, Math.min(400, S.pxPerSec * f));
+  const nv = ($('tlWrap').clientWidth || 800) / S.pxPerSec;
+  S.scrollSec = clampScroll(centerSec - nv / 2);
+  renderTimeline();
+}
+$('btnZoomIn').onclick = () => zoomBy(1.5);
+$('btnZoomOut').onclick = () => zoomBy(1 / 1.5);
 $('btnZoomFit').onclick = zoomFit;
 $('optRes').onchange = (e) => {
   const [w, h] = e.target.value.split('x').map(Number);
