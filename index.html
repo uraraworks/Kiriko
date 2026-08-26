@@ -23,16 +23,16 @@
     </div>
     <div class="tb-sep"></div>
     <div class="tb-group">
-      <button id="btnMarkIn" class="tb" title="イン点 (I)">[ IN</button>
-      <button id="btnMarkOut" class="tb" title="アウト点 (O)">OUT ]</button>
-      <button id="btnAddClip" class="tb accent" title="クリップとして追加 (Enter)">＋ クリップ追加</button>
-      <button id="btnAddTelop" class="tb" title="再生位置にテロップを追加 (T)">＋ テロップ</button>
-      <button id="btnAddBlur" class="tb" title="再生位置にぼかし区間を追加 (B)">＋ ぼかし</button>
+      <button id="btnMarkIn" class="tb" title="イン点（ソース＝拾う区間／プログラム＝切り取る範囲）　［ I ］">[ IN</button>
+      <button id="btnMarkOut" class="tb" title="アウト点（ソース＝拾う区間／プログラム＝切り取る範囲）　［ O ］">OUT ]</button>
+      <button id="btnAddClip" class="tb accent" title="ソースの区間をクリップとして追加　［ Enter ］">＋ クリップ追加</button>
+      <button id="btnAddTelop" class="tb" title="再生位置にテロップを追加　［ T ］">＋ テロップ</button>
+      <button id="btnAddBlur" class="tb" title="再生位置にぼかし区間を追加　［ B ］">＋ ぼかし</button>
       <button id="btnAddAudio" class="tb" title="効果音 / BGM の素材を読み込む">＋ 音源</button>
     </div>
     <div class="tb-sep"></div>
     <div class="tb-group">
-      <button id="btnDelete" class="tb" title="選択クリップを削除 (Delete)">削除</button>
+      <button id="btnDelete" class="tb" title="範囲を切り取り／選択中の要素を削除　［ Delete ］">削除</button>
     </div>
     <div class="spacer"></div>
     <div class="tb-group">
@@ -132,13 +132,16 @@
       <div class="panel-head sub">ショートカット</div>
       <ul class="keys">
         <li><kbd>Space</kbd> 再生／停止</li>
-        <li><kbd>I</kbd> / <kbd>O</kbd> イン点／アウト点</li>
-        <li><kbd>Enter</kbd> クリップ追加</li>
+        <li><kbd>I</kbd> / <kbd>O</kbd> 範囲の開始／終了</li>
+        <li><kbd>Delete</kbd> 範囲を切り取って詰める</li>
+        <li><kbd>Esc</kbd> 範囲選択を解除</li>
+        <li><kbd>Shift</kbd>+<kbd>I</kbd>/<kbd>O</kbd> 範囲の端へ移動</li>
+        <li><kbd>Enter</kbd> クリップ追加（ソース）</li>
         <li><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> 逆／停止／早送り</li>
         <li><kbd>←</kbd><kbd>→</kbd> 1フレーム</li>
         <li><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 1秒</li>
         <li><kbd>T</kbd> テロップ追加／<kbd>B</kbd> ぼかし追加</li>
-        <li><kbd>Delete</kbd> 選択クリップ／テロップ削除</li>
+        <li><kbd>Delete</kbd> 選択中の要素を削除</li>
         <li><kbd>Ctrl</kbd>+<kbd>S</kbd> プロジェクト保存</li>
       </ul>
     </aside>
@@ -148,6 +151,13 @@
   <section class="panel timeline">
     <div class="panel-head">
       タイムライン
+      <span class="tl-edit">
+        <button id="btnZoneIn" class="mini zone" title="範囲の開始をカーソル位置に　［ I ］">[ 開始</button>
+        <button id="btnZoneOut" class="mini zone" title="範囲の終了をカーソル位置に　［ O ］">終了 ]</button>
+        <button id="btnExtract" class="mini danger" title="範囲を切り取って後ろを詰める　［ Delete ］">切り取り</button>
+        <button id="btnZoneClear" class="mini" title="範囲選択を解除　［ Esc ］">解除</button>
+        <span class="zone-info" id="zoneInfo">範囲 未選択</span>
+      </span>
       <span class="tl-tools">
         <button id="btnZoomOut" class="mini">－</button>
         <button id="btnZoomIn" class="mini">＋</button>

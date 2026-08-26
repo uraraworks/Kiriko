@@ -227,3 +227,17 @@ kbd {
 .bin-add:hover { background: #474080; }
 #fxForm .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 #fxForm .num, #fxForm input[type=number] { width: 100%; }
+
+/* ---------- タイムラインの範囲選択（カット作業） ---------- */
+.tl-edit { display: flex; align-items: center; gap: 4px; margin-left: 14px; font-weight: 400; }
+.mini.zone { background: #4a4020; border-color: #6d5c28; color: #f0d98c; }
+.mini.zone:hover { background: #5c4f26; }
+.mini.danger { background: #5a2a26; border-color: #8a3f38; color: #ffc9c2; font-weight: 700; }
+.mini.danger:hover { background: #6e332e; }
+.mini:disabled { opacity: .35; cursor: default; }
+.mini:disabled:hover { background: #30353f; }
+.mini.danger:disabled:hover { background: #5a2a26; }
+.zone-info {
+  color: #c9b876; font-size: 11px; font-variant-numeric: tabular-nums;
+  margin-left: 6px; white-space: nowrap;
+}

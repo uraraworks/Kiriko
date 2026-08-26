@@ -31,6 +31,8 @@ const S = {
   telopStyle: { ...T.DEFAULT_STYLE }, // 次に追加するテロップの既定スタイル
   selectedBlurId: null,
   selectedAudioId: null,
+  zoneIn: null,            // タイムラインの範囲選択（Kdenlive のゾーン相当）
+  zoneOut: null,
   library: null,           // AudioLibrary（初回の音源読み込み時に作る）
   audioPreview: null,
 };
@@ -245,14 +247,21 @@ function programTick() {
 
 // ---------------------------------------------------------------- クリップ操作
 
+/**
+ * イン点はアクティブなモニターに対して打つ（Kdenlive と同じ考え方）。
+ *  - ソースモニター … 素材から拾う区間（加算方式）
+ *  - プログラムモニター … タイムラインの範囲選択（切り取り用）
+ */
 function markIn() {
-  if (S.mode !== 'source' || !curSource()) return;
+  if (S.mode === 'program') return zoneIn();
+  if (!curSource()) return;
   S.markIn = video.currentTime;
   if (S.markOut !== null && S.markOut <= S.markIn) S.markOut = null;
   renderTransport(); renderScrub();
 }
 function markOut() {
-  if (S.mode !== 'source' || !curSource()) return;
+  if (S.mode === 'program') return zoneOut();
+  if (!curSource()) return;
   S.markOut = video.currentTime;
   if (S.markIn !== null && S.markIn >= S.markOut) S.markIn = null;
   renderTransport(); renderScrub();
@@ -274,7 +283,114 @@ function addClip() {
   renderAll();
 }
 
+// ---------------------------------------------------------------- タイムラインの範囲選択と切り取り
+
+function zoneIn() {
+  S.zoneIn = S.programTime;
+  if (S.zoneOut !== null && S.zoneOut <= S.zoneIn) S.zoneOut = null;
+  renderZoneUI();
+}
+
+function zoneOut() {
+  S.zoneOut = S.programTime;
+  if (S.zoneIn !== null && S.zoneIn >= S.zoneOut) S.zoneIn = null;
+  renderZoneUI();
+}
+
+function clearZone() {
+  S.zoneIn = S.zoneOut = null;
+  renderZoneUI();
+}
+
+/** 範囲が確定しているか（片方だけならタイムラインの端で補う） */
+function zoneRange() {
+  const total = P.totalDuration(S.project);
+  if (S.zoneIn === null && S.zoneOut === null) return null;
+  const a = S.zoneIn ?? 0;
+  const b = S.zoneOut ?? total;
+  return b - a > 0.001 ? [a, b] : null;
+}
+
+function renderZoneInfo() {
+  const r = zoneRange();
+  $('zoneInfo').textContent = r
+    ? `範囲 ${tc(r[0], false)} 〜 ${tc(r[1], false)}（${tc(r[1] - r[0], false)}）`
+    : '範囲 未選択';
+  $('btnExtract').disabled = !r;
+  $('btnZoneClear').disabled = !r;
+}
+
+function renderZoneUI() {
+  renderZoneInfo();
+  renderTimeline();
+  renderTransport();
+}
+
+/** 範囲を切り取って後ろを詰める（Kdenlive の「ゾーンを抽出」相当） */
+function extractZone() {
+  const r = zoneRange();
+  if (!r) return status('先に範囲を選択してください（I / O）', true);
+  const [a, b] = r;
+  const len = b - a;
+
+  const kept = [];
+  let t = 0;
+  for (const c of S.project.clips) {
+    const dur = P.clipDuration(c);
+    const s0 = t, e0 = t + dur;
+    t = e0;
+    if (e0 <= a || s0 >= b) { kept.push(c); continue; }   // 範囲外はそのまま
+    if (s0 < a) kept.push({ ...c, out: c.in + (a - s0) }); // 前半を残す
+    if (e0 > b) kept.push({ ...c, id: P.newId('clip'), in: c.in + (b - s0) }); // 後半を残す
+  }
+  S.project.clips = kept;
+  rippleAfter(a, b);
+
+  S.selectedClipId = null;
+  clearZone();
+  seekProgram(a, true);
+  renderAll();
+  status(`${tc(len, false)} を切り取りました（残り ${tc(P.totalDuration(S.project), false)}）`);
+}
+
+/** テロップ・ぼかし・音源を、切り取った分だけ前に詰める */
+function rippleAfter(a, b) {
+  const len = b - a;
+  const shift = (v) => (v >= b ? v - len : v > a ? a : v);
+  const alive = (x, y) => y - x > 0.05;
+
+  S.project.telops = S.project.telops
+    .map((x) => ({ ...x, start: shift(x.start), end: shift(x.end) }))
+    .filter((x) => alive(x.start, x.end));
+  S.project.blurs = S.project.blurs
+    .map((x) => ({ ...x, start: shift(x.start), end: shift(x.end) }))
+    .filter((x) => alive(x.start, x.end));
+  S.project.audioClips = S.project.audioClips
+    .map((x) => {
+      const s0 = shift(x.start), e0 = shift(x.start + x.duration);
+      // 頭を削られた分だけ素材の頭出しもずらす
+      const trimmed = Math.max(0, a - x.start) > 0 && x.start < a ? 0 : Math.max(0, x.start - s0);
+      return { ...x, start: s0, duration: e0 - s0, offset: (x.offset ?? 0) + trimmed };
+    })
+    .filter((x) => x.duration > 0.05);
+}
+
+/** 素材まるごとをタイムラインの末尾に置く（範囲を消していく編集の起点） */
+function placeWholeSource(sourceId) {
+  const src = S.sources.get(sourceId);
+  if (!src) return;
+  const clip = { id: P.newId('clip'), sourceId, in: 0, out: src.duration, volume: 1 };
+  S.project.clips.push(clip);
+  select('clip', clip.id);
+  setMode('program');
+  zoomFit();
+  renderAll();
+  status(`${src.name} 全体（${tc(src.duration, false)}）をタイムラインに配置しました`);
+}
+
 function deleteSelected() {
+  // プログラムモニターで範囲が選ばれていれば「切り取って詰める」を優先する
+  if (S.mode === 'program' && zoneRange()) { extractZone(); return; }
   if (S.selectedBlurId) {
     S.project.blurs = S.project.blurs.filter((b) => b.id !== S.selectedBlurId);
     S.selectedBlurId = null; renderAll(); renderFxForm(true); return;
@@ -518,7 +634,10 @@ function renderBin() {
     for (const s of S.project.sources) {
       const el = document.createElement('div');
       el.className = 'bin-item' + (s.id === S.currentSourceId ? ' active' : '');
-      el.innerHTML = `<div class="n">${esc(s.name)}</div><div class="m">${tc(s.duration)} ／ ${(s.size / 1e9).toFixed(2)} GB</div>`;
+      el.innerHTML = `<div class="row"><div class="n">${esc(s.name)}</div>`
+        + `<button class="bin-add" title="素材まるごとをタイムラインに置く（範囲を消していく編集の起点）">全体</button></div>`
+        + `<div class="m">${tc(s.duration)} ／ ${(s.size / 1e9).toFixed(2)} GB</div>`;
+      el.querySelector('.bin-add').onclick = (ev) => { ev.stopPropagation(); placeWholeSource(s.id); };
       el.onclick = () => selectSource(s.id);
       list.appendChild(el);
     }
@@ -773,9 +892,11 @@ function renderTransport() {
   $('tcDur').textContent = tc(dur);
   $('btnPlay').textContent = video.paused ? '▶' : '❚❚';
   $('rateLabel').textContent = `×${video.playbackRate}`;
-  $('lblIn').textContent = S.markIn === null ? '--:--' : tc(S.markIn, false);
-  $('lblOut').textContent = S.markOut === null ? '--:--' : tc(S.markOut, false);
-  $('lblLen').textContent = (S.markIn !== null && S.markOut !== null) ? tc(S.markOut - S.markIn, false) : '--:--';
+  const inV = S.mode === 'program' ? S.zoneIn : S.markIn;
+  const outV = S.mode === 'program' ? S.zoneOut : S.markOut;
+  $('lblIn').textContent = inV === null ? '--:--' : tc(inV, false);
+  $('lblOut').textContent = outV === null ? '--:--' : tc(outV, false);
+  $('lblLen').textContent = (inV !== null && outV !== null) ? tc(outV - inV, false) : '--:--';
   $('totalDur').textContent = tc(P.totalDuration(S.project), false);
   $('clipCount').textContent = S.project.clips.length;
 }
@@ -819,6 +940,16 @@ function renderScrub() {
   } else {
     ctx.fillStyle = '#3f5a8a';
     ctx.fillRect(0, 12, w, 12);
+    // 選択中の範囲
+    const zr = zoneRange();
+    if (zr) {
+      const x0 = (zr[0] / dur) * w, x1 = (zr[1] / dur) * w;
+      ctx.fillStyle = '#f0c33c55';
+      ctx.fillRect(x0, 12, x1 - x0, 12);
+      ctx.fillStyle = '#f0c33c';
+      ctx.fillRect(x0 - 1, 8, 2, 20);
+      ctx.fillRect(x1 - 1, 8, 2, 20);
+    }
   }
 
   const cur = S.mode === 'program' ? S.programTime : video.currentTime;
@@ -940,6 +1071,21 @@ function renderTimeline() {
     const tw = (tel.end - tel.start) * S.pxPerSec;
     if (x + tw < -5 || x > w + 5) continue;
     drawTelopBlock(ctx, x, Y_TELOP + 3, Math.max(3, tw), TELOP_H - 7, tel, tel.id === S.selectedTelopId);
+  }
+
+  // --- 範囲選択（ゾーン）---
+  const zr = zoneRange();
+  if (zr) {
+    const zx0 = secToX(zr[0]), zx1 = secToX(zr[1]);
+    ctx.fillStyle = '#f0c33c18';
+    ctx.fillRect(zx0, RULER_H, zx1 - zx0, h - RULER_H);
+    ctx.fillStyle = '#f0c33c';
+    ctx.fillRect(zx0, 0, Math.max(2, zx1 - zx0), 4);        // ルーラー上の帯
+    ctx.fillRect(zx0 - 1, 0, 2, h);
+    ctx.fillRect(zx1 - 1, 0, 2, h);
+    // 端の三角マーカー
+    ctx.beginPath(); ctx.moveTo(zx0, 4); ctx.lineTo(zx0 + 9, 4); ctx.lineTo(zx0, 13); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(zx1, 4); ctx.lineTo(zx1 - 9, 4); ctx.lineTo(zx1, 13); ctx.fill();
   }
 
   // --- プレイヘッド ---
@@ -1474,6 +1620,10 @@ function zoomBy(f) {
 $('btnZoomIn').onclick = () => zoomBy(1.5);
 $('btnZoomOut').onclick = () => zoomBy(1 / 1.5);
 $('btnZoomFit').onclick = zoomFit;
+$('btnZoneIn').onclick = () => { setMode('program'); zoneIn(); };
+$('btnZoneOut').onclick = () => { setMode('program'); zoneOut(); };
+$('btnExtract').onclick = extractZone;
+$('btnZoneClear').onclick = clearZone;
 $('optRes').onchange = (e) => {
   const [w, h] = e.target.value.split('x').map(Number);
   S.project.output.width = w; S.project.output.height = h;
@@ -1543,14 +1693,21 @@ document.addEventListener('drop', (e) => {
 
 // --- キーボード ---
 document.addEventListener('keydown', (e) => {
-  if (e.target.matches('input, select, textarea')) return;
+  if (e.target instanceof Element && e.target.matches('input, select, textarea')) return;
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); saveProject(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   switch (k) {
     case ' ': e.preventDefault(); togglePlay(); break;
-    case 'i': markIn(); break;
-    case 'o': markOut(); break;
+    case 'i':
+      if (e.shiftKey && S.mode === 'program' && S.zoneIn !== null) { seekProgram(S.zoneIn, true); renderAll(); }
+      else markIn();
+      break;
+    case 'o':
+      if (e.shiftKey && S.mode === 'program' && S.zoneOut !== null) { seekProgram(S.zoneOut, true); renderAll(); }
+      else markOut();
+      break;
+    case 'escape': clearZone(); break;
     case 'enter': addClip(); break;
     case 't': addTelop(); break;
     case 'b': addBlur(); break;
@@ -1580,6 +1737,7 @@ function renderAll() {
   renderFxForm();
   renderTransport();
   renderScrub();
+  renderZoneInfo();
   renderTimeline();
   renderOverlay();
 }
