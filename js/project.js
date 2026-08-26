@@ -14,8 +14,9 @@ export function createProject() {
     clips: [],     // { id, sourceId, in, out, volume }
     telops: [],    // { id, text, start, end, x, y, ...style } 時刻は出力タイムライン秒
     telopPresets: null, // null なら telop.js の既定プリセットを使う
-    audioClips: [],// Phase 3 (SE / BGM)
-    blurs: [],     // Phase 3
+    audioAssets: [],// { id, name, duration } SE / BGM 素材
+    audioClips: [], // { id, assetId, kind, start, offset, duration, volume, fadeIn, fadeOut }
+    blurs: [],      // { id, start, end, strength } 区間ぼかし（プライバシー保護）
   };
 }
 

@@ -18,10 +18,14 @@ async function drain(obj, limit) {
 /**
  * @param {object} project
  * @param {Map<string, Mp4Source>} sourceMap
- * @param {object} opts { onProgress(ratio, text), onLog(text), signal, overlay(ctx, timelineSec) }
+ * @param {object} opts { onProgress, onLog, signal, composeFrame(ctx,frame,t,w,h), audioMix(planar,n,absStart,ch,rate) }
  */
 export async function exportProject(project, sourceMap, opts = {}) {
-  const { onProgress = () => {}, onLog = () => {}, signal, overlay = null } = opts;
+  const {
+    onProgress = () => {}, onLog = () => {}, signal,
+    composeFrame = null,   // ぼかし＋テロップの合成（未指定なら素の映像のみ）
+    audioMix = null,       // SE / BGM の加算ミックス
+  } = opts;
   const clips = project.clips.filter((c) => clipDuration(c) > 0.001);
   if (clips.length === 0) throw new Error('書き出すクリップがありません');
 
@@ -50,7 +54,7 @@ export async function exportProject(project, sourceMap, opts = {}) {
     fastStart: streaming ? false : 'in-memory',
     firstTimestampBehavior: 'offset',
     video: { codec: 'avc', width, height, frameRate: fps },
-    audio: audioSrc ? { codec: 'aac', sampleRate: audioRate, numberOfChannels: audioCh } : undefined,
+    audio: { codec: 'aac', sampleRate: audioRate, numberOfChannels: audioCh },
   });
 
   // ---- エンコーダ ----
@@ -69,7 +73,7 @@ export async function exportProject(project, sourceMap, opts = {}) {
   });
 
   let audioEncoder = null;
-  if (audioSrc) {
+  {
     audioEncoder = new AudioEncoder({
       output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
       error: (e) => { encError = e; },
@@ -101,15 +105,15 @@ export async function exportProject(project, sourceMap, opts = {}) {
       onLog(`クリップ ${i + 1}/${clips.length}: ${src.name} ${fmt(clip.in)} → ${fmt(clip.out)}`);
 
       await encodeVideoRange(src, clip, {
-        ctx, canvas, videoEncoder, fps, width, height, state, signal, overlay,
+        ctx, canvas, videoEncoder, fps, width, height, state, signal, composeFrame,
         onProgress: (secDone) => {
           const done = state.timelineBase + secDone;
           onProgress(done / totalOut, `映像 ${fmt(done)} / ${fmt(totalOut)}`);
         },
       });
 
-      if (audioSrc && src.audio) {
-        await encodeAudioRange(src, clip, { audioEncoder, audioRate, audioCh, state, signal });
+      if (audioEncoder) {
+        await encodeAudioRange(src, clip, { audioEncoder, audioRate, audioCh, state, signal, audioMix });
       }
 
       state.timelineBase += clipDuration(clip);
@@ -133,7 +137,7 @@ export async function exportProject(project, sourceMap, opts = {}) {
 // ---------------------------------------------------------------- 映像
 
 async function encodeVideoRange(src, clip, o) {
-  const { ctx, canvas, videoEncoder, fps, width, height, state, signal, onProgress, overlay } = o;
+  const { ctx, canvas, videoEncoder, fps, width, height, state, signal, onProgress, composeFrame } = o;
   const samples = src.video.samples;
   const startIdx = Mp4Source.syncIndexBefore(samples, clip.in);
   const dur = clipDuration(clip);
@@ -146,8 +150,9 @@ async function encodeVideoRange(src, clip, o) {
   const emitUntil = async (limitSec) => {
     while (pending && emittedSec + 1e-9 < limitSec) {
       const timelineSec = state.timelineBase + emittedSec;
-      ctx.drawImage(pending, 0, 0, width, height);
-      if (overlay) overlay(ctx, timelineSec); // テロップ等の合成
+      // ぼかし・テロップの合成はプレビューと同じ関数を通す
+      if (composeFrame) composeFrame(ctx, pending, timelineSec, width, height);
+      else ctx.drawImage(pending, 0, 0, width, height);
       const ts = Math.round(timelineSec * 1e6);
       const frame = new VideoFrame(canvas, { timestamp: ts, duration: Math.round(frameDur * 1e6) });
       videoEncoder.encode(frame, { keyFrame: state.outFrame % (fps * 2) === 0 });
@@ -220,9 +225,10 @@ async function encodeVideoRange(src, clip, o) {
 // ---------------------------------------------------------------- 音声
 
 async function encodeAudioRange(src, clip, o) {
-  const { audioEncoder, audioRate, audioCh, state, signal } = o;
-  const samples = src.audio.samples;
-  const startIdx = Mp4Source.indexBefore(samples, clip.in);
+  const { audioEncoder, audioRate, audioCh, state, signal, audioMix } = o;
+  const hasAudio = !!src.audio;
+  const samples = hasAudio ? src.audio.samples : [];
+  const startIdx = hasAudio ? Mp4Source.indexBefore(samples, clip.in) : 0;
   const FRAME = 1024;
 
   // クリップ内 PCM を貯めて 1024 サンプル単位で吐く（クリップ間の継ぎ目が出ないよう連番で timestamp を振る）
@@ -248,6 +254,8 @@ async function encodeAudioRange(src, clip, o) {
         }
       }
       queued -= n;
+      // SE / BGM をこの区間に加算する（出力サンプル位置で引き当てる）
+      if (audioMix) audioMix(planar, n, state.outAudioSamples, audioCh, audioRate);
       const ad = new AudioData({
         format: 'f32-planar',
         sampleRate: audioRate,
@@ -266,16 +274,18 @@ async function encodeAudioRange(src, clip, o) {
   const gain = clip.volume ?? 1;
   const queue = [];
   let decodeError = null;
-  const decoder = new AudioDecoder({
+  const decoder = hasAudio ? new AudioDecoder({
     output: (data) => queue.push(data),
     error: (e) => { decodeError = e; },
-  });
-  decoder.configure({
-    codec: src.audio.codec.startsWith('mp4a') ? 'mp4a.40.2' : src.audio.codec,
-    sampleRate: src.audio.sampleRate,
-    numberOfChannels: src.audio.channels,
-    description: src.audio.description,
-  });
+  }) : null;
+  if (decoder) {
+    decoder.configure({
+      codec: src.audio.codec.startsWith('mp4a') ? 'mp4a.40.2' : src.audio.codec,
+      sampleRate: src.audio.sampleRate,
+      numberOfChannels: src.audio.channels,
+      description: src.audio.description,
+    });
+  }
 
   const pump = async () => {
     while (queue.length) {
@@ -305,7 +315,7 @@ async function encodeAudioRange(src, clip, o) {
     }
   };
 
-  for (let i = startIdx; i < samples.length; i++) {
+  for (let i = startIdx; hasAudio && i < samples.length; i++) {
     if (signal?.aborted) throw new Error('中断しました');
     const s = samples[i];
     if (s.time >= clip.out) break;
@@ -320,10 +330,12 @@ async function encodeAudioRange(src, clip, o) {
     while (decoder.decodeQueueSize > 32) { await sleep(2); await pump(); }
     if (decodeError) throw decodeError;
   }
-  await decoder.flush();
-  await pump();
-  decoder.close();
-  if (decodeError) throw decodeError;
+  if (decoder) {
+    await decoder.flush();
+    await pump();
+    decoder.close();
+    if (decodeError) throw decodeError;
+  }
 
   // 端数を無音で埋めて映像尺と合わせる
   if (accepted < wantSamples) {

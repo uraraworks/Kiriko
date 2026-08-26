@@ -27,6 +27,8 @@
       <button id="btnMarkOut" class="tb" title="アウト点 (O)">OUT ]</button>
       <button id="btnAddClip" class="tb accent" title="クリップとして追加 (Enter)">＋ クリップ追加</button>
       <button id="btnAddTelop" class="tb" title="再生位置にテロップを追加 (T)">＋ テロップ</button>
+      <button id="btnAddBlur" class="tb" title="再生位置にぼかし区間を追加 (B)">＋ ぼかし</button>
+      <button id="btnAddAudio" class="tb" title="効果音 / BGM の素材を読み込む">＋ 音源</button>
     </div>
     <div class="tb-sep"></div>
     <div class="tb-group">
@@ -125,6 +127,7 @@
         <div class="empty">未選択</div>
       </div>
       <div class="form hidden" id="telopForm"></div>
+      <div class="form hidden" id="fxForm"></div>
 
       <div class="panel-head sub">ショートカット</div>
       <ul class="keys">
@@ -134,7 +137,7 @@
         <li><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> 逆／停止／早送り</li>
         <li><kbd>←</kbd><kbd>→</kbd> 1フレーム</li>
         <li><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 1秒</li>
-        <li><kbd>T</kbd> テロップ追加</li>
+        <li><kbd>T</kbd> テロップ追加／<kbd>B</kbd> ぼかし追加</li>
         <li><kbd>Delete</kbd> 選択クリップ／テロップ削除</li>
         <li><kbd>Ctrl</kbd>+<kbd>S</kbd> プロジェクト保存</li>
       </ul>
@@ -155,9 +158,11 @@
     <div class="tl-body">
       <div class="tl-heads">
         <div class="tl-head ruler-head"></div>
+        <div class="tl-head fx">FX</div>
         <div class="tl-head telop">T1</div>
         <div class="tl-head">V1</div>
         <div class="tl-head">A1</div>
+        <div class="tl-head aud2">A2</div>
       </div>
       <div class="tl-canvas-wrap" id="tlWrap">
         <canvas id="tlCanvas"></canvas>
@@ -186,6 +191,7 @@
 <input type="file" id="fileInput" accept="video/mp4,video/*" multiple hidden>
 <input type="file" id="projInput" accept="application/json,.json" hidden>
 <input type="file" id="fontInput" accept=".ttf,.otf,.woff,.woff2,.ttc" multiple hidden>
+<input type="file" id="audioInput" accept="audio/*,.mp3,.wav,.m4a,.ogg" multiple hidden>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

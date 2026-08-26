@@ -4,6 +4,8 @@ import * as P from './project.js';
 import { exportProject } from './exporter.js';
 import { parseKdenlive, basename } from './kdenlive.js';
 import * as T from './telop.js';
+import { composeFrame, activeBlur } from './compose.js';
+import { AudioLibrary, AudioPreview, mixInto } from './audio.js';
 
 // ---------------------------------------------------------------- 状態
 
@@ -27,6 +29,10 @@ const S = {
   userFonts: [],           // ユーザーが追加した .ttf/.otf
   installedFonts: null,    // Local Font Access API で列挙した結果
   telopStyle: { ...T.DEFAULT_STYLE }, // 次に追加するテロップの既定スタイル
+  selectedBlurId: null,
+  selectedAudioId: null,
+  library: null,           // AudioLibrary（初回の音源読み込み時に作る）
+  audioPreview: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -51,8 +57,12 @@ const curSource = () => S.sources.get(S.currentSourceId) || null;
 function select(type, id) {
   S.selectedClipId = type === 'clip' ? id : null;
   S.selectedTelopId = type === 'telop' ? id : null;
+  S.selectedBlurId = type === 'blur' ? id : null;
+  S.selectedAudioId = type === 'audio' ? id : null;
 }
 const selectedTelop = () => S.project.telops.find((t) => t.id === S.selectedTelopId) || null;
+const selectedBlur = () => S.project.blurs.find((b) => b.id === S.selectedBlurId) || null;
+const selectedAudio = () => S.project.audioClips.find((a) => a.id === S.selectedAudioId) || null;
 const presets = () => S.project.telopPresets ?? T.DEFAULT_PRESETS;
 
 function status(msg, isErr = false) {
@@ -69,7 +79,14 @@ async function openFiles() {
     try {
       const handles = await window.showOpenFilePicker({
         multiple: true,
-        types: [{ description: '動画 / プロジェクト', accept: { 'video/*': ['.mp4', '.mov', '.m4v'], 'application/xml': ['.kdenlive'] } }],
+        types: [{
+          description: '動画 / 音源 / プロジェクト',
+          accept: {
+            'video/*': ['.mp4', '.mov', '.m4v'],
+            'audio/*': ['.mp3', '.wav', '.m4a', '.ogg'],
+            'application/xml': ['.kdenlive'],
+          },
+        }],
       });
       files = await Promise.all(handles.map((h) => h.getFile()));
     } catch (e) { if (e.name === 'AbortError') return; throw e; }
@@ -80,8 +97,13 @@ async function openFiles() {
   await addFiles(files);
 }
 
+const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg|flac)$/i;
+
 async function addFiles(files) {
+  const audio = files.filter((f) => AUDIO_RE.test(f.name));
+  if (audio.length) await addAudioAssets(audio);
   for (const file of files) {
+    if (AUDIO_RE.test(file.name)) continue;
     if (/\.kdenlive$/i.test(file.name)) { await importKdenlive(file); continue; }
     try {
       status(`${file.name} を解析中…`);
@@ -202,6 +224,7 @@ function seekProgram(t, force = false) {
     setVideoSource(loc.clip.sourceId);
   }
   if (Math.abs(video.currentTime - loc.localTime) > 0.05) video.currentTime = loc.localTime;
+  video.volume = Math.min(1, Math.max(0, loc.clip.volume ?? 1));
 }
 
 /** プログラム再生中のクリップ跨ぎ処理 */
@@ -252,6 +275,14 @@ function addClip() {
 }
 
 function deleteSelected() {
+  if (S.selectedBlurId) {
+    S.project.blurs = S.project.blurs.filter((b) => b.id !== S.selectedBlurId);
+    S.selectedBlurId = null; renderAll(); renderFxForm(true); return;
+  }
+  if (S.selectedAudioId) {
+    S.project.audioClips = S.project.audioClips.filter((a) => a.id !== S.selectedAudioId);
+    S.selectedAudioId = null; renderAll(); renderFxForm(true); return;
+  }
   if (S.selectedTelopId) {
     S.project.telops = S.project.telops.filter((t) => t.id !== S.selectedTelopId);
     S.selectedTelopId = null;
@@ -298,6 +329,76 @@ function addTelop() {
   setTimeout(() => document.getElementById('telText')?.focus(), 0);
 }
 
+// ---------------------------------------------------------------- ぼかし / 音源
+
+function addBlur() {
+  const total = P.totalDuration(S.project);
+  if (total <= 0) return status('先にクリップを作ってください', true);
+  const t0 = Math.min(currentTimelineTime(), Math.max(0, total - 0.5));
+  const b = { id: P.newId('blur'), start: t0, end: Math.min(total, t0 + 3), strength: 40 };
+  S.project.blurs.push(b);
+  select('blur', b.id);
+  setMode('program'); seekProgram(t0, true);
+  renderAll(); renderFxForm(true);
+  status(`ぼかし区間を追加しました（${tc(b.start, false)} 〜 ${tc(b.end, false)}）`);
+}
+
+function library() {
+  if (!S.library) {
+    S.library = new AudioLibrary();
+    S.audioPreview = new AudioPreview(S.library);
+  }
+  return S.library;
+}
+
+async function addAudioAssets(files) {
+  const lib = library();
+  for (const f of files) {
+    try {
+      const id = P.newId('aud');
+      const meta = await lib.add(f, id);
+      S.project.audioAssets.push(meta);
+      status(`${f.name} を読み込みました（${tc(meta.duration, false)}）`);
+    } catch (e) {
+      status(`${f.name}: 音源を読み込めませんでした`, true);
+    }
+  }
+  renderAll();
+}
+
+/** 素材を再生位置に配置する。BGM は長いので kind を尺で判定する */
+function placeAudio(assetId) {
+  const asset = S.project.audioAssets.find((a) => a.id === assetId);
+  if (!asset) return;
+  const total = P.totalDuration(S.project);
+  if (total <= 0) return status('先にクリップを作ってください', true);
+  const start = Math.min(currentTimelineTime(), Math.max(0, total - 0.2));
+  const isBgm = asset.duration > 20;
+  const ac = {
+    id: P.newId('ac'),
+    assetId,
+    kind: isBgm ? 'bgm' : 'se',
+    start,
+    offset: 0,
+    duration: Math.min(asset.duration, isBgm ? Math.max(1, total - start) : asset.duration),
+    volume: isBgm ? 0.35 : 0.9,
+    fadeIn: isBgm ? 1.5 : 0,
+    fadeOut: isBgm ? 2 : 0,
+  };
+  S.project.audioClips.push(ac);
+  select('audio', ac.id);
+  renderAll(); renderFxForm(true);
+  status(`${asset.name} を ${tc(start, false)} に配置しました`);
+}
+
+/** SE/BGM のミックス関数（書き出しとプレビューで共通の定義を使う） */
+function audioMixer() {
+  const clips = S.project.audioClips;
+  if (!clips.length || !S.library) return null;
+  const lib = S.library;
+  return (planar, n, absStart, ch, rate) => mixInto(planar, n, absStart, ch, rate, clips, lib);
+}
+
 // --- ステージ（<video> ＋ オーバーレイ canvas）---
 const stage = $('stage');
 const overlay = $('overlay');
@@ -318,6 +419,13 @@ function renderOverlay() {
   const ctx = overlay.getContext('2d');
   ctx.clearRect(0, 0, overlay.width, overlay.height);
   const t = currentTimelineTime();
+
+  // ぼかしは <video> 側に CSS filter で掛ける（表示サイズに合わせて半径を換算）
+  const px = S.mode === 'program' ? activeBlur(S.project.blurs, t) : 0;
+  const disp = stage.clientWidth / (S.project.output.width || 1920);
+  video.style.filter = px > 0 ? `blur(${(px * disp).toFixed(2)}px)` : '';
+  video.style.transform = px > 0 ? `scale(${(1 + (px * 4) / Math.min(S.project.output.width, S.project.output.height)).toFixed(4)})` : '';
+
   if (S.mode === 'program') {
     T.drawTelopsAt(ctx, S.project.telops, t);
   } else {
@@ -415,6 +523,16 @@ function renderBin() {
       list.appendChild(el);
     }
   }
+  for (const a of S.project.audioAssets) {
+    const el = document.createElement('div');
+    el.className = 'bin-item audio';
+    el.innerHTML = `<div class="row"><div class="n">♪ ${esc(a.name)}</div>`
+      + `<button class="bin-add" title="再生位置に配置">＋</button></div>`
+      + `<div class="m">${tc(a.duration, false)} ／ ${a.duration > 20 ? 'BGM' : '効果音'}</div>`;
+    el.querySelector('.bin-add').onclick = (e) => { e.stopPropagation(); placeAudio(a.id); };
+    el.onclick = () => placeAudio(a.id);
+    $('binList').appendChild(el);
+  }
   const src = curSource();
   $('srcInfo').innerHTML = src
     ? `映像 <b>${esc(src.video.codec)}</b><br>${src.video.width}×${src.video.height} ／ ${src.video.samples.length} フレーム<br>`
@@ -468,9 +586,11 @@ function renderTelopForm(force = false) {
   const form = $('telopForm');
   const clipForm = $('clipForm');
   const tel = selectedTelop();
-  $('selHead').textContent = tel ? '選択テロップ' : '選択クリップ';
+  const other = selectedBlur() || selectedAudio();
+  $('selHead').textContent = tel ? '選択テロップ'
+    : selectedBlur() ? '選択ぼかし' : selectedAudio() ? '選択音源' : '選択クリップ';
   form.classList.toggle('hidden', !tel);
-  clipForm.classList.toggle('hidden', !!tel);
+  clipForm.classList.toggle('hidden', !!tel || !!other);
   if (!tel) { telopFormId = null; return; }
   if (!force && telopFormId === tel.id) { syncTelopNumbers(); return; }
   telopFormId = tel.id;
@@ -575,6 +695,65 @@ function renderTelopForm(force = false) {
   };
 }
 
+let fxFormKey = null;
+
+function renderFxForm(force = false) {
+  const form = $('fxForm');
+  const blur = selectedBlur(), ac = selectedAudio();
+  const key = blur ? `b:${blur.id}` : ac ? `a:${ac.id}` : null;
+  form.classList.toggle('hidden', !key);
+  if (!key) { fxFormKey = null; return; }
+  if (!force && fxFormKey === key) { syncFxNumbers(); return; }
+  fxFormKey = key;
+
+  const live = () => { renderTimeline(); renderOverlay(); };
+
+  if (blur) {
+    form.innerHTML = `
+      <div class="sub-label">全画面ぼかし（プライバシー保護用）</div>
+      <label>強さ <span id="fxStrLbl">${blur.strength}</span>
+        <input type="range" id="fxStr" min="4" max="120" value="${blur.strength}"></label>
+      <div class="grid2">
+        <label>開始（秒）<input class="num" type="number" id="fxStart" step="0.1" value="${blur.start.toFixed(2)}"></label>
+        <label>終了（秒）<input class="num" type="number" id="fxEnd" step="0.1" value="${blur.end.toFixed(2)}"></label>
+      </div>
+      <div class="sub-label">長さ ${tc(blur.end - blur.start, false)}</div>`;
+    $('fxStr').oninput = (e) => { blur.strength = +e.target.value; $('fxStrLbl').textContent = e.target.value; live(); };
+    $('fxStart').oninput = (e) => { blur.start = Math.max(0, +e.target.value); live(); };
+    $('fxEnd').oninput = (e) => { blur.end = Math.max(blur.start + 0.1, +e.target.value); live(); };
+    return;
+  }
+
+  const asset = S.project.audioAssets.find((a) => a.id === ac.assetId);
+  form.innerHTML = `
+    <div class="sub-label">${esc(asset?.name ?? ac.assetId)}（${ac.kind === 'bgm' ? 'BGM' : '効果音'}）</div>
+    <label>音量 <span id="fxVolLbl">${Math.round(ac.volume * 100)}%</span>
+      <input type="range" id="fxVol" min="0" max="200" value="${Math.round(ac.volume * 100)}"></label>
+    <div class="grid2">
+      <label>フェードイン（秒）<input class="num" type="number" id="fxFi" step="0.1" min="0" value="${ac.fadeIn}"></label>
+      <label>フェードアウト（秒）<input class="num" type="number" id="fxFo" step="0.1" min="0" value="${ac.fadeOut}"></label>
+    </div>
+    <div class="grid2">
+      <label>開始（秒）<input class="num" type="number" id="fxStart" step="0.1" value="${ac.start.toFixed(2)}"></label>
+      <label>長さ（秒）<input class="num" type="number" id="fxDur" step="0.1" value="${ac.duration.toFixed(2)}"></label>
+    </div>
+    <label>素材の頭出し（秒）<input class="num" type="number" id="fxOff" step="0.1" min="0" value="${(ac.offset ?? 0).toFixed(2)}"></label>
+    <div class="sub-label">BGM を重ねて両方にフェードを付ければクロスフェードになります</div>`;
+  $('fxVol').oninput = (e) => { ac.volume = +e.target.value / 100; $('fxVolLbl').textContent = `${e.target.value}%`; live(); };
+  $('fxFi').oninput = (e) => { ac.fadeIn = Math.max(0, +e.target.value); live(); };
+  $('fxFo').oninput = (e) => { ac.fadeOut = Math.max(0, +e.target.value); live(); };
+  $('fxStart').oninput = (e) => { ac.start = Math.max(0, +e.target.value); live(); };
+  $('fxDur').oninput = (e) => { ac.duration = Math.max(0.1, +e.target.value); live(); };
+  $('fxOff').oninput = (e) => { ac.offset = Math.max(0, +e.target.value); live(); };
+}
+
+function syncFxNumbers() {
+  const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v; };
+  const blur = selectedBlur(), ac = selectedAudio();
+  if (blur) { set('fxStart', blur.start.toFixed(2)); set('fxEnd', blur.end.toFixed(2)); }
+  else if (ac) { set('fxStart', ac.start.toFixed(2)); set('fxDur', ac.duration.toFixed(2)); }
+}
+
 /** ドラッグ中など、フォームを作り直さずに数値だけ追従させる */
 function syncTelopNumbers() {
   const tel = selectedTelop();
@@ -667,10 +846,12 @@ $('scrubBar').addEventListener('pointerdown', (e) => {
 // ---------------------------------------------------------------- 描画：タイムライン
 
 const tlCanvas = $('tlCanvas');
-const RULER_H = 26, TELOP_H = 34, TRACK_H = 62;
-const Y_TELOP = RULER_H;
-const Y_V = RULER_H + TELOP_H;
+const RULER_H = 26, FX_H = 22, TELOP_H = 34, TRACK_H = 62, AUD_H = 48;
+const Y_FX = RULER_H;
+const Y_TELOP = Y_FX + FX_H;
+const Y_V = Y_TELOP + TELOP_H;
 const Y_A = Y_V + TRACK_H;
+const Y_A2 = Y_A + TRACK_H;
 
 function tlSize() {
   const wrap = $('tlWrap');
@@ -716,12 +897,13 @@ function renderTimeline() {
   ctx.stroke();
 
   // --- トラック背景 ---
-  ctx.fillStyle = '#1b1d24';
-  ctx.fillRect(0, Y_TELOP, w, TELOP_H);
+  ctx.fillStyle = '#191f22'; ctx.fillRect(0, Y_FX, w, FX_H);
+  ctx.fillStyle = '#1b1d24'; ctx.fillRect(0, Y_TELOP, w, TELOP_H);
   ctx.fillStyle = '#1e2128'; ctx.fillRect(0, Y_V, w, TRACK_H);
   ctx.fillStyle = '#1c1f26'; ctx.fillRect(0, Y_A, w, TRACK_H);
+  ctx.fillStyle = '#1d1b26'; ctx.fillRect(0, Y_A2, w, AUD_H);
   ctx.strokeStyle = '#2b303a'; ctx.beginPath();
-  for (const y of [Y_V, Y_A, Y_A + TRACK_H]) { ctx.moveTo(0, y + 0.5); ctx.lineTo(w, y + 0.5); }
+  for (const y of [Y_TELOP, Y_V, Y_A, Y_A2, Y_A2 + AUD_H]) { ctx.moveTo(0, y + 0.5); ctx.lineTo(w, y + 0.5); }
   ctx.stroke();
 
   // --- クリップ ---
@@ -732,6 +914,23 @@ function renderTimeline() {
     const sel = clip.id === S.selectedClipId;
     drawClip(ctx, x, Y_V + 2, cw, TRACK_H - 6, clip, sel, 'video');
     drawClip(ctx, x, Y_A + 2, cw, TRACK_H - 6, clip, sel, 'audio');
+  }
+
+  // --- ぼかし ---
+  for (const b of S.project.blurs) {
+    const x = secToX(b.start), bw = (b.end - b.start) * S.pxPerSec;
+    if (x + bw < -5 || x > w + 5) continue;
+    drawFxBlock(ctx, x, Y_FX + 2, Math.max(3, bw), FX_H - 5, `ぼかし ${b.strength}`,
+      b.id === S.selectedBlurId, ['#8fd8c4', '#4e9c85'], '#0d2a22');
+  }
+
+  // --- SE / BGM ---
+  for (const ac of S.project.audioClips) {
+    const x = secToX(ac.start), aw = ac.duration * S.pxPerSec;
+    if (x + aw < -5 || x > w + 5) continue;
+    const asset = S.project.audioAssets.find((a) => a.id === ac.assetId);
+    const [ry, rh] = audioRowRect(ac);
+    drawAudioClip(ctx, x, ry, Math.max(3, aw), rh, ac, asset, ac.id === S.selectedAudioId);
   }
 
   // --- テロップ ---
@@ -773,6 +972,52 @@ function drawClip(ctx, x, y, w, h, clip, sel, kind) {
       : `${tc(P.clipDuration(clip), false)}`;
     ctx.fillText(label, x + 5, y + 4);
     if (kind === 'audio') drawFakeWave(ctx, x, y, w, h);
+  }
+  ctx.restore();
+}
+
+function drawFxBlock(ctx, x, y, w, h, label, sel, colors, textColor) {
+  ctx.save();
+  ctx.beginPath(); roundRect(ctx, x, y, w, h, 3);
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, colors[0]); g.addColorStop(1, colors[1]);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = sel ? '#ffffffdd' : '#00000066'; ctx.lineWidth = sel ? 2 : 1; ctx.stroke();
+  if (w > 40) {
+    ctx.clip();
+    ctx.fillStyle = textColor; ctx.font = '10px -apple-system, sans-serif'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + 5, y + h / 2);
+  }
+  ctx.restore();
+}
+
+/** A2 は上段が効果音、下段が BGM。重ならないので掴みやすい */
+function audioRowRect(ac) {
+  const half = (AUD_H - 6) / 2;
+  return ac.kind === 'bgm' ? [Y_A2 + 3 + half + 1, half - 1] : [Y_A2 + 3, half - 1];
+}
+
+function drawAudioClip(ctx, x, y, w, h, ac, asset, sel) {
+  ctx.save();
+  ctx.beginPath(); roundRect(ctx, x, y, w, h, 3);
+  const bgm = ac.kind === 'bgm';
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, sel ? '#b6a9f2' : (bgm ? '#7b6fd0' : '#9a7fd8'));
+  g.addColorStop(1, sel ? '#8f80d8' : (bgm ? '#5a4fa4' : '#7358ad'));
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = sel ? '#ffffffdd' : '#00000066'; ctx.lineWidth = sel ? 2 : 1; ctx.stroke();
+  ctx.clip();
+
+  // フェードを台形で見せる
+  if ((ac.fadeIn > 0 || ac.fadeOut > 0) && w > 8) {
+    ctx.fillStyle = '#00000055';
+    const fi = Math.min(w, ac.fadeIn * S.pxPerSec), fo = Math.min(w, ac.fadeOut * S.pxPerSec);
+    if (fi > 0) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + fi, y); ctx.lineTo(x, y + h); ctx.fill(); }
+    if (fo > 0) { ctx.beginPath(); ctx.moveTo(x + w, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - fo, y); ctx.fill(); }
+  }
+  if (w > 30) {
+    ctx.fillStyle = '#14102a'; ctx.font = '10px -apple-system, sans-serif'; ctx.textBaseline = 'middle';
+    ctx.fillText(`${bgm ? '♪' : '▸'} ${asset?.name ?? ''}  ${Math.round(ac.volume * 100)}%`, x + 5, y + h / 2);
   }
   ctx.restore();
 }
@@ -820,6 +1065,27 @@ function niceStep(pxPerSec) {
 }
 
 // --- タイムライン操作 ---
+function hitBlurBlock(x, y) {
+  if (y < Y_FX || y >= Y_TELOP) return null;
+  for (let i = S.project.blurs.length - 1; i >= 0; i--) {
+    const b = S.project.blurs[i];
+    const cx = secToX(b.start), cw = (b.end - b.start) * S.pxPerSec;
+    if (x >= cx && x <= cx + cw) return { blur: b, cx, cw };
+  }
+  return null;
+}
+
+function hitAudioClip(x, y) {
+  if (y < Y_A2 || y >= Y_A2 + AUD_H) return null;
+  for (let i = S.project.audioClips.length - 1; i >= 0; i--) {
+    const ac = S.project.audioClips[i];
+    const cx = secToX(ac.start), cw = ac.duration * S.pxPerSec;
+    const [ry, rh] = audioRowRect(ac);
+    if (x >= cx && x <= cx + cw && y >= ry && y <= ry + rh) return { ac, cx, cw };
+  }
+  return null;
+}
+
 function hitTelopBlock(x, y) {
   if (y < Y_TELOP || y >= Y_V) return null;
   for (let i = S.project.telops.length - 1; i >= 0; i--) {
@@ -831,7 +1097,7 @@ function hitTelopBlock(x, y) {
 }
 
 function hitClip(x, y) {
-  if (y < Y_V) return null;
+  if (y < Y_V || y >= Y_A2) return null;
   for (const { clip, offset } of P.withTimelineOffsets(S.project)) {
     const cx = secToX(offset), cw = P.clipDuration(clip) * S.pxPerSec;
     if (x >= cx && x <= cx + cw) return { clip, offset, cx, cw };
@@ -843,7 +1109,7 @@ tlCanvas.addEventListener('pointermove', (e) => {
   if (drag) return;
   const r = tlCanvas.getBoundingClientRect();
   const x = e.clientX - r.left, y = e.clientY - r.top;
-  const hit = hitTelopBlock(x, y) || hitClip(x, y);
+  const hit = hitBlurBlock(x, y) || hitTelopBlock(x, y) || hitAudioClip(x, y) || hitClip(x, y);
   tlCanvas.style.cursor = !hit ? 'default'
     : (Math.abs(x - hit.cx) < 6 || Math.abs(x - (hit.cx + hit.cw)) < 6) ? 'ew-resize' : 'grab';
 });
@@ -854,6 +1120,30 @@ tlCanvas.addEventListener('pointerdown', (e) => {
   const x = e.clientX - r.left, y = e.clientY - r.top;
   tlCanvas.setPointerCapture(e.pointerId);
 
+  // ぼかしトラック
+  const bh = hitBlurBlock(x, y);
+  if (bh) {
+    select('blur', bh.blur.id);
+    const eL = Math.abs(x - bh.cx) < 6, eR = Math.abs(x - (bh.cx + bh.cw)) < 6;
+    drag = eL || eR
+      ? { type: 'blurTrim', blur: bh.blur, side: eL ? 'start' : 'end', startX: x, orig: { ...bh.blur } }
+      : { type: 'blurMove', blur: bh.blur, startX: x, orig: { ...bh.blur } };
+    renderAll(); renderFxForm(true); return;
+  }
+  if (y >= Y_FX && y < Y_TELOP) { select('clip', null); renderAll(); renderFxForm(true); renderTelopForm(true); return; }
+
+  // SE / BGM トラック
+  const ah = hitAudioClip(x, y);
+  if (ah) {
+    select('audio', ah.ac.id);
+    const eL = Math.abs(x - ah.cx) < 6, eR = Math.abs(x - (ah.cx + ah.cw)) < 6;
+    drag = eL || eR
+      ? { type: 'audioTrim', ac: ah.ac, side: eL ? 'start' : 'end', startX: x, orig: { ...ah.ac } }
+      : { type: 'audioMove', ac: ah.ac, startX: x, orig: { ...ah.ac } };
+    renderAll(); renderFxForm(true); return;
+  }
+  if (y >= Y_A2) { select('clip', null); renderAll(); renderFxForm(true); renderTelopForm(true); return; }
+
   // テロップトラック
   const th = hitTelopBlock(x, y);
   if (th) {
@@ -863,13 +1153,13 @@ tlCanvas.addEventListener('pointerdown', (e) => {
     drag = edgeL || edgeR
       ? { type: 'telopTrim', tel: th.tel, side: edgeL ? 'start' : 'end', startX: x, orig: { start: th.tel.start, end: th.tel.end } }
       : { type: 'telopMove', tel: th.tel, startX: x, orig: { start: th.tel.start, end: th.tel.end } };
-    renderAll();
+    renderAll(); renderFxForm(true);
     if (rebuild) renderTelopForm(true);
     return;
   }
   if (y >= Y_TELOP && y < Y_V) { // テロップトラックの空き
     select('clip', null);
-    renderAll(); renderTelopForm(true);
+    renderAll(); renderTelopForm(true); renderFxForm(true);
     return;
   }
 
@@ -881,9 +1171,10 @@ tlCanvas.addEventListener('pointerdown', (e) => {
     drag = { type: 'scrub' };
     return;
   }
-  const rebuildTel = !!S.selectedTelopId;
+  const rebuildTel = !!S.selectedTelopId, rebuildFx = !!(S.selectedBlurId || S.selectedAudioId);
   select('clip', hit.clip.id);
   if (rebuildTel) renderTelopForm(true);
+  if (rebuildFx) renderFxForm(true);
   const edgeL = Math.abs(x - hit.cx) < 6, edgeR = Math.abs(x - (hit.cx + hit.cw)) < 6;
   if (edgeL || edgeR) {
     drag = { type: 'trim', clip: hit.clip, side: edgeL ? 'in' : 'out', startX: x, orig: { in: hit.clip.in, out: hit.clip.out } };
@@ -909,6 +1200,36 @@ tlCanvas.addEventListener('pointermove', (e) => {
       drag.clip.out = Math.max(drag.orig.in + 0.1, Math.min(src?.duration ?? Infinity, drag.orig.out + d));
     }
     renderTimeline(); renderInspector(); renderTransport();
+  } else if (drag.type === 'blurMove') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    const len = drag.orig.end - drag.orig.start;
+    drag.blur.start = Math.max(0, drag.orig.start + d);
+    drag.blur.end = drag.blur.start + len;
+    renderTimeline(); renderOverlay(); syncFxNumbers();
+  } else if (drag.type === 'blurTrim') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    if (drag.side === 'start') drag.blur.start = Math.max(0, Math.min(drag.orig.end - 0.1, drag.orig.start + d));
+    else drag.blur.end = Math.max(drag.orig.start + 0.1, drag.orig.end + d);
+    renderTimeline(); renderOverlay(); syncFxNumbers();
+  } else if (drag.type === 'audioMove') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    drag.ac.start = Math.max(0, drag.orig.start + d);
+    renderTimeline(); syncFxNumbers();
+  } else if (drag.type === 'audioTrim') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    const asset = S.project.audioAssets.find((a) => a.id === drag.ac.assetId);
+    const maxLen = asset ? asset.duration : Infinity;
+    if (drag.side === 'start') {
+      // 頭を詰めると素材の頭出し位置もずれる
+      const ns = Math.max(0, Math.min(drag.orig.start + drag.orig.duration - 0.1, drag.orig.start + d));
+      const shift = ns - drag.orig.start;
+      drag.ac.start = ns;
+      drag.ac.offset = Math.max(0, (drag.orig.offset ?? 0) + shift);
+      drag.ac.duration = Math.max(0.1, drag.orig.duration - shift);
+    } else {
+      drag.ac.duration = Math.max(0.1, Math.min(maxLen - (drag.ac.offset ?? 0), drag.orig.duration + d));
+    }
+    renderTimeline(); syncFxNumbers();
   } else if (drag.type === 'telopMove') {
     const d = (x - drag.startX) / S.pxPerSec;
     const len = drag.orig.end - drag.orig.start;
@@ -949,7 +1270,7 @@ tlCanvas.addEventListener('pointerup', () => {
 tlCanvas.addEventListener('dblclick', (e) => {
   const r = tlCanvas.getBoundingClientRect();
   const y = e.clientY - r.top;
-  if (y < Y_V) return;
+  if (y < Y_V || y >= Y_A2) return;
   const hit = hitClip(e.clientX - r.left, y);
   if (!hit) return;
   selectSource(hit.clip.sourceId);
@@ -1055,11 +1376,12 @@ async function doExport() {
   const t0 = performance.now();
 
   try {
-    const telops = S.project.telops;
-    const buf = await exportProject(S.project, S.sources, {
+    const proj = S.project;
+    const buf = await exportProject(proj, S.sources, {
       fileHandle,
       signal: ac.signal,
-      overlay: telops.length ? (ctx, t) => T.drawTelopsAt(ctx, telops, t) : null,
+      composeFrame: (ctx, frame, t, w, h) => composeFrame(ctx, frame, t, w, h, proj),
+      audioMix: audioMixer(),
       onProgress: (r, text) => {
         $('ovProg').style.width = `${Math.min(100, r * 100).toFixed(1)}%`;
         $('progBar').style.width = `${Math.min(100, r * 100).toFixed(1)}%`;
@@ -1097,6 +1419,9 @@ $('btnMarkOut').onclick = markOut;
 $('btnAddClip').onclick = addClip;
 $('btnDelete').onclick = deleteSelected;
 $('btnAddTelop').onclick = addTelop;
+$('btnAddBlur').onclick = addBlur;
+$('btnAddAudio').onclick = () => $('audioInput').click();
+$('audioInput').onchange = (e) => { addAudioAssets([...e.target.files]); e.target.value = ''; };
 $('fontInput').onchange = async (e) => {
   for (const f of e.target.files) {
     try {
@@ -1141,6 +1466,20 @@ function togglePlay() {
   if (video.paused) { video.playbackRate = 1; video.play().catch(() => {}); } else video.pause();
   renderTransport();
 }
+
+/** SE / BGM をプログラム再生に追従させる */
+function syncAudioPreview() {
+  if (!S.audioPreview) return;
+  if (S.mode !== 'program' || video.paused || video.playbackRate !== 1) {
+    S.audioPreview.stop();
+    return;
+  }
+  // クリップ跨ぎのシークでは鳴らし直さない（BGM が切れてしまうため）。
+  // ずれが大きくなった時だけスケジュールし直す。
+  const pos = S.audioPreview.positionNow();
+  if (pos !== null && Math.abs(pos - S.programTime) < 0.25) return;
+  S.audioPreview.start(S.project.audioClips, S.programTime);
+}
 function step(d) {
   video.pause();
   if (S.mode === 'program') seekProgram(S.programTime + d, false);
@@ -1148,10 +1487,10 @@ function step(d) {
   renderTransport(); renderScrub(); renderTimeline(); renderOverlay();
 }
 
-video.addEventListener('timeupdate', () => { programTick(); renderTransport(); renderScrub(); if (S.mode === 'program') renderTimeline(); renderOverlay(); });
-video.addEventListener('seeked', () => { renderTransport(); renderScrub(); });
-video.addEventListener('play', renderTransport);
-video.addEventListener('pause', renderTransport);
+video.addEventListener('timeupdate', () => { programTick(); renderTransport(); renderScrub(); if (S.mode === 'program') { renderTimeline(); syncAudioPreview(); } renderOverlay(); });
+video.addEventListener('seeked', () => { renderTransport(); renderScrub(); syncAudioPreview(); });
+video.addEventListener('play', () => { renderTransport(); syncAudioPreview(); });
+video.addEventListener('pause', () => { renderTransport(); S.audioPreview?.stop(); });
 video.addEventListener('loadedmetadata', () => { renderTransport(); renderScrub(); });
 
 // requestVideoFrameCallback があればクリップ跨ぎの精度が上がる
@@ -1180,6 +1519,7 @@ document.addEventListener('keydown', (e) => {
     case 'o': markOut(); break;
     case 'enter': addClip(); break;
     case 't': addTelop(); break;
+    case 'b': addBlur(); break;
     case 'j':
       video.playbackRate = video.paused || video.playbackRate > 0 ? 1 : video.playbackRate;
       step(-10 / fps()); break;
@@ -1203,6 +1543,7 @@ function renderAll() {
   renderBin();
   renderInspector();
   renderTelopForm();
+  renderFxForm();
   renderTransport();
   renderScrub();
   renderTimeline();
@@ -1223,6 +1564,9 @@ window.bme = {
   set project(p) { S.project = p; select(null, null); zoomFit(); renderAll(); },
   addFiles,
   addTelop,
+  addBlur,
+  addAudioAssets,
+  placeAudio,
   telop: T,
   loadProjectJSON(text) { S.project = P.deserialize(text); zoomFit(); renderAll(); },
   exportProjectJSON() { return P.serialize(S.project); },
