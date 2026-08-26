@@ -173,3 +173,41 @@ kbd {
   padding: 8px; height: 150px; overflow: auto; font-size: 11px; color: #9aa2b0;
   white-space: pre-wrap; user-select: text;
 }
+
+/* ---------- Phase 2: テロップ ---------- */
+.hidden { display: none !important; }
+
+.stage { position: relative; line-height: 0; }
+.stage > video, .stage > canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+}
+.stage > canvas { cursor: default; }
+.stage > canvas.grab { cursor: grab; }
+.stage > canvas.grabbing { cursor: grabbing; }
+#video { max-width: none; max-height: none; background: #000; }
+
+.tl-head.telop { height: 34px; color: #d9c07a; }
+
+/* テロップ編集フォーム */
+#telopForm textarea {
+  background: #2a2e37; color: var(--text); border: 1px solid #3c424e; border-radius: 4px;
+  padding: 5px 6px; font-size: 13px; font-family: inherit; resize: vertical; min-height: 54px;
+}
+#telopForm .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#telopForm .swatch { display: flex; align-items: center; gap: 5px; }
+#telopForm input[type=color] {
+  width: 30px; height: 24px; padding: 0; border: 1px solid #3c424e; border-radius: 4px;
+  background: #2a2e37; cursor: pointer;
+}
+#telopForm .num { width: 100%; }
+.preset-row { display: flex; gap: 5px; align-items: center; }
+.preset-row select { flex: 1; min-width: 0; }
+.align-group { display: flex; gap: 3px; }
+.align-group button {
+  flex: 1; background: #2a2e37; border: 1px solid #3c424e; color: var(--dim);
+  border-radius: 4px; padding: 3px 0; font-size: 11px; cursor: pointer;
+}
+.align-group button.on { background: var(--accent2); border-color: #3d80e6; color: #fff; }
+.font-actions { display: flex; gap: 5px; }
+.font-actions button { flex: 1; }
+.sub-label { color: #6f7684; font-size: 10.5px; margin-top: 2px; }

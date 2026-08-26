@@ -18,10 +18,10 @@ async function drain(obj, limit) {
 /**
  * @param {object} project
  * @param {Map<string, Mp4Source>} sourceMap
- * @param {object} opts { onProgress(ratio, text), onLog(text), signal }
+ * @param {object} opts { onProgress(ratio, text), onLog(text), signal, overlay(ctx, timelineSec) }
  */
 export async function exportProject(project, sourceMap, opts = {}) {
-  const { onProgress = () => {}, onLog = () => {}, signal } = opts;
+  const { onProgress = () => {}, onLog = () => {}, signal, overlay = null } = opts;
   const clips = project.clips.filter((c) => clipDuration(c) > 0.001);
   if (clips.length === 0) throw new Error('書き出すクリップがありません');
 
@@ -101,7 +101,7 @@ export async function exportProject(project, sourceMap, opts = {}) {
       onLog(`クリップ ${i + 1}/${clips.length}: ${src.name} ${fmt(clip.in)} → ${fmt(clip.out)}`);
 
       await encodeVideoRange(src, clip, {
-        ctx, canvas, videoEncoder, fps, width, height, state, signal,
+        ctx, canvas, videoEncoder, fps, width, height, state, signal, overlay,
         onProgress: (secDone) => {
           const done = state.timelineBase + secDone;
           onProgress(done / totalOut, `映像 ${fmt(done)} / ${fmt(totalOut)}`);
@@ -133,7 +133,7 @@ export async function exportProject(project, sourceMap, opts = {}) {
 // ---------------------------------------------------------------- 映像
 
 async function encodeVideoRange(src, clip, o) {
-  const { ctx, canvas, videoEncoder, fps, width, height, state, signal, onProgress } = o;
+  const { ctx, canvas, videoEncoder, fps, width, height, state, signal, onProgress, overlay } = o;
   const samples = src.video.samples;
   const startIdx = Mp4Source.syncIndexBefore(samples, clip.in);
   const dur = clipDuration(clip);
@@ -145,8 +145,10 @@ async function encodeVideoRange(src, clip, o) {
 
   const emitUntil = async (limitSec) => {
     while (pending && emittedSec + 1e-9 < limitSec) {
+      const timelineSec = state.timelineBase + emittedSec;
       ctx.drawImage(pending, 0, 0, width, height);
-      const ts = Math.round((state.timelineBase + emittedSec) * 1e6);
+      if (overlay) overlay(ctx, timelineSec); // テロップ等の合成
+      const ts = Math.round(timelineSec * 1e6);
       const frame = new VideoFrame(canvas, { timestamp: ts, duration: Math.round(frameDur * 1e6) });
       videoEncoder.encode(frame, { keyFrame: state.outFrame % (fps * 2) === 0 });
       frame.close();

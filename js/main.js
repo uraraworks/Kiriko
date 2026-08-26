@@ -3,6 +3,7 @@ import { Mp4Source } from './mp4source.js';
 import * as P from './project.js';
 import { exportProject } from './exporter.js';
 import { parseKdenlive, basename } from './kdenlive.js';
+import * as T from './telop.js';
 
 // ---------------------------------------------------------------- 状態
 
@@ -22,6 +23,10 @@ const S = {
   exporting: false,
   pendingKdenlive: null,   // { cuts, files } 素材の読み込み待ち
   videoSourceId: null,     // <video> に現在ロードしている素材
+  selectedTelopId: null,
+  userFonts: [],           // ユーザーが追加した .ttf/.otf
+  installedFonts: null,    // Local Font Access API で列挙した結果
+  telopStyle: { ...T.DEFAULT_STYLE }, // 次に追加するテロップの既定スタイル
 };
 
 const $ = (id) => document.getElementById(id);
@@ -41,6 +46,14 @@ function tc(sec, withHours = true) {
 }
 const fps = () => S.project.output.fps || 30;
 const curSource = () => S.sources.get(S.currentSourceId) || null;
+
+/** クリップとテロップの選択は排他 */
+function select(type, id) {
+  S.selectedClipId = type === 'clip' ? id : null;
+  S.selectedTelopId = type === 'telop' ? id : null;
+}
+const selectedTelop = () => S.project.telops.find((t) => t.id === S.selectedTelopId) || null;
+const presets = () => S.project.telopPresets ?? T.DEFAULT_PRESETS;
 
 function status(msg, isErr = false) {
   const el = $('status');
@@ -230,7 +243,7 @@ function addClip() {
   if (b - a < 0.05) return status('区間が短すぎます', true);
   const clip = { id: P.newId('clip'), sourceId: S.currentSourceId, in: a, out: b, volume: 1 };
   S.project.clips.push(clip);
-  S.selectedClipId = clip.id;
+  select('clip', clip.id);
   // 次のカットを続けて打てるように、アウト点を新しいイン点にする
   S.markIn = b;
   S.markOut = null;
@@ -239,13 +252,152 @@ function addClip() {
 }
 
 function deleteSelected() {
+  if (S.selectedTelopId) {
+    S.project.telops = S.project.telops.filter((t) => t.id !== S.selectedTelopId);
+    S.selectedTelopId = null;
+    renderAll();
+    return;
+  }
   if (!S.selectedClipId) return;
   const i = S.project.clips.findIndex((c) => c.id === S.selectedClipId);
   if (i < 0) return;
   S.project.clips.splice(i, 1);
-  S.selectedClipId = S.project.clips[Math.min(i, S.project.clips.length - 1)]?.id ?? null;
+  select('clip', S.project.clips[Math.min(i, S.project.clips.length - 1)]?.id ?? null);
   renderAll();
 }
+
+// ---------------------------------------------------------------- テロップ
+
+/** いま編集中の「タイムライン時刻」。ソースモニターでも近い位置を返す */
+function currentTimelineTime() {
+  if (S.mode === 'program') return S.programTime;
+  // ソースモニターの位置が採用区間に入っていれば、その出力時刻に読み替える
+  let acc = 0;
+  for (const c of S.project.clips) {
+    if (c.sourceId === S.currentSourceId && video.currentTime >= c.in && video.currentTime < c.out) {
+      return acc + (video.currentTime - c.in);
+    }
+    acc += P.clipDuration(c);
+  }
+  return S.programTime;
+}
+
+function addTelop() {
+  const total = P.totalDuration(S.project);
+  if (total <= 0) return status('先にクリップを作ってください', true);
+  const t0 = Math.min(currentTimelineTime(), Math.max(0, total - 0.5));
+  const t1 = Math.min(total, t0 + 3);
+  const tel = T.createTelop(t0, t1, S.telopStyle, 'テロップ');
+  S.project.telops.push(tel);
+  select('telop', tel.id);
+  setMode('program');
+  seekProgram(t0, true);
+  renderAll();
+  renderTelopForm(true);
+  status(`テロップを追加しました（${tc(t0, false)} 〜 ${tc(t1, false)}）`);
+  setTimeout(() => document.getElementById('telText')?.focus(), 0);
+}
+
+// --- ステージ（<video> ＋ オーバーレイ canvas）---
+const stage = $('stage');
+const overlay = $('overlay');
+
+function fitStage() {
+  const wrap = $('videoWrap');
+  const ow = S.project.output.width, oh = S.project.output.height;
+  const aw = wrap.clientWidth, ah = wrap.clientHeight;
+  if (!aw || !ah) return;
+  const scale = Math.min(aw / ow, ah / oh);
+  stage.style.width = `${Math.floor(ow * scale)}px`;
+  stage.style.height = `${Math.floor(oh * scale)}px`;
+  if (overlay.width !== ow) { overlay.width = ow; overlay.height = oh; }
+}
+
+function renderOverlay() {
+  fitStage();
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  const t = currentTimelineTime();
+  if (S.mode === 'program') {
+    T.drawTelopsAt(ctx, S.project.telops, t);
+  } else {
+    // ソースモニターでは、位置調整しやすいよう選択中のテロップだけ出す
+    const sel = selectedTelop();
+    if (sel) T.drawTelop(ctx, sel);
+  }
+  // 選択中は枠を出す
+  const sel = selectedTelop();
+  if (sel && (S.mode !== 'program' || (t >= sel.start && t < sel.end))) {
+    const b = T.telopBounds(ctx, sel);
+    ctx.save();
+    ctx.strokeStyle = '#4c9affcc'; ctx.lineWidth = 3; ctx.setLineDash([10, 7]);
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    ctx.restore();
+  }
+}
+
+/** マウス座標 → 出力ピクセル座標 */
+function stagePoint(e) {
+  const r = overlay.getBoundingClientRect();
+  return {
+    x: ((e.clientX - r.left) / r.width) * overlay.width,
+    y: ((e.clientY - r.top) / r.height) * overlay.height,
+  };
+}
+
+let telopDrag = null;
+overlay.addEventListener('pointerdown', (e) => {
+  const ctx = overlay.getContext('2d');
+  const p = stagePoint(e);
+  const t = currentTimelineTime();
+  const pool = S.mode === 'program' ? S.project.telops : (selectedTelop() ? [selectedTelop()] : []);
+  const hit = S.mode === 'program'
+    ? T.hitTelop(ctx, pool, t, p.x, p.y)
+    : (pool[0] && insideBounds(ctx, pool[0], p) ? pool[0] : null);
+  if (!hit) return;
+  overlay.setPointerCapture(e.pointerId);
+  const rebuild = hit.id !== S.selectedTelopId;
+  select('telop', hit.id);
+  telopDrag = { tel: hit, dx: p.x - hit.x, dy: p.y - hit.y };
+  overlay.classList.add('grabbing');
+  renderAll();
+  if (rebuild) renderTelopForm(true);
+});
+
+function insideBounds(ctx, tel, p) {
+  const b = T.telopBounds(ctx, tel);
+  return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
+}
+
+overlay.addEventListener('pointermove', (e) => {
+  const ctx = overlay.getContext('2d');
+  const p = stagePoint(e);
+  if (!telopDrag) {
+    const t = currentTimelineTime();
+    const pool = S.mode === 'program' ? S.project.telops : (selectedTelop() ? [selectedTelop()] : []);
+    const over = S.mode === 'program'
+      ? T.hitTelop(ctx, pool, t, p.x, p.y)
+      : (pool[0] && insideBounds(ctx, pool[0], p) ? pool[0] : null);
+    overlay.classList.toggle('grab', !!over);
+    return;
+  }
+  let x = p.x - telopDrag.dx, y = p.y - telopDrag.dy;
+  if (!e.altKey) { // Alt を押していない間は中央・端にスナップ
+    const W = overlay.width, H = overlay.height;
+    for (const gx of [W / 2, 90, W - 90]) if (Math.abs(x - gx) < 18) x = gx;
+    for (const gy of [H / 2, 140, H - 140]) if (Math.abs(y - gy) < 18) y = gy;
+  }
+  telopDrag.tel.x = Math.round(x);
+  telopDrag.tel.y = Math.round(y);
+  renderOverlay();
+  syncTelopNumbers();
+});
+
+overlay.addEventListener('pointerup', () => {
+  if (!telopDrag) return;
+  telopDrag = null;
+  overlay.classList.remove('grabbing');
+});
 
 // ---------------------------------------------------------------- 描画：ビン / インスペクタ
 
@@ -285,6 +437,153 @@ function renderInspector() {
   $('fIn').onchange = (e) => { clip.in = Math.max(0, +e.target.value); renderAll(); };
   $('fOut').onchange = (e) => { clip.out = Math.max(clip.in + 0.05, +e.target.value); renderAll(); };
   $('fVol').oninput = (e) => { clip.volume = +e.target.value / 100; $('fVolLbl').textContent = `${e.target.value}%`; };
+}
+
+// ---------------------------------------------------------------- テロップ編集パネル
+
+function fontOptions(current) {
+  const groups = [
+    ['システム', T.SYSTEM_FONTS],
+    ['Web フォント', T.WEB_FONTS],
+  ];
+  if (S.userFonts.length) groups.push(['追加したフォント', S.userFonts.map((f) => ({ css: f, label: f }))]);
+  if (S.installedFonts) groups.push(['インストール済み', S.installedFonts.map((f) => ({ css: f, label: f }))]);
+  let html = '';
+  for (const [label, list] of groups) {
+    html += `<optgroup label="${esc(label)}">`;
+    for (const f of list) {
+      html += `<option value="${esc(f.css)}"${f.css === current ? ' selected' : ''}>${esc(f.label)}</option>`;
+    }
+    html += '</optgroup>';
+  }
+  // 一覧に無いフォントが設定されている場合の受け皿
+  const all = groups.flatMap(([, l]) => l.map((f) => f.css));
+  if (current && !all.includes(current)) html = `<option value="${esc(current)}" selected>${esc(current)}</option>` + html;
+  return html;
+}
+
+let telopFormId = null;
+
+function renderTelopForm(force = false) {
+  const form = $('telopForm');
+  const clipForm = $('clipForm');
+  const tel = selectedTelop();
+  $('selHead').textContent = tel ? '選択テロップ' : '選択クリップ';
+  form.classList.toggle('hidden', !tel);
+  clipForm.classList.toggle('hidden', !!tel);
+  if (!tel) { telopFormId = null; return; }
+  if (!force && telopFormId === tel.id) { syncTelopNumbers(); return; }
+  telopFormId = tel.id;
+
+  form.innerHTML = `
+    <label>テキスト（改行で複数行）
+      <textarea id="telText" rows="2">${esc(tel.text)}</textarea></label>
+
+    <div class="preset-row">
+      <select id="telPreset"><option value="">プリセットを適用…</option>
+        ${presets().map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join('')}
+      </select>
+      <button class="mini" id="telPresetSave" title="現在のスタイルと位置をプリセットとして保存">＋</button>
+    </div>
+
+    <label>フォント<select id="telFont">${fontOptions(tel.font)}</select></label>
+    <div class="font-actions">
+      <button class="mini" id="telFontFile">.ttf を追加</button>
+      <button class="mini" id="telFontLocal">PC のフォント一覧</button>
+    </div>
+
+    <div class="grid2">
+      <label>サイズ <input class="num" type="number" id="telSize" min="16" max="400" value="${tel.size}"></label>
+      <label>縁の太さ <input class="num" type="number" id="telSW" min="0" max="60" value="${tel.strokeWidth}"></label>
+    </div>
+
+    <label>配置
+      <div class="align-group">
+        ${['left', 'center', 'right'].map((a) =>
+          `<button data-align="${a}" class="${tel.align === a ? 'on' : ''}">${{ left: '左', center: '中央', right: '右' }[a]}</button>`).join('')}
+      </div></label>
+
+    <div class="grid2">
+      <div class="swatch"><input type="color" id="telFill" value="${tel.fill}"><span>文字</span></div>
+      <div class="swatch"><input type="color" id="telStroke" value="${tel.stroke}"><span>内縁</span></div>
+      <div class="swatch"><input type="color" id="telOuter" value="${tel.outerStroke}"><span>白フチ</span></div>
+      <label>白フチ倍率 <input class="num" type="number" id="telOuterScale" step="0.1" min="0" max="5" value="${tel.outerScale}"></label>
+    </div>
+
+    <label>影 <span id="telShadowLbl">${Math.round(tel.shadow * 100)}%</span>
+      <input type="range" id="telShadow" min="0" max="100" value="${Math.round(tel.shadow * 100)}"></label>
+
+    <div class="grid2">
+      <label>開始（秒）<input class="num" type="number" id="telStart" step="0.1" value="${tel.start.toFixed(2)}"></label>
+      <label>終了（秒）<input class="num" type="number" id="telEnd" step="0.1" value="${tel.end.toFixed(2)}"></label>
+    </div>
+    <div class="grid2">
+      <label>X <input class="num" type="number" id="telX" value="${Math.round(tel.x)}"></label>
+      <label>Y <input class="num" type="number" id="telY" value="${Math.round(tel.y)}"></label>
+    </div>
+    <div class="sub-label">プレビュー上でドラッグして位置を決められます（Alt でスナップ解除）</div>`;
+
+  const live = () => { renderOverlay(); renderTimeline(); };
+  const bind = (id, fn, ev = 'input') => $(id).addEventListener(ev, (e) => { fn(e.target.value, e); live(); });
+
+  $('telText').addEventListener('input', (e) => { tel.text = e.target.value; live(); });
+  bind('telFont', (v) => { tel.font = v; S.telopStyle.font = v; });
+  bind('telSize', (v) => { tel.size = Math.max(8, +v); S.telopStyle.size = tel.size; });
+  bind('telSW', (v) => { tel.strokeWidth = Math.max(0, +v); S.telopStyle.strokeWidth = tel.strokeWidth; });
+  bind('telFill', (v) => { tel.fill = v; S.telopStyle.fill = v; });
+  bind('telStroke', (v) => { tel.stroke = v; S.telopStyle.stroke = v; });
+  bind('telOuter', (v) => { tel.outerStroke = v; S.telopStyle.outerStroke = v; });
+  bind('telOuterScale', (v) => { tel.outerScale = Math.max(0, +v); S.telopStyle.outerScale = tel.outerScale; });
+  bind('telShadow', (v) => { tel.shadow = +v / 100; S.telopStyle.shadow = tel.shadow; $('telShadowLbl').textContent = `${v}%`; });
+  bind('telStart', (v) => { tel.start = Math.max(0, +v); });
+  bind('telEnd', (v) => { tel.end = Math.max(tel.start + 0.1, +v); });
+  bind('telX', (v) => { tel.x = +v; });
+  bind('telY', (v) => { tel.y = +v; });
+
+  for (const b of form.querySelectorAll('.align-group button')) {
+    b.onclick = () => {
+      tel.align = b.dataset.align; S.telopStyle.align = tel.align;
+      for (const o of form.querySelectorAll('.align-group button')) o.classList.toggle('on', o === b);
+      live();
+    };
+  }
+
+  $('telPreset').onchange = (e) => {
+    const p = presets()[+e.target.value];
+    if (!p) return;
+    Object.assign(tel, p.style);
+    S.telopStyle = { ...p.style };
+    e.target.value = '';
+    renderTelopForm(true);
+    live();
+  };
+  $('telPresetSave').onclick = () => {
+    const name = prompt('プリセット名', `プリセット ${presets().length + 1}`);
+    if (!name) return;
+    const { id, text, start, end, ...style } = tel;
+    S.project.telopPresets = [...presets(), { name, style }];
+    renderTelopForm(true);
+    status(`プリセット「${name}」を保存しました`);
+  };
+  $('telFontFile').onclick = () => $('fontInput').click();
+  $('telFontLocal').onclick = async () => {
+    try {
+      S.installedFonts = await T.queryInstalledFonts();
+      renderTelopForm(true);
+      status(`インストール済みフォント ${S.installedFonts.length} 件を読み込みました`);
+    } catch (e) { status(e.message, true); }
+  };
+}
+
+/** ドラッグ中など、フォームを作り直さずに数値だけ追従させる */
+function syncTelopNumbers() {
+  const tel = selectedTelop();
+  if (!tel || telopFormId !== tel.id) return;
+  const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v; };
+  set('telX', Math.round(tel.x));
+  set('telY', Math.round(tel.y));
+  set('telStart', tel.start.toFixed(2));
+  set('telEnd', tel.end.toFixed(2));
 }
 
 function renderTransport() {
@@ -368,7 +667,10 @@ $('scrubBar').addEventListener('pointerdown', (e) => {
 // ---------------------------------------------------------------- 描画：タイムライン
 
 const tlCanvas = $('tlCanvas');
-const RULER_H = 26, TRACK_H = 62;
+const RULER_H = 26, TELOP_H = 34, TRACK_H = 62;
+const Y_TELOP = RULER_H;
+const Y_V = RULER_H + TELOP_H;
+const Y_A = Y_V + TRACK_H;
 
 function tlSize() {
   const wrap = $('tlWrap');
@@ -414,12 +716,13 @@ function renderTimeline() {
   ctx.stroke();
 
   // --- トラック背景 ---
-  for (let i = 0; i < 2; i++) {
-    ctx.fillStyle = i % 2 ? '#1c1f26' : '#1e2128';
-    ctx.fillRect(0, RULER_H + i * TRACK_H, w, TRACK_H);
-    ctx.strokeStyle = '#2b303a'; ctx.beginPath();
-    ctx.moveTo(0, RULER_H + (i + 1) * TRACK_H + 0.5); ctx.lineTo(w, RULER_H + (i + 1) * TRACK_H + 0.5); ctx.stroke();
-  }
+  ctx.fillStyle = '#1b1d24';
+  ctx.fillRect(0, Y_TELOP, w, TELOP_H);
+  ctx.fillStyle = '#1e2128'; ctx.fillRect(0, Y_V, w, TRACK_H);
+  ctx.fillStyle = '#1c1f26'; ctx.fillRect(0, Y_A, w, TRACK_H);
+  ctx.strokeStyle = '#2b303a'; ctx.beginPath();
+  for (const y of [Y_V, Y_A, Y_A + TRACK_H]) { ctx.moveTo(0, y + 0.5); ctx.lineTo(w, y + 0.5); }
+  ctx.stroke();
 
   // --- クリップ ---
   for (const { clip, offset } of P.withTimelineOffsets(S.project)) {
@@ -427,8 +730,16 @@ function renderTimeline() {
     const cw = P.clipDuration(clip) * S.pxPerSec;
     if (x + cw < -5 || x > w + 5) continue;
     const sel = clip.id === S.selectedClipId;
-    drawClip(ctx, x, RULER_H + 2, cw, TRACK_H - 6, clip, sel, 'video');
-    drawClip(ctx, x, RULER_H + TRACK_H + 2, cw, TRACK_H - 6, clip, sel, 'audio');
+    drawClip(ctx, x, Y_V + 2, cw, TRACK_H - 6, clip, sel, 'video');
+    drawClip(ctx, x, Y_A + 2, cw, TRACK_H - 6, clip, sel, 'audio');
+  }
+
+  // --- テロップ ---
+  for (const tel of S.project.telops) {
+    const x = secToX(tel.start);
+    const tw = (tel.end - tel.start) * S.pxPerSec;
+    if (x + tw < -5 || x > w + 5) continue;
+    drawTelopBlock(ctx, x, Y_TELOP + 3, Math.max(3, tw), TELOP_H - 7, tel, tel.id === S.selectedTelopId);
   }
 
   // --- プレイヘッド ---
@@ -466,6 +777,21 @@ function drawClip(ctx, x, y, w, h, clip, sel, kind) {
   ctx.restore();
 }
 
+function drawTelopBlock(ctx, x, y, w, h, tel, sel) {
+  ctx.save();
+  ctx.beginPath(); roundRect(ctx, x, y, w, h, 3);
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, sel ? '#f2d98a' : '#c9a94e'); g.addColorStop(1, sel ? '#d9b957' : '#a8862f');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = sel ? '#ffffffdd' : '#00000066'; ctx.lineWidth = sel ? 2 : 1; ctx.stroke();
+  if (w > 24) {
+    ctx.clip();
+    ctx.fillStyle = '#2a1f00'; ctx.font = '11px -apple-system, sans-serif'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(tel.text).replace(/\n/g, ' ') || '（空）', x + 5, y + h / 2);
+  }
+  ctx.restore();
+}
+
 function drawFakeWave(ctx, x, y, w, h) {
   // Phase 0 では波形解析まではしない。存在感だけ出しておく。
   ctx.strokeStyle = '#0e131b55'; ctx.beginPath();
@@ -494,8 +820,18 @@ function niceStep(pxPerSec) {
 }
 
 // --- タイムライン操作 ---
+function hitTelopBlock(x, y) {
+  if (y < Y_TELOP || y >= Y_V) return null;
+  for (let i = S.project.telops.length - 1; i >= 0; i--) {
+    const tel = S.project.telops[i];
+    const cx = secToX(tel.start), cw = (tel.end - tel.start) * S.pxPerSec;
+    if (x >= cx && x <= cx + cw) return { tel, cx, cw };
+  }
+  return null;
+}
+
 function hitClip(x, y) {
-  if (y < RULER_H) return null;
+  if (y < Y_V) return null;
   for (const { clip, offset } of P.withTimelineOffsets(S.project)) {
     const cx = secToX(offset), cw = P.clipDuration(clip) * S.pxPerSec;
     if (x >= cx && x <= cx + cw) return { clip, offset, cx, cw };
@@ -506,8 +842,8 @@ function hitClip(x, y) {
 tlCanvas.addEventListener('pointermove', (e) => {
   if (drag) return;
   const r = tlCanvas.getBoundingClientRect();
-  const hit = hitClip(e.clientX - r.left, e.clientY - r.top);
-  const x = e.clientX - r.left;
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  const hit = hitTelopBlock(x, y) || hitClip(x, y);
   tlCanvas.style.cursor = !hit ? 'default'
     : (Math.abs(x - hit.cx) < 6 || Math.abs(x - (hit.cx + hit.cw)) < 6) ? 'ew-resize' : 'grab';
 });
@@ -518,6 +854,25 @@ tlCanvas.addEventListener('pointerdown', (e) => {
   const x = e.clientX - r.left, y = e.clientY - r.top;
   tlCanvas.setPointerCapture(e.pointerId);
 
+  // テロップトラック
+  const th = hitTelopBlock(x, y);
+  if (th) {
+    const rebuild = th.tel.id !== S.selectedTelopId;
+    select('telop', th.tel.id);
+    const edgeL = Math.abs(x - th.cx) < 6, edgeR = Math.abs(x - (th.cx + th.cw)) < 6;
+    drag = edgeL || edgeR
+      ? { type: 'telopTrim', tel: th.tel, side: edgeL ? 'start' : 'end', startX: x, orig: { start: th.tel.start, end: th.tel.end } }
+      : { type: 'telopMove', tel: th.tel, startX: x, orig: { start: th.tel.start, end: th.tel.end } };
+    renderAll();
+    if (rebuild) renderTelopForm(true);
+    return;
+  }
+  if (y >= Y_TELOP && y < Y_V) { // テロップトラックの空き
+    select('clip', null);
+    renderAll(); renderTelopForm(true);
+    return;
+  }
+
   const hit = hitClip(x, y);
   if (!hit || y < RULER_H) {
     setMode('program');
@@ -526,7 +881,9 @@ tlCanvas.addEventListener('pointerdown', (e) => {
     drag = { type: 'scrub' };
     return;
   }
-  S.selectedClipId = hit.clip.id;
+  const rebuildTel = !!S.selectedTelopId;
+  select('clip', hit.clip.id);
+  if (rebuildTel) renderTelopForm(true);
   const edgeL = Math.abs(x - hit.cx) < 6, edgeR = Math.abs(x - (hit.cx + hit.cw)) < 6;
   if (edgeL || edgeR) {
     drag = { type: 'trim', clip: hit.clip, side: edgeL ? 'in' : 'out', startX: x, orig: { in: hit.clip.in, out: hit.clip.out } };
@@ -542,7 +899,7 @@ tlCanvas.addEventListener('pointermove', (e) => {
   const x = e.clientX - r.left;
   if (drag.type === 'scrub') {
     seekProgram(Math.max(0, xToSec(x)), false);
-    renderTimeline(); renderTransport(); renderScrub();
+    renderTimeline(); renderTransport(); renderScrub(); renderOverlay();
   } else if (drag.type === 'trim') {
     const d = (x - drag.startX) / S.pxPerSec;
     const src = S.sources.get(drag.clip.sourceId);
@@ -552,6 +909,17 @@ tlCanvas.addEventListener('pointermove', (e) => {
       drag.clip.out = Math.max(drag.orig.in + 0.1, Math.min(src?.duration ?? Infinity, drag.orig.out + d));
     }
     renderTimeline(); renderInspector(); renderTransport();
+  } else if (drag.type === 'telopMove') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    const len = drag.orig.end - drag.orig.start;
+    drag.tel.start = Math.max(0, drag.orig.start + d);
+    drag.tel.end = drag.tel.start + len;
+    renderTimeline(); renderOverlay(); syncTelopNumbers();
+  } else if (drag.type === 'telopTrim') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    if (drag.side === 'start') drag.tel.start = Math.max(0, Math.min(drag.orig.end - 0.1, drag.orig.start + d));
+    else drag.tel.end = Math.max(drag.orig.start + 0.1, drag.orig.end + d);
+    renderTimeline(); renderOverlay(); syncTelopNumbers();
   } else if (drag.type === 'move') {
     if (Math.abs(x - drag.startX) > 4) drag.moved = true;
     const clips = S.project.clips;
@@ -580,7 +948,9 @@ tlCanvas.addEventListener('pointerup', () => {
 
 tlCanvas.addEventListener('dblclick', (e) => {
   const r = tlCanvas.getBoundingClientRect();
-  const hit = hitClip(e.clientX - r.left, e.clientY - r.top);
+  const y = e.clientY - r.top;
+  if (y < Y_V) return;
+  const hit = hitClip(e.clientX - r.left, y);
   if (!hit) return;
   selectSource(hit.clip.sourceId);
   S.markIn = hit.clip.in; S.markOut = hit.clip.out;
@@ -637,7 +1007,7 @@ async function loadProject(file) {
     p.clips = p.clips.map((c) => ({ ...c, sourceId: remap.get(c.sourceId) ?? c.sourceId }));
     p.sources = S.project.sources;
     S.project = p;
-    S.selectedClipId = null;
+    select(null, null);
     const missing = p.clips.filter((c) => !S.sources.has(c.sourceId)).length;
     zoomFit();
     renderAll();
@@ -675,6 +1045,8 @@ async function doExport() {
   }
 
   video.pause();
+  // フォントが未ロードだと別書体で焼き込まれてしまう
+  await T.ensureFontsLoaded(S.project.telops);
   S.exporting = true;
   const ac = new AbortController();
   $('btnCancel').onclick = () => ac.abort();
@@ -683,9 +1055,11 @@ async function doExport() {
   const t0 = performance.now();
 
   try {
+    const telops = S.project.telops;
     const buf = await exportProject(S.project, S.sources, {
       fileHandle,
       signal: ac.signal,
+      overlay: telops.length ? (ctx, t) => T.drawTelopsAt(ctx, telops, t) : null,
       onProgress: (r, text) => {
         $('ovProg').style.width = `${Math.min(100, r * 100).toFixed(1)}%`;
         $('progBar').style.width = `${Math.min(100, r * 100).toFixed(1)}%`;
@@ -722,10 +1096,30 @@ $('btnMarkIn').onclick = markIn;
 $('btnMarkOut').onclick = markOut;
 $('btnAddClip').onclick = addClip;
 $('btnDelete').onclick = deleteSelected;
+$('btnAddTelop').onclick = addTelop;
+$('fontInput').onchange = async (e) => {
+  for (const f of e.target.files) {
+    try {
+      const name = await T.loadFontFile(f);
+      if (!S.userFonts.includes(name)) S.userFonts.push(name);
+      const tel = selectedTelop();
+      if (tel) { tel.font = name; S.telopStyle.font = name; }
+      status(`フォント「${name}」を追加しました`);
+    } catch (err) { status(`フォント読み込み失敗: ${f.name}`, true); }
+  }
+  e.target.value = '';
+  renderTelopForm(true);
+  renderOverlay();
+};
 $('btnExport').onclick = () => doExport().catch((e) => status(e.message, true));
 $('btnZoomIn').onclick = () => { S.pxPerSec = Math.min(400, S.pxPerSec * 1.5); renderTimeline(); };
 $('btnZoomOut').onclick = () => { S.pxPerSec = Math.max(0.2, S.pxPerSec / 1.5); renderTimeline(); };
 $('btnZoomFit').onclick = zoomFit;
+$('optRes').onchange = (e) => {
+  const [w, h] = e.target.value.split('x').map(Number);
+  S.project.output.width = w; S.project.output.height = h;
+  renderOverlay();
+};
 
 $('fileInput').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
 $('projInput').onchange = (e) => { if (e.target.files[0]) loadProject(e.target.files[0]); e.target.value = ''; };
@@ -751,10 +1145,10 @@ function step(d) {
   video.pause();
   if (S.mode === 'program') seekProgram(S.programTime + d, false);
   else video.currentTime = Math.max(0, video.currentTime + d);
-  renderTransport(); renderScrub(); renderTimeline();
+  renderTransport(); renderScrub(); renderTimeline(); renderOverlay();
 }
 
-video.addEventListener('timeupdate', () => { programTick(); renderTransport(); renderScrub(); if (S.mode === 'program') renderTimeline(); });
+video.addEventListener('timeupdate', () => { programTick(); renderTransport(); renderScrub(); if (S.mode === 'program') renderTimeline(); renderOverlay(); });
 video.addEventListener('seeked', () => { renderTransport(); renderScrub(); });
 video.addEventListener('play', renderTransport);
 video.addEventListener('pause', renderTransport);
@@ -762,7 +1156,7 @@ video.addEventListener('loadedmetadata', () => { renderTransport(); renderScrub(
 
 // requestVideoFrameCallback があればクリップ跨ぎの精度が上がる
 if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
-  const cb = () => { programTick(); video.requestVideoFrameCallback(cb); };
+  const cb = () => { programTick(); if (!video.paused) renderOverlay(); video.requestVideoFrameCallback(cb); };
   video.requestVideoFrameCallback(cb);
 }
 
@@ -785,6 +1179,7 @@ document.addEventListener('keydown', (e) => {
     case 'i': markIn(); break;
     case 'o': markOut(); break;
     case 'enter': addClip(); break;
+    case 't': addTelop(); break;
     case 'j':
       video.playbackRate = video.paused || video.playbackRate > 0 ? 1 : video.playbackRate;
       step(-10 / fps()); break;
@@ -800,16 +1195,18 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-new ResizeObserver(() => { renderTimeline(); renderScrub(); }).observe(document.body);
+new ResizeObserver(() => { renderTimeline(); renderScrub(); renderOverlay(); }).observe(document.body);
 
 // ---------------------------------------------------------------- 起動
 
 function renderAll() {
   renderBin();
   renderInspector();
+  renderTelopForm();
   renderTransport();
   renderScrub();
   renderTimeline();
+  renderOverlay();
 }
 
 if (!('VideoEncoder' in window)) {
@@ -823,8 +1220,10 @@ status('準備完了 — 「素材を開く」または mp4 をドロップし�
 window.bme = {
   state: S,
   get project() { return S.project; },
-  set project(p) { S.project = p; S.selectedClipId = null; zoomFit(); renderAll(); },
+  set project(p) { S.project = p; select(null, null); zoomFit(); renderAll(); },
   addFiles,
+  addTelop,
+  telop: T,
   loadProjectJSON(text) { S.project = P.deserialize(text); zoomFit(); renderAll(); },
   exportProjectJSON() { return P.serialize(S.project); },
   render: renderAll,

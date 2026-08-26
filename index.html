@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Browser Movie Editor — Phase 0</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@800&family=RocknRoll+One&family=Dela+Gothic+One&family=Yusei+Magic&family=Kiwi+Maru:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/app.css">
 <script src="vendor/mp4box.all.min.js"></script>
 </head>
@@ -23,6 +26,7 @@
       <button id="btnMarkIn" class="tb" title="イン点 (I)">[ IN</button>
       <button id="btnMarkOut" class="tb" title="アウト点 (O)">OUT ]</button>
       <button id="btnAddClip" class="tb accent" title="クリップとして追加 (Enter)">＋ クリップ追加</button>
+      <button id="btnAddTelop" class="tb" title="再生位置にテロップを追加 (T)">＋ テロップ</button>
     </div>
     <div class="tb-sep"></div>
     <div class="tb-group">
@@ -55,8 +59,11 @@
         <button class="tab" data-mode="program">プログラム</button>
         <span class="mon-name" id="monName">—</span>
       </div>
-      <div class="video-wrap">
-        <video id="video" playsinline preload="metadata"></video>
+      <div class="video-wrap" id="videoWrap">
+        <div class="stage" id="stage">
+          <video id="video" playsinline preload="metadata"></video>
+          <canvas id="overlay"></canvas>
+        </div>
         <div class="no-media" id="noMedia">素材が未読み込みです</div>
       </div>
 
@@ -113,10 +120,11 @@
         </label>
       </div>
 
-      <div class="panel-head sub">選択クリップ</div>
+      <div class="panel-head sub" id="selHead">選択クリップ</div>
       <div class="form" id="clipForm">
         <div class="empty">未選択</div>
       </div>
+      <div class="form hidden" id="telopForm"></div>
 
       <div class="panel-head sub">ショートカット</div>
       <ul class="keys">
@@ -126,7 +134,8 @@
         <li><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> 逆／停止／早送り</li>
         <li><kbd>←</kbd><kbd>→</kbd> 1フレーム</li>
         <li><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 1秒</li>
-        <li><kbd>Delete</kbd> 選択クリップ削除</li>
+        <li><kbd>T</kbd> テロップ追加</li>
+        <li><kbd>Delete</kbd> 選択クリップ／テロップ削除</li>
         <li><kbd>Ctrl</kbd>+<kbd>S</kbd> プロジェクト保存</li>
       </ul>
     </aside>
@@ -146,6 +155,7 @@
     <div class="tl-body">
       <div class="tl-heads">
         <div class="tl-head ruler-head"></div>
+        <div class="tl-head telop">T1</div>
         <div class="tl-head">V1</div>
         <div class="tl-head">A1</div>
       </div>
@@ -175,6 +185,7 @@
 
 <input type="file" id="fileInput" accept="video/mp4,video/*" multiple hidden>
 <input type="file" id="projInput" accept="application/json,.json" hidden>
+<input type="file" id="fontInput" accept=".ttf,.otf,.woff,.woff2,.ttc" multiple hidden>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

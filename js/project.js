@@ -12,7 +12,8 @@ export function createProject() {
     output: { width: 1920, height: 1080, fps: 30, videoBitrate: 12_000_000, audioBitrate: 192_000 },
     sources: [],   // { id, name, size, duration }
     clips: [],     // { id, sourceId, in, out, volume }
-    telops: [],    // Phase 2
+    telops: [],    // { id, text, start, end, x, y, ...style } 時刻は出力タイムライン秒
+    telopPresets: null, // null なら telop.js の既定プリセットを使う
     audioClips: [],// Phase 3 (SE / BGM)
     blurs: [],     // Phase 3
   };
