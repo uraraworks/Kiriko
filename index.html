@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browser Movie Editor — Phase 0</title>
+<link rel="stylesheet" href="css/app.css">
+<script src="vendor/mp4box.all.min.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ ツールバー ============ -->
+  <header class="toolbar">
+    <div class="brand">Browser Movie Editor <span class="phase">Phase 0</span></div>
+    <div class="tb-group">
+      <button id="btnOpen" class="tb" title="素材を読み込む">素材を開く</button>
+      <button id="btnLoadProj" class="tb" title="プロジェクトJSONを読み込む">開く…</button>
+      <button id="btnSaveProj" class="tb" title="プロジェクトJSONを保存 (Ctrl+S)">保存</button>
+    </div>
+    <div class="tb-sep"></div>
+    <div class="tb-group">
+      <button id="btnMarkIn" class="tb" title="イン点 (I)">[ IN</button>
+      <button id="btnMarkOut" class="tb" title="アウト点 (O)">OUT ]</button>
+      <button id="btnAddClip" class="tb accent" title="クリップとして追加 (Enter)">＋ クリップ追加</button>
+    </div>
+    <div class="tb-sep"></div>
+    <div class="tb-group">
+      <button id="btnDelete" class="tb" title="選択クリップを削除 (Delete)">削除</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="tb-group">
+      <span class="totalinfo">尺 <b id="totalDur">00:00.00</b> / <b id="clipCount">0</b> クリップ</span>
+      <button id="btnExport" class="tb export" title="mp4 で書き出す">▶ 書き出し</button>
+    </div>
+  </header>
+
+  <!-- ============ ワークスペース ============ -->
+  <main class="workspace">
+
+    <!-- メディアビン -->
+    <aside class="panel bin">
+      <div class="panel-head">メディアビン</div>
+      <div id="binList" class="bin-list">
+        <div class="empty">「素材を開く」で mp4 を読み込みます</div>
+      </div>
+      <div class="panel-head sub">素材情報</div>
+      <div id="srcInfo" class="srcinfo">—</div>
+    </aside>
+
+    <!-- モニター -->
+    <section class="panel monitor">
+      <div class="panel-head tabs">
+        <button class="tab active" data-mode="source">ソース</button>
+        <button class="tab" data-mode="program">プログラム</button>
+        <span class="mon-name" id="monName">—</span>
+      </div>
+      <div class="video-wrap">
+        <video id="video" playsinline preload="metadata"></video>
+        <div class="no-media" id="noMedia">素材が未読み込みです</div>
+      </div>
+
+      <div class="scrub">
+        <canvas id="scrubBar" height="34"></canvas>
+      </div>
+
+      <div class="transport">
+        <span class="tc" id="tcCur">00:00:00.00</span>
+        <div class="tp-buttons">
+          <button id="btnHome" class="tp" title="先頭 (Home)">⏮</button>
+          <button id="btnBack1" class="tp" title="1フレーム戻る (←)">◀|</button>
+          <button id="btnPlay" class="tp play" title="再生／停止 (Space)">▶</button>
+          <button id="btnFwd1" class="tp" title="1フレーム進む (→)">|▶</button>
+          <button id="btnEnd" class="tp" title="末尾 (End)">⏭</button>
+        </div>
+        <span class="tc dim" id="tcDur">00:00:00.00</span>
+        <span class="rate" id="rateLabel">×1</span>
+        <span class="inout">IN <b id="lblIn">--:--</b> / OUT <b id="lblOut">--:--</b> / <b id="lblLen">--:--</b></span>
+      </div>
+    </section>
+
+    <!-- インスペクタ -->
+    <aside class="panel inspector">
+      <div class="panel-head">出力設定</div>
+      <div class="form">
+        <label>解像度
+          <select id="optRes">
+            <option value="1920x1080" selected>1920 × 1080 (FHD)</option>
+            <option value="1280x720">1280 × 720 (HD)</option>
+          </select>
+        </label>
+        <label>フレームレート
+          <select id="optFps">
+            <option value="30" selected>30 fps (CFR)</option>
+            <option value="60">60 fps (CFR)</option>
+            <option value="24">24 fps (CFR)</option>
+          </select>
+        </label>
+        <label>映像ビットレート
+          <select id="optVbr">
+            <option value="8000000">8 Mbps</option>
+            <option value="12000000" selected>12 Mbps</option>
+            <option value="16000000">16 Mbps</option>
+            <option value="20000000">20 Mbps</option>
+          </select>
+        </label>
+        <label>音声ビットレート
+          <select id="optAbr">
+            <option value="128000">128 kbps</option>
+            <option value="192000" selected>192 kbps</option>
+            <option value="256000">256 kbps</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="panel-head sub">選択クリップ</div>
+      <div class="form" id="clipForm">
+        <div class="empty">未選択</div>
+      </div>
+
+      <div class="panel-head sub">ショートカット</div>
+      <ul class="keys">
+        <li><kbd>Space</kbd> 再生／停止</li>
+        <li><kbd>I</kbd> / <kbd>O</kbd> イン点／アウト点</li>
+        <li><kbd>Enter</kbd> クリップ追加</li>
+        <li><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> 逆／停止／早送り</li>
+        <li><kbd>←</kbd><kbd>→</kbd> 1フレーム</li>
+        <li><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 1秒</li>
+        <li><kbd>Delete</kbd> 選択クリップ削除</li>
+        <li><kbd>Ctrl</kbd>+<kbd>S</kbd> プロジェクト保存</li>
+      </ul>
+    </aside>
+  </main>
+
+  <!-- ============ タイムライン ============ -->
+  <section class="panel timeline">
+    <div class="panel-head">
+      タイムライン
+      <span class="tl-tools">
+        <button id="btnZoomOut" class="mini">－</button>
+        <button id="btnZoomIn" class="mini">＋</button>
+        <button id="btnZoomFit" class="mini">全体</button>
+        <span class="hint">クリップ本体ドラッグ＝並べ替え／端ドラッグ＝トリム／ダブルクリック＝ソースで開く</span>
+      </span>
+    </div>
+    <div class="tl-body">
+      <div class="tl-heads">
+        <div class="tl-head ruler-head"></div>
+        <div class="tl-head">V1</div>
+        <div class="tl-head">A1</div>
+      </div>
+      <div class="tl-canvas-wrap" id="tlWrap">
+        <canvas id="tlCanvas"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ステータスバー ============ -->
+  <footer class="statusbar">
+    <div class="progress"><div id="progBar"></div></div>
+    <div id="status" class="status">準備完了</div>
+  </footer>
+
+  <!-- 書き出しオーバーレイ -->
+  <div id="overlay" class="overlay hidden">
+    <div class="overlay-box">
+      <h2>書き出し中</h2>
+      <div class="progress big"><div id="ovProg"></div></div>
+      <div id="ovText" class="ov-text">準備中…</div>
+      <pre id="ovLog" class="ov-log"></pre>
+      <button id="btnCancel" class="tb">中断</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept="video/mp4,video/*" multiple hidden>
+<input type="file" id="projInput" accept="application/json,.json" hidden>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

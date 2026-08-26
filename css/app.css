@@ -1,0 +1,175 @@
+/* NLE 風ダークテーマ */
+:root {
+  --bg:        #16181d;
+  --panel:     #1e2128;
+  --panel2:    #23262e;
+  --head:      #262a33;
+  --line:      #33384380;
+  --line-hard: #383e4a;
+  --text:      #d7dae0;
+  --dim:       #8b93a1;
+  --accent:    #4c9aff;
+  --accent2:   #2f6fd0;
+  --video:     #5b7fd4;
+  --video-sel: #8fb2ff;
+  --audio:     #4aa87a;
+  --audio-sel: #7fd8ab;
+  --danger:    #e0574f;
+  --in:        #f0c33c;
+  --out:       #f0c33c;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+#app { display: grid; grid-template-rows: 40px minmax(0,1fr) 232px 26px; height: 100%; }
+
+/* ---------- ツールバー ---------- */
+.toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 0 10px; overflow-x: auto; overflow-y: hidden;
+  background: linear-gradient(#2a2e37, #21242b);
+  border-bottom: 1px solid #12141880;
+}
+.brand { font-weight: 700; letter-spacing: .02em; margin-right: 6px; white-space: nowrap; flex: none; }
+.brand .phase { color: var(--dim); font-weight: 400; font-size: 11px; margin-left: 4px; }
+.tb-group { display: flex; gap: 4px; align-items: center; }
+.tb-sep { width: 1px; height: 22px; background: var(--line-hard); flex: none; }
+.spacer { flex: 1; min-width: 8px; }
+.tb {
+  background: #30353f; color: var(--text); border: 1px solid #3c424e; border-radius: 5px;
+  padding: 5px 11px; font-size: 12px; cursor: pointer; white-space: nowrap; flex: none;
+}
+.tb:hover { background: #3a404b; }
+.tb:active { background: #272b33; }
+.tb:disabled { opacity: .4; cursor: default; }
+.tb.accent { background: var(--accent2); border-color: #3d80e6; }
+.tb.accent:hover { background: #3a7fe0; }
+.tb.export { background: #2f7a4d; border-color: #3a9560; font-weight: 700; }
+.tb.export:hover { background: #37905b; }
+.totalinfo { color: var(--dim); font-size: 12px; margin-right: 6px; white-space: nowrap; }
+.totalinfo b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* ---------- ワークスペース ---------- */
+.workspace { display: grid; grid-template-columns: 240px minmax(0,1fr) 250px; gap: 1px; background: #101216; min-height: 0; }
+.panel { background: var(--panel); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.panel-head {
+  background: var(--head); padding: 6px 10px; font-size: 11.5px; font-weight: 700; color: #aeb6c4;
+  border-bottom: 1px solid #14161a; display: flex; align-items: center; gap: 8px; flex: none;
+}
+.panel-head.sub { background: #21242b; border-top: 1px solid #14161a; }
+
+/* メディアビン */
+.bin-list { overflow: auto; flex: 1; min-height: 60px; }
+.bin-item {
+  display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+.bin-item:hover { background: #262a33; }
+.bin-item.active { background: #2c3a52; box-shadow: inset 3px 0 0 var(--accent); }
+.bin-item .n { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bin-item .m { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.empty { color: var(--dim); font-size: 11.5px; padding: 10px; }
+.srcinfo { padding: 8px 10px; font-size: 11px; color: var(--dim); line-height: 1.7; flex: none; }
+.srcinfo b { color: var(--text); font-weight: 500; }
+
+/* モニター */
+.monitor .tabs { gap: 0; }
+.tab {
+  background: transparent; border: none; border-bottom: 2px solid transparent;
+  color: var(--dim); padding: 4px 12px; font-size: 12px; cursor: pointer; font-weight: 700;
+  white-space: nowrap; flex: none;
+}
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.mon-name { margin-left: auto; font-weight: 400; color: var(--dim); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
+.video-wrap {
+  flex: 1; min-height: 0; background: #000; display: flex; align-items: center; justify-content: center; position: relative;
+}
+#video { max-width: 100%; max-height: 100%; display: block; background: #000; }
+.no-media { position: absolute; color: #556; font-size: 13px; }
+.scrub { padding: 0 8px; background: var(--panel); }
+#scrubBar { width: 100%; height: 34px; display: block; cursor: pointer; }
+.transport {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 5px 10px 8px;
+  border-top: 1px solid var(--line);
+}
+.tc { font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 700; letter-spacing: .02em; }
+.tc.dim { color: var(--dim); font-weight: 400; }
+.tp-buttons { display: flex; gap: 3px; margin: 0 auto; }
+.tp {
+  background: #30353f; border: 1px solid #3c424e; color: var(--text);
+  border-radius: 4px; min-width: 34px; height: 26px; cursor: pointer; font-size: 12px;
+}
+.tp:hover { background: #3a404b; }
+.tp.play { min-width: 46px; background: #3b424f; }
+.rate { color: var(--dim); font-size: 11px; min-width: 26px; }
+.inout { color: var(--dim); font-size: 11.5px; }
+.inout b { color: var(--in); font-variant-numeric: tabular-nums; }
+
+/* インスペクタ */
+.inspector { overflow: auto; }
+.form { padding: 9px 10px; display: flex; flex-direction: column; gap: 8px; }
+.form label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
+.form select, .form input[type=text], .form input[type=number] {
+  background: #2a2e37; color: var(--text); border: 1px solid #3c424e; border-radius: 4px;
+  padding: 4px 6px; font-size: 12px;
+}
+.form input[type=range] { width: 100%; }
+.form .row { display: flex; gap: 8px; align-items: center; }
+.keys { margin: 0; padding: 8px 10px 12px 10px; list-style: none; font-size: 11px; color: var(--dim); }
+.keys li { padding: 2px 0; }
+kbd {
+  background: #2f343e; border: 1px solid #454b58; border-bottom-width: 2px; border-radius: 3px;
+  padding: 0 4px; font-size: 10px; margin-right: 2px; color: var(--text);
+}
+
+/* ---------- タイムライン ---------- */
+.timeline { border-top: 1px solid #101216; }
+.tl-tools { margin-left: auto; display: flex; align-items: center; gap: 5px; font-weight: 400; }
+.tl-tools .hint { color: #6f7684; font-size: 10.5px; margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini {
+  background: #30353f; border: 1px solid #3c424e; color: var(--text);
+  border-radius: 4px; padding: 1px 8px; font-size: 11px; cursor: pointer;
+}
+.mini:hover { background: #3a404b; }
+.tl-body { flex: 1; display: grid; grid-template-columns: 56px minmax(0,1fr); min-height: 0; }
+.tl-heads { background: var(--panel2); border-right: 1px solid var(--line-hard); }
+.tl-head {
+  height: 62px; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: #9aa2b0; border-bottom: 1px solid var(--line);
+}
+.tl-head.ruler-head { height: 26px; }
+.tl-canvas-wrap { position: relative; overflow: hidden; }
+#tlCanvas { display: block; width: 100%; height: 100%; cursor: default; }
+
+/* ---------- ステータスバー ---------- */
+.statusbar { display: flex; align-items: center; gap: 10px; padding: 0 10px; background: #1a1d23; border-top: 1px solid #101216; }
+.progress { width: 160px; height: 6px; background: #2b3038; border-radius: 3px; overflow: hidden; }
+.progress > div { height: 100%; width: 0; background: var(--accent); transition: width .12s linear; }
+.progress.big { width: 100%; height: 10px; }
+.status { font-size: 11.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status.err { color: #ff8a80; }
+
+/* ---------- オーバーレイ ---------- */
+.overlay {
+  position: fixed; inset: 0; background: #0b0d10cc; display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+.overlay.hidden { display: none; }
+.overlay-box {
+  background: var(--panel); border: 1px solid var(--line-hard); border-radius: 10px;
+  padding: 20px 24px; width: 560px; display: flex; flex-direction: column; gap: 12px;
+  box-shadow: 0 24px 60px #0009;
+}
+.overlay-box h2 { margin: 0; font-size: 15px; }
+.ov-text { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.ov-log {
+  margin: 0; background: #14171c; border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px; height: 150px; overflow: auto; font-size: 11px; color: #9aa2b0;
+  white-space: pre-wrap; user-select: text;
+}
