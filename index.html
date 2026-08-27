@@ -284,7 +284,7 @@
         <button id="btnZoomOut" class="mini ico" title="縮小　［ ⌘/Ctrl + ホイール ］"><svg class="ic"><use href="#i-zoomout"/></svg></button>
         <button id="btnZoomIn" class="mini ico" title="拡大　［ ⌘/Ctrl + ホイール ］"><svg class="ic"><use href="#i-zoomin"/></svg></button>
         <button id="btnZoomFit" class="mini ico" title="全体を表示"><svg class="ic"><use href="#i-zoomfit"/></svg></button>
-        <span class="hint">ドラッグ＝移動（カット位置に吸着・Alt で解除）／端ドラッグ＝トリム／ホイール＝スクロール／⌘・Ctrl＋ホイール＝拡大縮小</span>
+        <span class="hint">ドラッグ＝移動（カット位置に吸着・Alt で解除）／端ドラッグ＝トリム／ホイール＝上下・横スワイプ＝時間軸／Shift＋ホイール＝時間軸／⌘・Ctrl＋ホイール＝拡大縮小</span>
       </span>
     </div>
     <div class="tl-body" id="tlBody">
@@ -336,8 +336,11 @@
         <tr><td>右クリック</td><td>削除メニュー</td></tr>
 
         <tr><th colspan="2">タイムライン</th></tr>
-        <tr><td>ホイール</td><td>横スクロール</td></tr>
+        <tr><td>横スワイプ</td><td>時間軸を左右に</td></tr>
+        <tr><td>ホイール（上下）</td><td>トラックを上下に<br><span class="dim">収まっている時は時間軸を左右に</span></td></tr>
+        <tr><td><kbd>Shift</kbd>+ホイール</td><td>時間軸を左右に</td></tr>
         <tr><td><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+ホイール</td><td>拡大縮小</td></tr>
+        <tr><td>上端のバー</td><td>ドラッグでタイムラインの高さを変える</td></tr>
 
         <tr><th colspan="2">ファイル</th></tr>
         <tr><td><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>元に戻す</td></tr>

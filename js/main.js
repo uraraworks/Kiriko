@@ -2915,24 +2915,43 @@ tlCanvas.addEventListener('contextmenu', (e) => {
   showContextMenu(e.clientX, e.clientY, items);
 });
 
+/**
+ * ホイール / トラックパッド。
+ *   横（deltaX）        … 時間軸を左右に
+ *   縦（deltaY）        … タイムラインのペインを上下に（トラックが入りきらない時）
+ *   Shift + 縦          … 時間軸を左右に（Windows の慣習）
+ *   ⌘ / Ctrl + 縦       … 拡大縮小（カーソル位置を固定）
+ * Mac のマジックマウス／トラックパッドは縦横そのまま、普通のホイールは Shift で横。
+ * トラックが縦に収まっていて動かせない時は、素のホイールも横スクロールに回す。
+ */
 $('tlWrap').addEventListener('wheel', (e) => {
-  e.preventDefault();
   const r = tlCanvas.getBoundingClientRect();
+
   if (e.ctrlKey || e.metaKey) {
-    // ⌘ / Ctrl ＋ ホイールで拡大縮小（カーソル位置を固定したまま）。
-    // Mac のトラックパッドのピンチも ctrlKey 付きの wheel として届くのでそのまま効く。
+    // Mac のトラックパッドのピンチも ctrlKey 付きの wheel として届くのでそのまま効く
+    e.preventDefault();
     const px = e.clientX - r.left;
     const anchorSec = xToSec(px);
     const f = Math.exp(-e.deltaY * 0.002);
     S.pxPerSec = Math.max(0.2, Math.min(400, S.pxPerSec * f));
     updateScrollRange();
     setScroll(anchorSec - px / S.pxPerSec);
-  } else {
-    // ホイールは横スクロール。トラックパッドの横スワイプ（deltaX）も拾う。
-    const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    setScroll(S.scrollSec + d / S.pxPerSec);
+    renderTimeline();
+    return;
   }
-  renderTimeline();
+
+  const scrollTime = (d) => {
+    e.preventDefault();
+    setScroll(S.scrollSec + d / S.pxPerSec);
+    renderTimeline();
+  };
+
+  if (e.shiftKey) return scrollTime(e.deltaY || e.deltaX);
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return scrollTime(e.deltaX);
+
+  const body = $('tlBody');
+  if (body.scrollHeight <= body.clientHeight + 1) return scrollTime(e.deltaY);
+  // 縦に動かせるならブラウザに任せる（.tl-body がそのままスクロールする）
 }, { passive: false });
 
 // ---------------------------------------------------------------- プロジェクト保存 / 読込
