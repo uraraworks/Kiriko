@@ -27,11 +27,14 @@ export class Bridge {
   connect(url = this.url) {
     this.url = url;
     this.wanted = true;
+    // 次に開いた時も繋ぎに行く（切ると解除される）
+    try { localStorage.setItem('kiriko.autoBridge', '1'); } catch {}
     this._open();
   }
 
   disconnect() {
     this.wanted = false;
+    try { localStorage.removeItem('kiriko.autoBridge'); } catch {}
     clearTimeout(this.retry);
     this.ws?.close();
     this.ws = null;

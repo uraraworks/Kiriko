@@ -375,7 +375,13 @@ claude mcp add kiriko -- node <このリポジトリ>/mcp/server.js
 ```
 
 登録したら Kiriko を開き、ツールバー右の**丸いランプ**をクリックして接続する
-（灰＝未接続／黄点滅＝サーバー待ち／緑＝接続中）。詳細は `mcp/README.md`。
+（灰＝未接続／黄点滅＝サーバー待ち／緑＝接続中）。`?bridge=1` を付けて開けば最初から繋ぎに行く。
+
+**GitHub Pages（https）に置いたものからでも繋がる** — localhost は安全なオリジンとして
+扱われるため。ただし **Safari は塞いでいる**ので Chrome 系か Firefox を使うこと。
+（`?bridgePort=9999` でポートも変えられる）
+
+詳細は `mcp/README.md`、ページ内 JS から直接叩く場合は `docs/AUTOMATION.md`。
 
 **方針**
 
@@ -413,9 +419,12 @@ Kiriko の音量データで「音がある区間」だけを切り出して渡�
 
 ## ブラウザ内の操作フック
 
-`window.bme` からプロジェクトを直接読み書きできる（MCP もここを通る）。
+`window.bme` が常に公開されている（`?bridge=1` は不要）。
+`bme.call(cmd, args)` で **MCP とまったく同じコマンド**を名前で実行できるので、
+ブラウザペインや DevTools から叩いても挙動がずれない。詳細は `docs/AUTOMATION.md`。
 
 ```js
+await bme.call('summary')    // MCP と同じコマンド（一覧は docs/AUTOMATION.md）
 bme.exportProjectJSON()      // 現在の編集内容を JSON 文字列で取得
 bme.loadProjectJSON(text)    // JSON を流し込んで UI に反映
 bme.project.clips            // カット列を直接いじる → bme.render()

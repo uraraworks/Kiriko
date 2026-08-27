@@ -3682,6 +3682,19 @@ $('mcpDot').onclick = () => {
   else { bridge.connect(); status('MCP サーバーに接続します…'); }
 };
 
+// ?bridge=1 で最初から繋ぎに行く。?bridgePort= でポートも変えられる。
+// https のページ（GitHub Pages 等）からでも ws://127.0.0.1 へは繋がる
+// （localhost は安全なオリジンとして扱われるため）。Safari だけは塞いでいる。
+(() => {
+  const q = new URLSearchParams(location.search);
+  const port = q.get('bridgePort');
+  if (port) bridge.url = `ws://127.0.0.1:${port}`;
+  if (q.get('bridge') === '1' || localStorage.getItem('kiriko.autoBridge') === '1') {
+    bridge.connect();
+    status('MCP サーバーに接続します…');
+  }
+})();
+
 // Phase 4（AI 連携 / MCP）に向けた操作フック。
 // プロジェクト JSON をそのまま差し替えられるようにしておく。
 window.bme = {
@@ -3709,6 +3722,16 @@ window.bme = {
   render: renderAll,
   bridge,
   commands: mcpCommands,
+  /**
+   * MCP と同じコマンドを名前で実行する。
+   * ブラウザペインなど、WebSocket を通さずに直接操作したい時はこちら。
+   * MCP 経由とまったく同じ処理を通るので、挙動がずれない。
+   */
+  call: async (cmd, args = {}) => {
+    const fn = mcpCommands[cmd];
+    if (!fn) throw new Error(`知らないコマンドです: ${cmd}（使えるもの: ${Object.keys(mcpCommands).join(', ')}）`);
+    return await fn(args);
+  },
   timelineLevels,
   frameAt,
 };
