@@ -18,6 +18,12 @@
   <defs>
     <g id="ic-base" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
   </defs>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>
+  </symbol>
+  <symbol id="i-paste" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 4h6v3H9z"/><path d="M8 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M8 13h8M8 16h5"/>
+  </symbol>
   <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
   </symbol>
@@ -293,7 +299,7 @@
   <div class="tl-split" id="tlSplit" title="ドラッグで高さを変える"></div>
   <section class="panel timeline">
     <div class="panel-head">
-      タイムライン
+      <span title="ドラッグ＝移動（カット位置に吸着・Alt で解除）&#10;端をドラッグ＝トリム&#10;ホイール＝上下・横スワイプ＝時間軸&#10;Shift＋ホイール＝時間軸&#10;⌘・Ctrl＋ホイール＝拡大縮小">タイムライン</span>
       <span class="tl-edit">
         <button id="btnAddMarker" class="mini ico" title="再生位置にマーカーを立てる　［ M ］"><svg class="ic"><use href="#i-marker"/></svg></button>
         <button id="btnPrevGap" class="mini ico" title="前の区間外を範囲選択　［ F ］"><svg class="ic"><use href="#i-prev"/></svg></button>
@@ -302,10 +308,12 @@
         <button id="btnAddTelop" class="mini ico" title="再生位置にテロップを追加　［ T ］"><svg class="ic"><use href="#i-telop"/></svg></button>
         <span class="tl-sep"></span>
         <button id="btnZoneIn" class="mini zone ico" title="範囲の開始をカーソル位置に　［ I ］"><svg class="ic"><use href="#i-in"/></svg></button>
-        <button id="btnZoneOut" class="mini zone ico" title="範囲の終了をカーソル位置に　［ O ］"><svg class="ic"><use href="#i-out"/></svg></button>
-        <button id="btnExtract" class="mini danger" title="範囲を切り取って後ろを詰める　［ Delete ］"><svg class="ic"><use href="#i-cut"/></svg><span>切り取り</span></button>
-        <button id="btnZoneClear" class="mini ico" title="範囲選択を解除　［ Esc ］"><svg class="ic"><use href="#i-clear"/></svg></button>
-        <span class="zone-info" id="zoneInfo">範囲 未選択</span>
+        <button id="btnZoneOut" class="mini zone ico hidden" title="範囲の終了をカーソル位置に　［ O ］"><svg class="ic"><use href="#i-out"/></svg></button>
+        <button id="btnExtract" class="mini danger hidden" title="範囲を切り取って後ろを詰める　［ Delete ］"><svg class="ic"><use href="#i-cut"/></svg><span>切り取り</span></button>
+        <button id="btnCopy" class="mini ico hidden" title="範囲のテロップ・音源などをまとめてコピー　［ ⌘/Ctrl + C ］"><svg class="ic"><use href="#i-copy"/></svg></button>
+        <button id="btnPaste" class="mini ico hidden" title="コピーしたものを再生位置に貼り付け　［ ⌘/Ctrl + V ］"><svg class="ic"><use href="#i-paste"/></svg></button>
+        <button id="btnZoneClear" class="mini ico hidden" title="範囲選択を解除　［ Esc ］"><svg class="ic"><use href="#i-clear"/></svg></button>
+        <span class="zone-info hidden" id="zoneInfo"></span>
         <span class="tl-sep"></span>
         <button id="btnDelete" class="mini ico" title="選択中のクリップ・テロップ・画像などを削除　［ Delete ］"><svg class="ic"><use href="#i-trash"/></svg></button>
       </span>
@@ -316,7 +324,7 @@
         <button id="btnZoomOut" class="mini ico" title="縮小　［ ⌘/Ctrl + ホイール ］"><svg class="ic"><use href="#i-zoomout"/></svg></button>
         <button id="btnZoomIn" class="mini ico" title="拡大　［ ⌘/Ctrl + ホイール ］"><svg class="ic"><use href="#i-zoomin"/></svg></button>
         <button id="btnZoomFit" class="mini ico" title="全体を表示"><svg class="ic"><use href="#i-zoomfit"/></svg></button>
-        <span class="hint">ドラッグ＝移動（カット位置に吸着・Alt で解除）／端ドラッグ＝トリム／ホイール＝上下・横スワイプ＝時間軸／Shift＋ホイール＝時間軸／⌘・Ctrl＋ホイール＝拡大縮小</span>
+
       </span>
     </div>
     <div class="tl-body" id="tlBody">

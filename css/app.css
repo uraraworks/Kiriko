@@ -165,7 +165,6 @@ kbd {
 .timeline { border-top: 1px solid #101216; min-height: 0; overflow: hidden; }
 .timeline > .panel-head { overflow-x: auto; overflow-y: hidden; }
 .tl-tools { margin-left: auto; display: flex; align-items: center; gap: 5px; font-weight: 400; flex: none; }
-.tl-tools .hint { color: #6f7684; font-size: 10.5px; margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mini {
   background: #30353f; border: 1px solid #3c424e; color: var(--text);
   border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;
@@ -485,6 +484,7 @@ kbd {
   background: #10131a; color: #e3e8f0; border: 1px solid #3c424e;
   border-radius: 6px; padding: 5px 9px; font-size: 11.5px; line-height: 1.5;
   max-width: 340px; box-shadow: 0 8px 24px #0009;
+  white-space: pre-line;   /* 複数行の説明も改行のまま出す */
   opacity: 0; transition: opacity .09s ease-out;
 }
 .tip.show { opacity: 1; }
@@ -623,3 +623,6 @@ body.exporting .status { color: var(--accent); font-weight: 700; }
 /* フッターのプログレスバーは書き出し中だけ出す（普段は使わないので場所を空ける） */
 .statusbar > .progress { display: none; }
 body.exporting .statusbar > .progress { display: block; }
+
+/* 説明が付いているタイムライン見出し */
+.panel-head > span[title] { cursor: help; border-bottom: 1px dotted #4a5160; }

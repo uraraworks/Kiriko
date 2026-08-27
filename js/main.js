@@ -498,15 +498,28 @@ function zoneRange() {
   return S.zoneOut - S.zoneIn > 0.001 ? [S.zoneIn, S.zoneOut] : null;
 }
 
+/**
+ * 範囲まわりの表示。使える時だけ出す。
+ * 通常は［開始］だけを置いておき、開始を打ってから終了・切り取り・解除を出す
+ * （終了から打つことはまず無いので、並んでいると迷う）。
+ */
 function renderZoneInfo() {
   const r = zoneRange();
+  const started = S.zoneIn !== null;
+  const show = (id, on) => $(id).classList.toggle('hidden', !on);
+
   $('zoneInfo').textContent = r
     ? `範囲 ${tc(r[0], false)} 〜 ${tc(r[1], false)}（${tc(r[1] - r[0], false)}）`
-    : S.zoneIn !== null
-      ? `範囲 ${tc(S.zoneIn, false)} 〜 —（O で終了を打つ）`
-      : '範囲 未選択';
+    : started ? `範囲 ${tc(S.zoneIn, false)} 〜 —（O で終了を打つ）` : '';
+
+  show('zoneInfo', started);
+  show('btnZoneOut', started);      // 開始を打ってから
+  show('btnZoneClear', started);
+  show('btnExtract', !!r);          // 範囲になってから
+  // コピーは「範囲」か「何か選んでいる時」。貼り付けは持っている時だけ
+  show('btnCopy', !!r || !!(S.selectedTelopId || S.selectedAudioId || S.selectedImageId || S.selectedBlurId));
+  show('btnPaste', !!S.clipboard?.items?.length);
   $('btnExtract').disabled = !r;
-  $('btnZoneClear').disabled = !r;
 }
 
 function renderZoneUI() {
@@ -709,6 +722,7 @@ function copySelected() {
   if (!pick) return status('コピーするものが選ばれていません（範囲を選ぶとまとめてコピーできます）', true);
   const [kind, item] = pick;
   S.clipboard = { base: item.start, items: [{ kind, data: clone(item) }] };
+  renderZoneInfo();   // 貼り付けボタンを出す
   status(`${KIND_NAME[kind]}をコピーしました（⌘V で再生位置に貼り付け）`);
 }
 
@@ -732,6 +746,7 @@ function copyRange(a, b) {
   const n = {};
   for (const it of items) n[it.kind] = (n[it.kind] ?? 0) + 1;
   const list = Object.entries(n).map(([k, v]) => `${KIND_NAME[k]} ${v}`).join('・');
+  renderZoneInfo();   // 貼り付けボタンを出す
   status(`範囲の ${list} をコピーしました（⌘V で再生位置に貼り付け）`);
 }
 
@@ -777,6 +792,8 @@ function pasteClipboard() {
   }
   if (!last) return status('貼り付けられませんでした（尺の外です）', true);
 
+  // 範囲は用済み。残っていると Delete が「範囲を切り取る」になって危ない
+  S.zoneIn = S.zoneOut = null;
   select(...last);
   setMode('program');
   seekProgram(t0, true);
@@ -4227,6 +4244,8 @@ $('btnAddMarker').onclick = () => addMarker();
 $('btnPrevGap').onclick = selectPrevGap;
 $('btnNextGap').onclick = selectNextGap;
 $('btnAddTelop').onclick = addTelop;
+$('btnCopy').onclick = copySelected;
+$('btnPaste').onclick = pasteClipboard;
 $('telSaveLib').onclick = () => saveTelopToLibrary();
 $('btnZoneIn').onclick = () => { setMode('program'); zoneIn(); };
 $('btnZoneOut').onclick = () => { setMode('program'); zoneOut(); };
