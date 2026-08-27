@@ -24,6 +24,7 @@ const S = {
   sources: new Map(),      // sourceId -> Mp4Source
   mediaFilter: 'all',      // メディア一覧の絞り込み（all / video / audio / image）
   clipboard: null,         // コピーしたテロップ / 音源 / 画像 / ぼかし
+  projectFile: null,       // 開いている .kiriko の { name, handle }。保存先に使う
   workDir: null,           // 作業フォルダ（FileSystemDirectoryHandle）
   workDirReady: false,     // その許可が生きているか
   libDir: null,            // テロップ用画像の置き場所（FileSystemDirectoryHandle）
@@ -264,6 +265,8 @@ async function addFiles(files) {
   for (const file of files) {
     if (AUDIO_RE.test(file.name) || IMAGE_RE.test(file.name)) continue;
     if (/\.kdenlive$/i.test(file.name)) { await importKdenlive(file); continue; }
+    // .kiriko をドロップしたらプロジェクトとして開く（mp4 として解析しようとしていた）
+    if (/\.kiriko$/i.test(file.name)) { await loadProject(file); continue; }
     try {
       status(`${file.name} を解析中…`);
       const src = new Mp4Source(file);
@@ -291,6 +294,9 @@ async function importKdenlive(file, text = null) {
   try {
     const info = parseKdenlive(text ?? await file.text());
     S.pendingKdenlive = info;
+    // 保存する時は .kiriko として別名になるので、ファイル名だけ引き継ぐ
+    S.projectFile = null;
+    S.project.title = projectTitleOf(file.name.replace(/\.kdenlive$/i, ''));
     const total = info.cuts.reduce((a, c) => a + (c.out - c.in), 0);
     const tracks = info.trackCounts.length > 1 ? `（映像 ${info.trackCounts.length} トラックを統合）` : '';
     status(`Kdenlive: ${info.cuts.length} カット${tracks} / 合計 ${tc(total, false)} を検出。`
@@ -3668,10 +3674,25 @@ $('tlWrap').addEventListener('wheel', (e) => {
 async function saveProject() {
   S.project.title = S.project.title || '無題プロジェクト';
   const text = P.serialize(S.project);
-  const name = `${S.project.title || '無題プロジェクト'}.kiriko`;
-  // 作業フォルダを開いていれば、そこへそのまま保存する（毎回選ばなくてよい）
+  const blob = () => new Blob([text], { type: 'application/json' });
+  // 開いたファイルがあればその名前を使う（タイトルは中身の見出しなので、
+  // ファイル名と食い違っていても開いた方を優先する）
+  const name = S.projectFile?.name ?? `${S.project.title}.kiriko`;
+
+  // ① 開いたファイルそのものへ書き戻す
+  const h0 = S.projectFile?.handle;
+  if (h0) {
+    try {
+      const w = await h0.createWritable();
+      await w.write(text); await w.close();
+      status(`${name} に保存しました`);
+      return;
+    } catch { /* 移動・削除された等。下の経路へ */ }
+  }
+  // ② 作業フォルダを開いていれば、そこへそのまま保存する（毎回選ばなくてよい）
   const dir = await FS.writableDir().catch(() => null);
-  if (dir && await FS.writeFile(dir, name, new Blob([text], { type: 'application/json' }))) {
+  if (dir && await FS.writeFile(dir, name, blob())) {
+    S.projectFile = { name, handle: await dir.getFileHandle(name).catch(() => null) };
     status(`${dir.name} / ${name} に保存しました`);
     return;
   }
@@ -3683,7 +3704,10 @@ async function saveProject() {
       });
       const w = await h.createWritable();
       await w.write(text); await w.close();
-      status('プロジェクトを保存しました');
+      // 次からはここへ保存する
+      S.projectFile = { name: h.name, handle: h };
+      if (S.project.title === '無題プロジェクト') S.project.title = projectTitleOf(h.name);
+      status(`${h.name} に保存しました`);
       return;
     } catch (e) { if (e.name === 'AbortError') return; }
   }
@@ -3693,7 +3717,15 @@ async function saveProject() {
   status('プロジェクトを保存しました');
 }
 
-async function loadProject(file) {
+/** 「プロジェクト.kiriko」→「プロジェクト」 */
+const projectTitleOf = (name) => name.replace(/\.(kiriko|json)$/i, '');
+
+/**
+ * プロジェクトを読み込む。
+ * @param {File} file
+ * @param {FileSystemFileHandle|null} handle 保存で同じファイルへ書き戻すために覚える
+ */
+async function loadProject(file, handle = null) {
   const text = await file.text();
   // 「開く」から .kdenlive を選んだ時は、そのまま取り込みに回す
   // （JSON として読もうとして落ちていた）
@@ -3703,6 +3735,10 @@ async function loadProject(file) {
   }
   try {
     const p = P.deserialize(text);
+    // 開いたファイル名を、保存先とタイトルの既定にする。
+    // これが無いと、編集して保存した時に「無題プロジェクト.kiriko」になってしまう
+    S.projectFile = { name: file.name, handle };
+    if (!p.title || p.title === '無題プロジェクト') p.title = projectTitleOf(file.name);
     // ファイルの実体はブラウザに保持できないので、名前で突き合わせる。
     // 保存されていた素材の一覧は捨てずに残す（どのファイルが要るか分かるように）。
     // 既に開いている素材があれば、そちらの id に寄せる。
@@ -3817,7 +3853,7 @@ async function useWorkFolder(dir) {
 
 async function openFromWorkDir(p) {
   await FS.rememberFile(p.name, p.handle);
-  await loadProject(await p.handle.getFile());
+  await loadProject(await p.handle.getFile(), p.handle);
 }
 
 /** フォルダにプロジェクトが複数ある時に選んでもらう */
@@ -4051,7 +4087,7 @@ $('btnLoadProj').onclick = async () => {
         accept: { 'application/json': ['.kiriko', '.json'], 'application/xml': ['.kdenlive'] } }],
     });
     await FS.rememberFile(h.name, h);
-    await loadProject(await h.getFile());
+    await loadProject(await h.getFile(), h);
   } catch (e) { if (e.name !== 'AbortError') status(e.message, true); }
 };
 $('btnAddClip').onclick = addClip;
@@ -4597,6 +4633,8 @@ window.bme = {
   get project() { return S.project; },
   set project(p) { S.project = p; select(null, null); zoomFit(); renderAll(); },
   addFiles,
+  loadProject,     // 保存先を覚えるので、テストや自動化からも同じ経路を通せる
+  saveProject,
   addTelop,
   addBlur,
   addMarker,

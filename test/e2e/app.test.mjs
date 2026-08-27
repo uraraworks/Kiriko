@@ -189,6 +189,40 @@ describe('ブラウザ結合', { skip }, () => {
     for (const [k, [a, b]] of Object.entries(r)) assert.equal(b, a, `${k} が保存で失われた`);
   });
 
+  // 開いたプロジェクト名を覚えていないと、保存で「無題プロジェクト.kiriko」になってしまう
+  test('開いたプロジェクトは、同じ名前で保存される', async () => {
+    const r = await ev(`(async () => {
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle('work', { create: true });
+      const NAME = '2025.10.01_配達.kiriko';
+
+      // タイトルを持たないプロジェクトを、その名前で置いておく
+      const src = JSON.parse(bme.exportProjectJSON());
+      delete src.title;
+      const fh = await dir.getFileHandle(NAME, { create: true });
+      const w0 = await fh.createWritable();
+      await w0.write(JSON.stringify(src)); await w0.close();
+
+      // 開く（作業フォルダから開いた時と同じ経路）
+      await bme.loadProject(await fh.getFile(), fh);
+      const afterOpen = { file: bme.state.projectFile?.name, title: bme.project.title };
+
+      // 編集してから保存
+      bme.project.markers.push({ id: 'm_test', time: 1, duration: 0, text: '印' });
+      await bme.saveProject();
+
+      const names = [];
+      for await (const [n] of dir.entries()) names.push(n);
+      const saved = JSON.parse(await (await (await dir.getFileHandle(NAME)).getFile()).text());
+      return { afterOpen, names, hasMarker: saved.markers.some((m) => m.id === 'm_test') };
+    })()`);
+    assert.equal(r.afterOpen.file, '2025.10.01_配達.kiriko', '開いたファイル名を覚えていない');
+    assert.equal(r.afterOpen.title, '2025.10.01_配達', 'タイトルがファイル名から入らない');
+    assert.ok(!r.names.includes('無題プロジェクト.kiriko'), `別名で保存された: ${r.names.join(', ')}`);
+    assert.ok(r.names.includes('2025.10.01_配達.kiriko'));
+    assert.ok(r.hasMarker, '編集内容が書き戻されていない');
+  });
+
   test('MCP と同じコマンドがページ内から通る', async () => {
     const s = await ev(`bme.call('summary')`);
     assert.ok(s && typeof s === 'object');
