@@ -28,7 +28,7 @@ body {
   overflow: hidden;
   user-select: none;
 }
-#app { display: grid; grid-template-rows: 40px minmax(0,1fr) 312px 26px; height: 100%; }
+#app { display: grid; grid-template-rows: 40px minmax(0,1fr) 330px 26px; height: 100%; }
 
 /* ---------- ツールバー ---------- */
 .toolbar {
@@ -302,9 +302,10 @@ kbd {
 
 /* タイムライン: 画像トラック */
 .tl-head.img { height: 30px; color: #e0ab74; }
+.tl-head { height: 64px; }
 .tl-head.telop { height: 30px; }
 .tl-head.fx { height: 22px; }
-.tl-head.aud2 { height: 44px; }
+.tl-head.aud2 { height: 48px; }
 
 /* 作業メモ（動画には出ない。プロジェクトに一緒に保存される） */
 #notes {
@@ -359,3 +360,7 @@ kbd {
 .keys-table td { padding: 4px 0; vertical-align: top; color: var(--text); }
 .keys-table td:first-child { width: 42%; padding-right: 8px; color: var(--dim); }
 .keys-table .dim { color: #6f7684; font-size: 10.5px; }
+
+/* 表示トグル（サムネイル・波形） */
+.mini.on { background: #2c4a6e; border-color: #3d6da0; color: #cfe4ff; }
+.mini.on:hover { background: #35578020; background: #355780; }

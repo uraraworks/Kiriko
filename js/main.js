@@ -7,6 +7,8 @@ import * as T from './telop.js';
 import { composeFrame, activeBlur, drawOverlaysAt, overlaysAt } from './compose.js';
 import { AudioLibrary, AudioPreview, mixInto } from './audio.js';
 import { History } from './history.js';
+import { ThumbCache, THUMB_W, THUMB_H } from './thumbs.js';
+import { WaveformCache, BINS_PER_SEC, bufferPeaks } from './waveform.js';
 import * as B from './boxes.js';
 import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageClip, drawImageClip, drawnRect } from './images.js';
 
@@ -41,12 +43,25 @@ const S = {
   focusArea: 'timeline',   // 'preview' ならカーソルキーで枠を動かす
   binTab: 'media',
   snapLine: null,          // タイムラインで吸着中の位置（秒）
+  showThumbs: true,
+  showWaves: true,
   inspTab: 'props',
   library: null,           // AudioLibrary（初回の音源読み込み時に作る）
   audioPreview: null,
 };
 
 const $ = (id) => document.getElementById(id);
+
+// できたそばから描き直す。連続で来るのでフレームにまとめる
+let redrawQueued = false;
+const queueTimelineRedraw = () => {
+  if (redrawQueued) return;
+  redrawQueued = true;
+  requestAnimationFrame(() => { redrawQueued = false; renderTimeline(); });
+};
+const thumbs = new ThumbCache(queueTimelineRedraw);
+const waves = new WaveformCache(queueTimelineRedraw);
+const bgmPeaks = new Map(); // assetId -> Float32Array（SE / BGM 用。メモリ上なので即時）
 const video = $('video');
 
 // ---------------------------------------------------------------- ユーティリティ
@@ -1560,7 +1575,7 @@ $('scrubBar').addEventListener('pointerdown', (e) => {
 // ---------------------------------------------------------------- 描画：タイムライン
 
 const tlCanvas = $('tlCanvas');
-const RULER_H = 26, FX_H = 22, IMG_H = 30, TELOP_H = 30, TRACK_H = 56, AUD_H = 44;
+const RULER_H = 26, FX_H = 22, IMG_H = 30, TELOP_H = 30, TRACK_H = 64, AUD_H = 48;
 const Y_FX = RULER_H;
 const Y_IMG = Y_FX + FX_H;
 const Y_TELOP = Y_IMG + IMG_H;
@@ -1589,8 +1604,12 @@ function zoomFit() {
   renderTimeline();
 }
 
+let lastView = '';
 function renderTimeline() {
   const { w, h, dpr } = tlSize();
+  // 表示範囲が変わったら、まだ手を付けていない生成要求は捨てる（見えない所を作らない）
+  const view = `${S.scrollSec.toFixed(2)}:${S.pxPerSec.toFixed(2)}:${w}`;
+  if (view !== lastView) { lastView = view; thumbs.clearPending(); waves.clearPending(); }
   const ctx = tlCanvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#191c22';
@@ -1717,13 +1736,21 @@ function drawClip(ctx, x, y, w, h, clip, sel, kind) {
   ctx.strokeStyle = sel ? '#ffffffcc' : '#00000066'; ctx.lineWidth = sel ? 2 : 1; ctx.stroke();
   if (w > 40) {
     ctx.clip();
-    ctx.fillStyle = '#0e131bcc';
+    if (kind === 'video') drawFilmstrip(ctx, x, y, w, h, clip, src);
+    else drawClipWave(ctx, x, y, w, h, clip, src);
+
+    ctx.fillStyle = kind === 'video' ? '#0e131bee' : '#0e131bcc';
     ctx.font = '10px -apple-system, sans-serif'; ctx.textBaseline = 'top';
     const label = kind === 'video'
       ? `${src?.name ?? '?'}  ${tc(clip.in, false)}`
       : `${tc(P.clipDuration(clip), false)}`;
+    // サムネイルの上でも読めるよう、ラベルの背に軽く敷く
+    const tw = ctx.measureText(label).width;
+    ctx.save();
+    ctx.fillStyle = '#00000055';
+    ctx.fillRect(x + 2, y + 2, tw + 6, 13);
+    ctx.restore();
     ctx.fillText(label, x + 5, y + 4);
-    if (kind === 'audio') drawFakeWave(ctx, x, y, w, h);
   }
   ctx.restore();
 }
@@ -1760,6 +1787,27 @@ function drawAudioClip(ctx, x, y, w, h, ac, asset, sel) {
   ctx.strokeStyle = sel ? '#ffffffdd' : '#00000066'; ctx.lineWidth = sel ? 2 : 1; ctx.stroke();
   ctx.clip();
 
+  // 波形（AudioBuffer から。メモリ上なので即時に出る）
+  if (S.showWaves && S.library?.has(ac.assetId) && w > 6) {
+    let wf = bgmPeaks.get(ac.assetId);
+    if (!wf) { wf = bufferPeaks(S.library.get(ac.assetId)); bgmPeaks.set(ac.assetId, wf); }
+    const peaks = wf.peaks;
+    const mid = y + h / 2, amp = h * 0.42 * wf.scale;
+    const buf = S.library.get(ac.assetId);
+    const loopLen = Math.max(0.001, buf.duration - (ac.offset ?? 0));
+    ctx.strokeStyle = '#1a1436aa'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let px = 0; px < w; px++) {
+      let local = px / S.pxPerSec;
+      if (ac.loop) local = local % loopLen;
+      const b = Math.floor(((ac.offset ?? 0) + local) * BINS_PER_SEC);
+      const v = b >= 0 && b < peaks.length ? peaks[b] : 0;
+      const a = v * amp;
+      ctx.moveTo(x + px + 0.5, mid - a); ctx.lineTo(x + px + 0.5, mid + a);
+    }
+    ctx.stroke();
+  }
+
   // フェードを台形で見せる
   if ((ac.fadeIn > 0 || ac.fadeOut > 0) && w > 8) {
     ctx.fillStyle = '#00000055';
@@ -1789,13 +1837,50 @@ function drawTelopBlock(ctx, x, y, w, h, tel, sel) {
   ctx.restore();
 }
 
-function drawFakeWave(ctx, x, y, w, h) {
-  // Phase 0 では波形解析まではしない。存在感だけ出しておく。
-  ctx.strokeStyle = '#0e131b55'; ctx.beginPath();
-  const mid = y + h * 0.62;
-  for (let i = 0; i < w; i += 3) {
-    const a = (Math.sin(i * 0.35) * 0.5 + Math.sin(i * 0.11) * 0.5) * h * 0.16;
-    ctx.moveTo(x + i, mid - a); ctx.lineTo(x + i, mid + a);
+/** クリップの上にサムネイルを並べる。無い分は生成を予約して次の描画で出る */
+function drawFilmstrip(ctx, x, y, w, h, clip, src) {
+  if (!S.showThumbs || !src) return;
+  const th = Math.min(h - 2, THUMB_H);
+  const tw = Math.round((th * THUMB_W) / THUMB_H);
+  const step = tw + 1;
+  // 画面内に入っている部分だけ要求する
+  const vw = $('tlWrap').clientWidth || 800;
+  const from = Math.max(0, Math.floor((-x) / step));
+  const to = Math.min(Math.ceil(w / step), Math.ceil((vw - x) / step));
+  for (let i = from; i < to; i++) {
+    const px = x + i * step;
+    const sec = clip.in + (i * step) / S.pxPerSec;
+    if (sec >= clip.out) break;
+    const bmp = thumbs.get(src, sec);
+    if (bmp) ctx.drawImage(bmp, px, y + (h - th) / 2, tw, th);
+  }
+}
+
+/** クリップの音声波形。素材から実際にデコードしたピークを使う */
+function drawClipWave(ctx, x, y, w, h, clip, src) {
+  const mid = y + h / 2;
+  if (!S.showWaves || !src?.audio) {
+    ctx.strokeStyle = '#0e131b55';
+    ctx.beginPath(); ctx.moveTo(x, mid); ctx.lineTo(x + w, mid); ctx.stroke();
+    return;
+  }
+  const t0 = clip.in, t1 = clip.out;
+  waves.ensure(src, t0, t1);
+  const peaks = waves.peaksFor(src);
+  const amp = h * 0.44 * waves.scaleFor(src);
+  ctx.strokeStyle = '#0e2a1daa';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let px = 0; px < w; px++) {
+    const sec = t0 + px / S.pxPerSec;
+    if (sec >= t1) break;
+    // 1px に複数ビンが入る場合は最大値を採る
+    const b0 = Math.floor(sec * BINS_PER_SEC);
+    const b1 = Math.max(b0 + 1, Math.floor((t0 + (px + 1) / S.pxPerSec) * BINS_PER_SEC));
+    let v = 0;
+    for (let b = b0; b < b1 && b < peaks.length; b++) if (peaks[b] > v) v = peaks[b];
+    const a = v * amp;
+    ctx.moveTo(x + px + 0.5, mid - a); ctx.lineTo(x + px + 0.5, mid + a);
   }
   ctx.stroke();
 }
@@ -2344,6 +2429,18 @@ function zoomBy(f) {
 $('btnZoomIn').onclick = () => zoomBy(1.5);
 $('btnZoomOut').onclick = () => zoomBy(1 / 1.5);
 $('btnZoomFit').onclick = zoomFit;
+$('btnThumbs').onclick = () => {
+  S.showThumbs = !S.showThumbs;
+  thumbs.setEnabled(S.showThumbs);
+  $('btnThumbs').classList.toggle('on', S.showThumbs);
+  renderTimeline();
+};
+$('btnWaves').onclick = () => {
+  S.showWaves = !S.showWaves;
+  waves.setEnabled(S.showWaves);
+  $('btnWaves').classList.toggle('on', S.showWaves);
+  renderTimeline();
+};
 $('btnZoneIn').onclick = () => { setMode('program'); zoneIn(); };
 $('btnZoneOut').onclick = () => { setMode('program'); zoneOut(); };
 $('btnExtract').onclick = extractZone;
