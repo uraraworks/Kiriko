@@ -121,6 +121,7 @@
       <div class="panel-head tabs">
         <button class="tab bintab active" data-bin="media">メディア</button>
         <button class="tab bintab" data-bin="fx">エフェクト</button>
+        <button class="tab bintab" data-bin="lib">テロップ</button>
       </div>
 
       <div id="binMedia" class="bin-pane">
@@ -136,6 +137,13 @@
 
       <div id="binFx" class="bin-pane hidden">
         <div id="fxList" class="bin-list"></div>
+      </div>
+
+      <div id="binLib" class="bin-pane hidden">
+        <div class="bin-actions">
+          <button class="mini" id="libRefresh" title="一覧を読み直す"><svg class="ic"><use href="#i-redo"/></svg><span>更新</span></button>
+        </div>
+        <div id="libList" class="bin-list"></div>
       </div>
 
       <div class="panel-head sub">素材情報</div>
@@ -270,15 +278,7 @@
       </span>
     </div>
     <div class="tl-body">
-      <div class="tl-heads">
-        <div class="tl-head ruler-head"></div>
-        <div class="tl-head fx">FX</div>
-        <div class="tl-head img">IM</div>
-        <div class="tl-head telop">T1</div>
-        <div class="tl-head">V1</div>
-        <div class="tl-head">A1</div>
-        <div class="tl-head aud2">A2</div>
-      </div>
+      <div class="tl-heads" id="tlHeads"></div>
       <div class="tl-canvas-wrap" id="tlWrap">
         <div class="tl-spacer" id="tlSpacer"><canvas id="tlCanvas"></canvas></div>
       </div>
@@ -355,7 +355,7 @@
 </div>
 
 <input type="file" id="fileInput" accept="video/mp4,video/*" multiple hidden>
-<input type="file" id="projInput" accept="application/json,.json" hidden>
+<input type="file" id="projInput" accept=".kiriko,application/json,.json" hidden>
 <input type="file" id="fontInput" accept=".ttf,.otf,.woff,.woff2,.ttc" multiple hidden>
 <input type="file" id="audioInput" accept="audio/*,.mp3,.wav,.m4a,.ogg" multiple hidden>
 <input type="file" id="imageInput" accept="image/*,.png,.jpg,.jpeg,.webp" multiple hidden>

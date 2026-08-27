@@ -40,34 +40,70 @@ export const SYSTEM_FONTS = [
   { css: 'Klee', label: 'クレー（手書き風）' },
 ];
 
+/** 行 1 本を作る */
+export function createRow(text = 'テロップ', style = {}) {
+  const { box, vAlign, wrap, ...rowStyle } = { ...DEFAULT_STYLE, ...style };
+  return { id: `row_${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`, text, ...rowStyle };
+}
+
+/**
+ * テロップ 1 個。
+ * 背景画像と複数行をひとまとめに持つ「セット」で、行ごとに書式を変えられる。
+ * （Keynote で 1 枚の PNG に焼いていたものを、そのまま構造として持てるようにしたもの）
+ */
 export function createTelop(t0, t1, style = {}, text = 'テロップ') {
-  const { box, ...rest } = { ...DEFAULT_STYLE, ...style };
+  const s = { ...DEFAULT_STYLE, ...style };
   return {
     id: `tel_${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`,
-    text,
     start: t0,
     end: t1,
-    box: { ...(box ?? DEFAULT_BOX) },
-    ...rest,
+    box: { ...(s.box ?? DEFAULT_BOX) },
+    vAlign: s.vAlign ?? 'bottom',
+    wrap: s.wrap ?? true,
+    rowGap: 0,
+    bgAssetId: null,      // 背景画像（枠に合わせて敷く）
+    bgOpacity: 1,
+    bgFit: 'contain',
+    // アイコン画像（ロゴなど）。文字の左右上下に添える
+    icon: { assetId: null, side: 'left', size: 120, gap: 20, valign: 'middle', trim: true },
+    rows: [createRow(text, s)],
   };
 }
 
-/** 旧形式（x, y, align）で保存されたテロップを枠形式に読み替える */
+/** 旧形式（1 行だけ・x,y 指定）を現在の形に読み替える */
 export function migrateTelop(t) {
-  if (t.box) {
-    if (!t.hAlign) t.hAlign = t.align ?? 'center';
-    if (!t.vAlign) t.vAlign = 'middle';
-    return t;
+  let out = t;
+  if (!out.box) {
+    const size = out.size ?? DEFAULT_STYLE.size;
+    const w = 1600, h = Math.max(size * 1.6, 160);
+    const cx = out.x ?? 960, cy = out.y ?? 940;
+    const align = out.align ?? 'center';
+    const x = align === 'left' ? cx : align === 'right' ? cx - w : cx - w / 2;
+    out = { ...out, box: { x, y: cy - h / 2, w, h }, hAlign: align, vAlign: 'middle' };
   }
-  const size = t.size ?? DEFAULT_STYLE.size;
-  const w = 1600, h = Math.max(size * 1.6, 160);
-  const cx = t.x ?? 960, cy = t.y ?? 940;
-  const align = t.align ?? 'center';
-  const x = align === 'left' ? cx : align === 'right' ? cx - w : cx - w / 2;
-  return { ...t, box: { x, y: cy - h / 2, w, h }, hAlign: align, vAlign: 'middle', wrap: t.wrap ?? true };
+  if (!out.rows) {
+    const { id, start, end, box, z, vAlign, wrap, text, ...style } = out;
+    out = {
+      id, start, end, box, z,
+      vAlign: vAlign ?? 'middle',
+      wrap: wrap ?? true,
+      rowGap: 0,
+      bgAssetId: null, bgOpacity: 1, bgFit: 'contain',
+      rows: [createRow(text ?? '', style)],
+    };
+  }
+  out.rows = out.rows.map((r) => ({ ...DEFAULT_STYLE, ...r }));
+  out.icon = { assetId: null, side: 'left', size: 120, gap: 20, valign: 'middle', trim: true, ...(out.icon ?? {}) };
+  out.bgOpacity = out.bgOpacity ?? 1;
+  out.bgFit = out.bgFit ?? 'contain';
+  out.rowGap = out.rowGap ?? 0;
+  return out;
 }
 
-/** 既定プリセット（スタイル＋位置をセットで持つのが本企画の要件） */
+/**
+ * 既定プリセット。スタイル＋枠＋縦の寄せをセットで持つ（本企画の要件）。
+ * 適用すると「編集中の行の書式」と「セットの枠・縦寄せ」が入る。
+ */
 export const DEFAULT_PRESETS = [
   {
     name: '実況（下段中央）',
@@ -98,27 +134,23 @@ export const DEFAULT_PRESETS = [
 
 // ---------------------------------------------------------------- 描画
 
-function fontSpec(t) {
-  const fam = /^[\w-]+$/.test(t.font) ? t.font : `"${t.font}"`;
-  return `${t.bold ? 'bold ' : ''}${t.size}px ${fam}, "Hiragino Maru Gothic ProN", sans-serif`;
+function fontSpec(r) {
+  const fam = /^[\w-]+$/.test(r.font) ? r.font : `"${r.font}"`;
+  return `${r.bold ? 'bold ' : ''}${r.size}px ${fam}, "Hiragino Maru Gothic ProN", sans-serif`;
 }
 
-/**
- * 枠幅で折り返した行を返す。
- * 日本語は単語境界が無いので基本は 1 文字ずつ詰め、空白があればそこを優先して折る。
- */
-export function layoutLines(ctx, t) {
-  ctx.font = fontSpec(t);
-  const raw = String(t.text ?? '').split('\n');
-  if (!t.wrap) return raw;
-  const maxW = Math.max(20, t.box.w);
+/** 枠幅で折り返した行を返す。日本語は単語境界が無いので基本は 1 文字ずつ詰める */
+export function wrapRow(ctx, row, maxW, wrap = true) {
+  ctx.font = fontSpec(row);
+  const raw = String(row.text ?? '').split('\n');
+  if (!wrap) return raw;
   const out = [];
   for (const para of raw) {
     if (!para) { out.push(''); continue; }
     let line = '';
     for (const ch of para) {
       const next = line + ch;
-      if (line && ctx.measureText(next).width > maxW) {
+      if (line && ctx.measureText(next).width > Math.max(20, maxW)) {
         const sp = line.lastIndexOf(' ');
         if (sp > 0 && line.length - sp < 12) { out.push(line.slice(0, sp)); line = line.slice(sp + 1) + ch; }
         else { out.push(line); line = ch; }
@@ -131,81 +163,177 @@ export function layoutLines(ctx, t) {
   return out;
 }
 
-/** 各行の描画位置（textAlign / textBaseline は middle 基準） */
-function layout(ctx, t) {
-  const lines = layoutLines(ctx, t);
-  const lh = t.size * (t.lineHeight ?? 1.18);
-  const blockH = (lines.length - 1) * lh + t.size;
-  const b = t.box;
-
-  let firstY;
-  if (t.vAlign === 'top') firstY = b.y + t.size / 2;
-  else if (t.vAlign === 'bottom') firstY = b.y + b.h - blockH + t.size / 2;
-  else firstY = b.y + b.h / 2 - (lines.length - 1) * lh / 2;
-
-  const x = t.hAlign === 'left' ? b.x : t.hAlign === 'right' ? b.x + b.w : b.x + b.w / 2;
-  return { lines, lh, firstY, x, blockH };
+/** アイコンとして描く元の範囲。既定では透明な余白を切り詰める */
+export function iconSourceRect(t, imageLib) {
+  const bmp = imageLib?.get(t.icon?.assetId);
+  if (!bmp) return null;
+  if (t.icon.trim === false) return { x: 0, y: 0, w: bmp.width, h: bmp.height };
+  return imageLib.content?.(t.icon.assetId) ?? { x: 0, y: 0, w: bmp.width, h: bmp.height };
 }
 
-/** テロップ 1 個を描く */
-export function drawTelop(ctx, t) {
-  if (!t.box) return;
+/** アイコンの大きさ（比率は素材の中身に合わせる） */
+function iconSize(t, imageLib) {
+  const ic = t.icon;
+  if (!ic?.assetId) return null;
+  const src = iconSourceRect(t, imageLib);
+  const ar = src ? src.w / src.h : 1;
+  const h = Math.max(8, ic.size);
+  return { w: h * ar, h };
+}
+
+/**
+ * 全行をまとめて配置する。行ごとに書体・大きさ・横の寄せが違ってよい。
+ * アイコンがある場合は、その分だけ文字の領域を狭めて場所を空ける。
+ */
+export function layoutTelop(ctx, t, imageLib = null) {
+  const b = t.box;
+  const ic = t.icon;
+  const isz = iconSize(t, imageLib);
+
+  // 文字を流し込む領域（アイコンのぶんを除いたところ）
+  const tb = { ...b };
+  if (isz) {
+    if (ic.side === 'left') { tb.x += isz.w + ic.gap; tb.w -= isz.w + ic.gap; }
+    else if (ic.side === 'right') { tb.w -= isz.w + ic.gap; }
+    else if (ic.side === 'top') { tb.y += isz.h + ic.gap; tb.h -= isz.h + ic.gap; }
+    else if (ic.side === 'bottom') { tb.h -= isz.h + ic.gap; }
+    tb.w = Math.max(40, tb.w); tb.h = Math.max(20, tb.h);
+  }
+
+  const rows = (t.rows ?? []).map((row) => {
+    const lines = wrapRow(ctx, row, tb.w, t.wrap);
+    const lh = row.size * (row.lineHeight ?? 1.18);
+    return { row, lines, lh, height: (lines.length - 1) * lh + row.size };
+  });
+  const gap = t.rowGap ?? 0;
+  const totalH = rows.reduce((a, r) => a + r.height, 0) + gap * Math.max(0, rows.length - 1);
+
+  const top = t.vAlign === 'top' ? tb.y
+    : t.vAlign === 'bottom' ? tb.y + tb.h - totalH
+    : tb.y + (tb.h - totalH) / 2;
+
+  let y = top;
+  for (const r of rows) {
+    r.firstY = y + r.row.size / 2;
+    r.x = r.row.hAlign === 'left' ? tb.x : r.row.hAlign === 'right' ? tb.x + tb.w : tb.x + tb.w / 2;
+    y += r.height + gap;
+  }
+
+  // アイコンは文字のかたまりに揃える（左右に置いた時に浮かないように）
+  let icon = null;
+  if (isz) {
+    let ix, iy;
+    if (ic.side === 'left') ix = b.x;
+    else if (ic.side === 'right') ix = b.x + b.w - isz.w;
+    else ix = b.x + (b.w - isz.w) / 2;
+
+    if (ic.side === 'top') iy = b.y;
+    else if (ic.side === 'bottom') iy = b.y + b.h - isz.h;
+    else if (ic.valign === 'top') iy = top;
+    else if (ic.valign === 'bottom') iy = top + totalH - isz.h;
+    else iy = top + (totalH - isz.h) / 2;
+
+    icon = { x: ix, y: iy, w: isz.w, h: isz.h };
+  }
+  return { rows, totalH, textBox: tb, icon };
+}
+
+function drawRowLine(ctx, row, text, x, y) {
+  if (!text) return;
+  const w = row.strokeWidth || 0;
+  if (row.shadow > 0) {
+    ctx.shadowColor = `rgba(0,0,0,${row.shadow})`;
+    ctx.shadowBlur = row.size * 0.14;
+    ctx.shadowOffsetY = row.size * 0.05;
+  }
+  // 外→内→塗り の順で重ねると YouTube 風の二重縁になる
+  if (w > 0 && (row.outerScale ?? 0) > 0) {
+    ctx.strokeStyle = row.outerStroke;
+    ctx.lineWidth = w * row.outerScale;
+    ctx.strokeText(text, x, y);
+  }
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  if (w > 0) {
+    ctx.strokeStyle = row.stroke;
+    ctx.lineWidth = w;
+    ctx.strokeText(text, x, y);
+  }
+  ctx.fillStyle = row.fill;
+  ctx.fillText(text, x, y);
+}
+
+/** 背景画像を枠に敷く */
+function drawTelopBg(ctx, t, imageLib) {
+  const bmp = t.bgAssetId && imageLib?.get(t.bgAssetId);
+  if (!bmp) return;
+  const b = t.box;
   ctx.save();
-  ctx.font = fontSpec(t);
-  const { lines, lh, firstY, x } = layout(ctx, t);
-  ctx.textAlign = t.hAlign || 'center';
+  ctx.globalAlpha = t.bgOpacity ?? 1;
+  if (t.bgFit === 'stretch') {
+    ctx.drawImage(bmp, b.x, b.y, b.w, b.h);
+  } else {
+    const s = Math.min(b.w / bmp.width, b.h / bmp.height);
+    const w = bmp.width * s, h = bmp.height * s;
+    ctx.drawImage(bmp, b.x + (b.w - w) / 2, b.y + (b.h - h) / 2, w, h);
+  }
+  ctx.restore();
+}
+
+/** テロップ 1 個（背景画像＋全行）を描く */
+export function drawTelop(ctx, t, imageLib = null) {
+  if (!t.box) return;
+  drawTelopBg(ctx, t, imageLib);
+  ctx.save();
   ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round';
   ctx.miterLimit = 2;
-
-  const w = t.strokeWidth || 0;
-  for (let i = 0; i < lines.length; i++) {
-    const y = firstY + i * lh;
-    if (!lines[i]) continue;
-
-    // 影は一番外側の縁にだけ乗せる
-    if (t.shadow > 0) {
-      ctx.shadowColor = `rgba(0,0,0,${t.shadow})`;
-      ctx.shadowBlur = t.size * 0.14;
-      ctx.shadowOffsetY = t.size * 0.05;
+  const { rows, icon } = layoutTelop(ctx, t, imageLib);
+  if (icon) {
+    const bmp = imageLib?.get(t.icon.assetId);
+    const src = iconSourceRect(t, imageLib);
+    if (bmp && src) ctx.drawImage(bmp, src.x, src.y, src.w, src.h, icon.x, icon.y, icon.w, icon.h);
+  }
+  for (const r of rows) {
+    ctx.font = fontSpec(r.row);
+    ctx.textAlign = r.row.hAlign || 'center';
+    for (let i = 0; i < r.lines.length; i++) {
+      drawRowLine(ctx, r.row, r.lines[i], r.x, r.firstY + i * r.lh);
     }
-    // 外→内→塗り の順で重ねると YouTube 風の二重縁になる
-    if (w > 0 && (t.outerScale ?? 0) > 0) {
-      ctx.strokeStyle = t.outerStroke;
-      ctx.lineWidth = w * t.outerScale;
-      ctx.strokeText(lines[i], x, y);
-    }
-    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-    if (w > 0) {
-      ctx.strokeStyle = t.stroke;
-      ctx.lineWidth = w;
-      ctx.strokeText(lines[i], x, y);
-    }
-    ctx.fillStyle = t.fill;
-    ctx.fillText(lines[i], x, y);
   }
   ctx.restore();
 }
 
-/** タイムライン時刻 t に出ているテロップをすべて描く */
-export function drawTelopsAt(ctx, telops, t) {
+export function drawTelopsAt(ctx, telops, t, imageLib = null) {
   for (const tel of telops) {
-    if (t >= tel.start && t < tel.end) drawTelop(ctx, tel);
+    if (t >= tel.start && t < tel.end) drawTelop(ctx, tel, imageLib);
   }
 }
 
-/** 実際に文字が占めている範囲（枠より狭いことがある。当たり判定の補助に使う） */
-export function textBounds(ctx, t) {
+/** 実際に中身が占めている範囲（枠より狭いことがある。当たり判定の補助に使う） */
+export function textBounds(ctx, t, imageLib = null) {
   ctx.save();
-  ctx.font = fontSpec(t);
-  const { lines, lh, firstY, blockH } = layout(ctx, t);
-  let maxW = 0;
-  for (const l of lines) maxW = Math.max(maxW, ctx.measureText(l).width);
+  const { rows, icon } = layoutTelop(ctx, t, imageLib);
+  let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+  for (const r of rows) {
+    ctx.font = fontSpec(r.row);
+    let maxW = 0;
+    for (const l of r.lines) maxW = Math.max(maxW, ctx.measureText(l).width);
+    const x = r.row.hAlign === 'left' ? r.x : r.row.hAlign === 'right' ? r.x - maxW : r.x - maxW / 2;
+    const pad = (r.row.strokeWidth || 0) * (r.row.outerScale || 1) * 0.5;
+    left = Math.min(left, x - pad);
+    right = Math.max(right, x + maxW + pad);
+    top = Math.min(top, r.firstY - r.row.size / 2 - pad);
+    bottom = Math.max(bottom, r.firstY + (r.lines.length - 1) * r.lh + r.row.size / 2 + pad);
+  }
+  if (icon) {
+    left = Math.min(left, icon.x); right = Math.max(right, icon.x + icon.w);
+    top = Math.min(top, icon.y); bottom = Math.max(bottom, icon.y + icon.h);
+  }
   ctx.restore();
-  const b = t.box;
-  const x = t.hAlign === 'left' ? b.x : t.hAlign === 'right' ? b.x + b.w - maxW : b.x + (b.w - maxW) / 2;
-  const pad = (t.strokeWidth || 0) * (t.outerScale || 1) * 0.5;
-  return { x: x - pad, y: firstY - t.size / 2 - pad, w: maxW + pad * 2, h: blockH + pad * 2, lh };
+  if (!Number.isFinite(left)) return { ...t.box };
+  // 背景画像がある時は枠そのものが当たり判定になる
+  if (t.bgAssetId) return { ...t.box };
+  return { x: left, y: top, w: right - left, h: bottom - top };
 }
 
 // ---------------------------------------------------------------- フォント

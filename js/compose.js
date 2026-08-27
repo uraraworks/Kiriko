@@ -65,6 +65,6 @@ export function overlaysAt(project, t) {
 export function drawOverlaysAt(ctx, project, t, imageLib) {
   for (const o of overlaysAt(project, t)) {
     if (o.kind === 'image') drawImageClip(ctx, o.item, imageLib);
-    else drawTelop(ctx, o.item);
+    else drawTelop(ctx, o.item, imageLib);
   }
 }
