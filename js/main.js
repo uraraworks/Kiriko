@@ -1971,25 +1971,22 @@ function renderInspector() {
 
 // ---------------------------------------------------------------- テロップ編集パネル
 
-function fontOptions(current) {
-  const groups = [
-    ['システム', T.SYSTEM_FONTS],
-    ['Web フォント', T.WEB_FONTS],
+/** 選べるフォントを 1 本のリストにする */
+function fontList() {
+  const out = [
+    ...T.SYSTEM_FONTS.map((f) => ({ ...f, group: 'システム' })),
+    ...T.WEB_FONTS.map((f) => ({ ...f, group: 'Web フォント' })),
+    ...S.userFonts.map((f) => ({ css: f, label: f, group: '追加したフォント' })),
+    ...(S.installedFonts ?? []).map((f) => ({ ...f, group: 'インストール済み' })),
   ];
-  if (S.userFonts.length) groups.push(['追加したフォント', S.userFonts.map((f) => ({ css: f, label: f }))]);
-  if (S.installedFonts) groups.push(['インストール済み', S.installedFonts.map((f) => ({ css: f, label: f }))]);
-  let html = '';
-  for (const [label, list] of groups) {
-    html += `<optgroup label="${esc(label)}">`;
-    for (const f of list) {
-      html += `<option value="${esc(f.css)}"${f.css === current ? ' selected' : ''}>${esc(f.label)}</option>`;
-    }
-    html += '</optgroup>';
-  }
-  // 一覧に無いフォントが設定されている場合の受け皿
-  const all = groups.flatMap(([, l]) => l.map((f) => f.css));
-  if (current && !all.includes(current)) html = `<option value="${esc(current)}" selected>${esc(current)}</option>` + html;
-  return html;
+  // 同じ書体が二重に出ないように
+  const seen = new Set();
+  return out.filter((f) => !seen.has(f.css) && seen.add(f.css));
+}
+
+/** 表示用の名前（日本語名があればそちら） */
+function fontLabel(css) {
+  return fontList().find((f) => f.css === css)?.label ?? css;
 }
 
 let telopFormId = null;
@@ -2091,7 +2088,9 @@ function renderTelopForm(force = false) {
       <button class="mini" id="telPresetSave" title="この行の書式と枠をプリセットとして保存">＋</button>
     </div>
 
-    <label>フォント<select id="telFont">${fontOptions(row.font)}</select></label>
+    <label>フォント
+      <button type="button" id="telFontBtn" class="font-btn" title="押すと一覧から選べます"
+        style="font-family:'${esc(row.font)}',sans-serif">${esc(fontLabel(row.font))}</button></label>
     <div class="font-actions">
       <button class="mini" id="telFontFile">.ttf を追加</button>
       <button class="mini" id="telFontLocal">PC のフォント一覧</button>
@@ -2216,7 +2215,6 @@ function renderTelopForm(force = false) {
     commit('テロップの文字を編集', `telText:${tel.id}:${S.telopRow}`);
     row.text = e.target.value; live();
   });
-  bind('telFont', (v) => { row.font = v; S.telopStyle.font = v; });
   bind('telSize', (v) => { row.size = Math.max(8, +v); S.telopStyle.size = row.size; });
   bind('telSW', (v) => { row.strokeWidth = Math.max(0, +v); S.telopStyle.strokeWidth = row.strokeWidth; });
   bind('telFill', (v) => { row.fill = v; S.telopStyle.fill = v; });
@@ -2328,13 +2326,77 @@ function renderTelopForm(force = false) {
     status(`プリセット「${name}」を保存しました`);
   };
   $('telFontFile').onclick = () => $('fontInput').click();
-  $('telFontLocal').onclick = async () => {
-    try {
-      S.installedFonts = await T.queryInstalledFonts();
-      renderTelopForm(true);
-      status(`インストール済みフォント ${S.installedFonts.length} 件を読み込みました`);
-    } catch (e) { status(e.message, true); }
-  };
+  $('telFontLocal').onclick = async () => { await loadInstalledFonts(); renderTelopForm(true); };
+  $('telFontBtn').onclick = () => openFontPicker(row.font, (css) => {
+    commit('フォントを変更');
+    row.font = css;
+    S.telopStyle.font = css;      // 次に追加するテロップにも引き継ぐ
+    renderTelopForm(true); live();
+  });
+}
+
+// ---------------------------------------------------------------- フォント選び
+//
+// <select> の <option> に書体を指定しても、macOS の Chrome は
+// ネイティブのポップアップで描くため反映されないことがある。
+// 「どんな字か見て選ぶ」を確実にしたいので、一覧は自前で描く。
+
+const fontPick = { onPick: null };
+
+function openFontPicker(current, onPick) {
+  fontPick.onPick = onPick;
+  fontPick.current = current;
+  $('fontPick').classList.remove('hidden');
+  const q = $('fontSearch');
+  q.value = '';
+  renderFontList();
+  q.focus();
+}
+
+function closeFontPicker() {
+  $('fontPick').classList.add('hidden');
+  fontPick.onPick = null;
+}
+
+function renderFontList() {
+  const list = $('fontPickList');
+  const q = $('fontSearch').value.trim().toLowerCase();
+  const items = fontList().filter((f) =>
+    !q || f.label.toLowerCase().includes(q) || f.css.toLowerCase().includes(q));
+
+  if (!items.length) {
+    list.innerHTML = '<div class="empty">見つかりません。［PC のフォント一覧を読み込む］も試してください</div>';
+    return;
+  }
+  let html = '', group = null;
+  for (const f of items) {
+    if (f.group !== group) { group = f.group; html += `<div class="font-group">${esc(group)}</div>`; }
+    const sub = f.css !== f.label ? `<span class="font-en">${esc(f.css)}</span>` : '';
+    html += `<button type="button" class="font-row${f.css === fontPick.current ? ' on' : ''}" data-css="${esc(f.css)}">`
+      + `<span class="font-name" style="font-family:'${esc(f.css)}',sans-serif">${esc(f.label)}</span>`
+      + `<span class="font-sample" style="font-family:'${esc(f.css)}',sans-serif">あア亜 Ag 123</span>`
+      + sub + '</button>';
+  }
+  list.innerHTML = html;
+  for (const b of list.querySelectorAll('.font-row')) {
+    b.onclick = () => { fontPick.onPick?.(b.dataset.css); closeFontPicker(); };
+  }
+}
+
+$('fontPickClose').onclick = closeFontPicker;
+$('fontSearch').addEventListener('input', renderFontList);
+$('fontPickLocal').onclick = () => loadInstalledFonts().then(renderFontList);
+$('fontPick').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFontPicker(); });
+
+/** PC のフォントを読み込む（ボタンの直後でないと許可が取れない） */
+async function loadInstalledFonts() {
+  try {
+    status('フォントを調べています…');
+    S.installedFonts = await T.queryInstalledFonts();
+    const ja = S.installedFonts.filter((f) => f.label !== f.en).length;
+    status(`インストール済みフォント ${S.installedFonts.length} 件`
+      + (ja ? `（うち ${ja} 件は日本語名で表示）` : ''));
+  } catch (e) { status(e.message, true); }
 }
 
 /** ドラッグ中など、フォームを作り直さずに枠の数値だけ追従させる */

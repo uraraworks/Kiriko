@@ -130,6 +130,83 @@ describe('ブラウザ結合', { skip }, () => {
     await ev(`document.getElementById('telopDialogClose').click()`);
   });
 
+  test('フォントは一覧から選べて、名前がその書体で出る', async () => {
+    const r = await ev(`(async () => {
+      bme.state.selectedTelopId = bme.project.telops[0].id;
+      document.getElementById('btnAddTelop').click();
+      await new Promise((r) => setTimeout(r, 300));
+      document.getElementById('telFontBtn').click();
+      await new Promise((r) => setTimeout(r, 200));
+      const rows = [...document.querySelectorAll('#fontPickList .font-row')];
+      const styled = rows.every((b) => {
+        const f = getComputedStyle(b.querySelector('.font-name')).fontFamily;
+        return f.includes(b.dataset.css);
+      });
+      // 絞り込み
+      const q = document.getElementById('fontSearch');
+      q.value = 'ヒラギノ';
+      q.dispatchEvent(new Event('input', { bubbles: true }));
+      const filtered = document.querySelectorAll('#fontPickList .font-row').length;
+      q.value = '';
+      q.dispatchEvent(new Event('input', { bubbles: true }));
+
+      // 選ぶ
+      const target = [...document.querySelectorAll('#fontPickList .font-row')]
+        .find((b) => b.dataset.css !== bme.project.telops.at(-1).rows[0].font);
+      const want = target.dataset.css;
+      target.click();
+      await new Promise((r) => setTimeout(r, 200));
+      return { rows: rows.length, styled, filtered, want,
+               got: bme.project.telops.at(-1).rows[0].font,
+               closed: document.getElementById('fontPick').classList.contains('hidden') };
+    })()`);
+    assert.ok(r.rows >= 5, `一覧が少なすぎる: ${r.rows}`);
+    assert.ok(r.styled, '名前がその書体で描かれていない');
+    assert.ok(r.filtered > 0 && r.filtered < r.rows, `絞り込みが効いていない: ${r.filtered}/${r.rows}`);
+    assert.equal(r.got, r.want, '選んだ書体が反映されない');
+    assert.ok(r.closed, '選んだのに閉じない');
+    await ev(`document.getElementById('telopDialogClose').click()`);
+  });
+
+  test('テロップの背景色と内縁の切り替えが効く', async () => {
+    const r = await ev(`(async () => {
+      const t = bme.project.telops.at(-1);
+      bme.state.selectedTelopId = t.id;
+      document.getElementById('btnAddTelop').click();
+      await new Promise((r) => setTimeout(r, 300));
+      const tel = bme.project.telops.at(-1);
+      const before = { bg: tel.bgFillOn, stroke: tel.rows[0].strokeOn };
+
+      const bg = document.getElementById('telBgFillOn');
+      bg.checked = true; bg.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 200));
+      const picker = !!document.getElementById('telBgFill');
+
+      const st = document.getElementById('telStrokeOn');
+      st.checked = false; st.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 200));
+      const strokeColorHidden = !document.getElementById('telStroke');
+
+      // 色の見本を押すと色が入る
+      const chip = document.querySelector('#telopForm .chips[data-for=telFill] .chip[data-color="#ff5a5a"]');
+      chip.click();
+      await new Promise((r) => setTimeout(r, 200));
+
+      return { before, picker, strokeColorHidden,
+               bgOn: tel.bgFillOn ?? bme.project.telops.at(-1).bgFillOn,
+               strokeOn: bme.project.telops.at(-1).rows[0].strokeOn,
+               fill: bme.project.telops.at(-1).rows[0].fill };
+    })()`);
+    assert.equal(r.before.bg, false, '背景色は既定で無し');
+    assert.equal(r.before.stroke, true, '内縁は既定で有り');
+    assert.ok(r.picker, '背景色を ON にしても色を選べない');
+    assert.equal(r.bgOn, true);
+    assert.equal(r.strokeOn, false);
+    assert.ok(r.strokeColorHidden, '内縁 OFF なのに色欄が残っている');
+    assert.equal(r.fill, '#ff5a5a', '色の見本が効かない');
+    await ev(`document.getElementById('telopDialogClose').click()`);
+  });
+
   test('画像と効果音を置ける', async () => {
     await dropFiles(page, [F.image, F.audio]);
     await page.waitForFunction('window.bme.project.audioAssets.length > 0 && window.bme.project.imageAssets.length > 0',

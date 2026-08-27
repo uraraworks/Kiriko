@@ -156,6 +156,17 @@ Keynote → PNG 書き出しの運用を置き換えるのが目的。1 文字�
 
 プレビューと書き出しは `js/telop.js` の **同じ描画関数**を通るので、見たままが焼き込まれる。
 
+**フォント一覧は自前で描く**（`openFontPicker`）。`<select>` の `<option>` に
+`font-family` を指定しても、macOS の Chrome はネイティブのポップアップで描くため
+反映されないことがある。「どんな字か見て選ぶ」を確実にしたいので独自にした。
+
+**日本語のフォント名**は、Local Font Access API が英語名しか返さないため、
+フォントファイルの `name` テーブルから自分で読む（`js/fontname.js`）。
+ファイル全部は読まない — ヘッダを 16 バイト読んでテーブル一覧の位置を求め、
+`name` テーブルだけ `Blob.slice()` で切り出す（1 フォント数 MB × 数百個あるため）。
+nameID 16（推奨ファミリ名）を 1 より優先し、Windows(3)/langID 0x0411 と
+Mac(1)/langID 11 の両方を見る。
+
 **字間**（`letterSpacing`）は行ごとの書式。canvas の `ctx.letterSpacing` を使う。
 `measureText` は**最後の文字のうしろにも字間を足した値**を返すので、
 寄せる時はその分を引く（`inkWidth` / `alignShift`）。引かないと、

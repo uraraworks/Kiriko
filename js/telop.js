@@ -5,6 +5,8 @@
 // 座標は出力ピクセル空間（既定 1920×1080）。プレビュー側の canvas も
 // 同じ解像度をバッキングストアに持たせるので、見たまま書き出される。
 
+import * as FN from './fontname.js';
+
 export const DEFAULT_STYLE = {
   font: 'Hiragino Maru Gothic ProN',
   size: 96,
@@ -412,7 +414,12 @@ export async function loadFontFile(file) {
  *  - ユーザー操作の直後にしか呼べない。permissions.query() を先に await すると
  *    そのユーザー操作が失効して権限ダイアログが出なくなるので、必ず先に呼ぶ
  */
-export async function queryInstalledFonts() {
+/**
+ * インストール済みフォントの一覧。
+ * @param {(done:number,total:number)=>void} [onProgress]
+ * @returns {Promise<Array<{css:string,label:string,en:string}>>}
+ */
+export async function queryInstalledFonts(onProgress = null) {
   if (!('queryLocalFonts' in window)) {
     throw new Error('このブラウザは Local Font Access API 非対応です（Chrome / Edge をお使いください）');
   }
@@ -433,6 +440,38 @@ export async function queryInstalledFonts() {
   }
 
   const byFamily = new Map();
-  for (const f of fonts) if (!byFamily.has(f.family)) byFamily.set(f.family, f.fullName);
-  return [...byFamily.keys()].sort();
+  for (const f of fonts) if (!byFamily.has(f.family)) byFamily.set(f.family, f);
+  const families = [...byFamily.keys()].sort();
+
+  // 日本語名はフォント自身が持っている（API は英語名しか返さない）。
+  // ファイル全部は読まず、name テーブルだけ切り出して読む
+  const out = [];
+  for (const family of families) {
+    const ja = await japaneseName(byFamily.get(family)).catch(() => null);
+    out.push({ css: family, label: ja && ja !== family ? ja : family, en: family });
+  }
+  if (onProgress) onProgress(out.length, out.length);
+  return out;
+}
+
+/** フォントファイルから日本語のファミリ名を読む。取れなければ null */
+async function japaneseName(fontData) {
+  const blob = await fontData.blob();
+  const probe = await blob.slice(0, 16).arrayBuffer();
+  let plan = FN.headerPlan(probe);
+  if (!plan) return null;
+
+  let base = 0;
+  if (plan.start === -1) {                    // TrueType Collection
+    base = FN.firstFontOffset(probe);
+    const p2 = await blob.slice(base, base + 12).arrayBuffer();
+    plan = FN.headerPlan(p2);
+    if (!plan) return null;
+  }
+  const header = await blob.slice(base, base + plan.need).arrayBuffer();
+  const tbl = FN.findNameTable(header, base);
+  if (!tbl) return null;
+  const at = base + tbl.offset;
+  const table = await blob.slice(at, at + tbl.length).arrayBuffer();
+  return FN.readFamilyNames(table).ja;
 }
