@@ -277,7 +277,10 @@ async function importKdenlive(file) {
   try {
     const info = parseKdenlive(await file.text());
     S.pendingKdenlive = info;
-    status(`Kdenlive: ${info.cuts.length} カット / 素材 ${info.files.length} 本 を検出。該当の mp4 を読み込むと反映されます`);
+    const total = info.cuts.reduce((a, c) => a + (c.out - c.in), 0);
+    const tracks = info.trackCounts.length > 1 ? `（映像 ${info.trackCounts.length} トラックを統合）` : '';
+    status(`Kdenlive: ${info.cuts.length} カット${tracks} / 合計 ${tc(total, false)} を検出。`
+      + `該当の mp4（${info.files.map(basename).join(', ')}）を読み込むと反映されます`);
     bindPendingKdenlive();
   } catch (e) {
     status(`Kdenlive 読み込み失敗: ${e.message}`, true);
@@ -302,7 +305,11 @@ function bindPendingKdenlive() {
   }));
   S.pendingKdenlive = null;
   zoomFit();
-  status(`Kdenlive から ${S.project.clips.length} カットを取り込みました`);
+  const notes = [];
+  if (pend.overlaps) notes.push(`${pend.overlaps} 箇所のトランジションは詰めて並べました`);
+  if (pend.dropped) notes.push(`重ねて置かれていた ${pend.dropped} 件は取り込めていません`);
+  status(`Kdenlive から ${S.project.clips.length} カットを取り込みました`
+    + (notes.length ? `（${notes.join(' / ')}）` : ''));
   renderAll();
 }
 

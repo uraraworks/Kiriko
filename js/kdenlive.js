@@ -1,8 +1,18 @@
 // kdenlive.js
 // Kdenlive (MLT XML) プロジェクトから「カット区間リスト」を取り出す。
-// Phase 4 の移行機能の先出し。テロップ/エフェクトは読まず、in/out だけを拾う。
+// テロップやエフェクトは読まない。in/out だけを拾う。
+//
+// 気をつける所:
+//  - 1 つのトラックは tractor の中に playlist を 2 本持つ（同一トラック内の
+//    トランジション用）。片方だけ読むと取りこぼす
+//  - 映像トラックが複数あることがある。実素材では V1 の隙間を V2 のクリップが
+//    埋めている作りだった（重なりゼロ）。トラックを 1 本だけ選ぶと 12 クリップ落ちる。
+//    なので全部の映像トラックを位置順に統合する
+//  - <blank> は隙間。タイムライン位置の計算に要る（並び順がこれで決まる）
+//  - MLT の out は「最後のフレーム」なので、長さは out - in + 1 フレーム
+//  - <track hide="audio"> が映像トラック（音声を隠している側）
 
-/** "00:00:04.967" / "123" (フレーム) → 秒 */
+/** "00:00:04.967" / "123"（フレーム）→ 秒 */
 function toSeconds(v, fps) {
   if (v == null) return 0;
   const s = String(v).trim();
@@ -23,6 +33,7 @@ export function parseKdenlive(xmlText) {
   const fps = profile
     ? (Number(profile.getAttribute('frame_rate_num')) || 30) / (Number(profile.getAttribute('frame_rate_den')) || 1)
     : 30;
+  const frame = 1 / fps;
 
   // producer / chain の id → リソースパス
   const resources = new Map();
@@ -33,37 +44,62 @@ export function parseKdenlive(xmlText) {
     if (id && res) resources.set(id, res);
   }
 
-  const isVideoFile = (p) => /\.(mp4|mov|m4v|mkv|avi|webm)$/i.test(p || '');
-
-  // playlist ごとにエントリを集め、動画素材を一番多く含むものを V1 とみなす
-  const playlists = [];
+  // playlist の中身を、タイムライン位置つきで読む
+  const playlists = new Map();
   for (const pl of doc.querySelectorAll('playlist')) {
-    if (pl.getAttribute('id') === 'main_bin') continue;
-    const entries = [];
-    for (const e of pl.querySelectorAll('entry')) {
-      const res = resources.get(e.getAttribute('producer'));
-      if (!isVideoFile(res)) continue;
-      const inSec = toSeconds(e.getAttribute('in'), fps);
-      const outSec = toSeconds(e.getAttribute('out'), fps) + 1 / fps; // MLT の out は最終フレーム
-      if (outSec > inSec) entries.push({ resource: res, in: inSec, out: outSec });
+    const id = pl.getAttribute('id');
+    if (!id || id === 'main_bin') continue;
+    const items = [];
+    let pos = 0;
+    for (const c of pl.children) {
+      if (c.tagName === 'blank') {
+        pos += toSeconds(c.getAttribute('length'), fps);
+      } else if (c.tagName === 'entry') {
+        const from = toSeconds(c.getAttribute('in'), fps);
+        const to = toSeconds(c.getAttribute('out'), fps) + frame;
+        items.push({ pos, in: from, out: to, resource: resources.get(c.getAttribute('producer')) });
+        pos += to - from;
+      }
     }
-    if (entries.length) playlists.push({ id: pl.getAttribute('id'), entries });
+    playlists.set(id, items);
   }
-  if (!playlists.length) throw new Error('動画クリップが見つかりませんでした');
 
-  // Kdenlive は AV クリップを映像用/音声用のプレイリストに分けて持つ。
-  // tractor の <track hide="audio"> が映像トラックなので、そちらを優先する。
-  const videoTracks = new Set(
-    [...doc.querySelectorAll('tractor > track')]
-      .filter((t) => t.getAttribute('hide') === 'audio')
-      .map((t) => t.getAttribute('producer'))
-  );
-  playlists.sort((a, b) =>
-    (videoTracks.has(b.id) - videoTracks.has(a.id)) || (b.entries.length - a.entries.length));
-  const best = playlists[0];
+  // tractor から映像トラック（hide="audio" 側）を拾う
+  const isVideoFile = (p) => /\.(mp4|mov|m4v|mkv|avi|webm)$/i.test(p || '');
+  const tracks = [];
+  for (const tr of doc.querySelectorAll('tractor')) {
+    const tks = [...tr.querySelectorAll(':scope > track')];
+    if (!tks.length || !tks.every((t) => t.getAttribute('hide') === 'audio')) continue;
+    const items = tks
+      .flatMap((t) => (playlists.get(t.getAttribute('producer')) ?? []).map((c) => ({ ...c, track: tr.getAttribute('id') })))
+      .filter((c) => isVideoFile(c.resource) && c.out - c.in > 0.001);
+    if (items.length) tracks.push({ id: tr.getAttribute('id'), entries: items });
+  }
+  if (!tracks.length) throw new Error('動画クリップが見つかりませんでした');
 
-  const files = [...new Set(best.entries.map((e) => e.resource))];
-  return { fps, cuts: best.entries, files, trackId: best.id };
+  // 全トラックを位置順に統合する。重なっている物は上に載せる演出（PinP 等）なので、
+  // Kiriko の 1 本の V1 では表現できない。落とした数は呼び出し側に伝える。
+  const all = tracks.flatMap((t) => t.entries).sort((a, b) => a.pos - b.pos);
+  const cuts = [];
+  let overlaps = 0, dropped = 0;
+  let endOfLast = -Infinity;
+  for (const c of all) {
+    const len = c.out - c.in;
+    if (c.pos < endOfLast - 0.05) {
+      // 手前のクリップに大きくかぶっている
+      if (c.pos + len <= endOfLast + 0.05) { dropped++; continue; } // 完全に隠れている＝重ね物
+      overlaps++;                                                    // 端が重なるだけ＝トランジション
+    }
+    cuts.push(c);
+    endOfLast = c.pos + len;
+  }
+
+  const files = [...new Set(cuts.map((e) => e.resource))];
+  return {
+    fps, cuts, files, overlaps, dropped,
+    trackIds: tracks.map((t) => t.id),
+    trackCounts: tracks.map((t) => t.entries.length),
+  };
 }
 
 export function basename(path) {
