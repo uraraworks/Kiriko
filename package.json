@@ -11,7 +11,8 @@
     "version:gen": "node scripts/gen-version.mjs",
     "serve": "python3 -m http.server 8901",
     "capture-help": "node scripts/capture-help-shots.mjs",
-    "hooks:install": "node scripts/install-hooks.mjs"
+    "hooks:install": "node scripts/install-hooks.mjs",
+    "social": "node scripts/make-social-image.mjs"
   },
   "devDependencies": {
     "puppeteer-core": "^25.4.0"

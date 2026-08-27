@@ -13,6 +13,10 @@
 
 ![Kiriko の編集画面](public/help/03-timeline.png)
 
+<!-- 共有時に出る画像は public/social.png（npm run social で作り直せる）。
+     GitHub の Social preview は API から設定できないので、
+     Settings → General → Social preview から手で上げる -->
+
 ## できること
 
 カット／テロップ（背景画像・アイコン・複数行のセット）／画像／効果音・BGM／
@@ -143,6 +147,18 @@ MCP（Model Context Protocol）に対応しているので、対応した生成 
 npm test          # 単体＋静的検査（数秒。依存なし）
 npm run test:e2e  # 実 Chrome での結合テスト（1 分ほど。ffmpeg が要る）
 ```
+
+## 共有した時に出る画像
+
+`public/social.png`（1280×640）。作り直すには:
+
+```bash
+npm run social
+```
+
+各ページの `og:image` はこれを指している。**GitHub のリポジトリ側**（`github.com/uraraworks/Kiriko`
+を貼った時に出る画像）は API から設定できないので、
+Settings → General → Social preview から手で上げる。
 
 `npm run hooks:install` を一度実行すると、**push の前に `npm test` が走る**ようになる
 （急ぐときは `git push --no-verify`）。結合テストは GitHub Actions でも回している。
