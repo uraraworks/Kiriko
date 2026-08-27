@@ -394,6 +394,7 @@ claude mcp add kiriko -- node <このリポジトリ>/mcp/server.js
 | `kiriko_add_telops` | テロップを一括で追加（プリセット指定可）|
 | `kiriko_get_frame` | 指定時刻のフレームを画像で見る |
 | `kiriko_get_project` / `kiriko_set_project` | 編集内容の JSON を丸ごと |
+| `kiriko_transcribe` | セリフを書き起こしてマーカーにする（ローカルの whisper.cpp）|
 
 **想定する流れ**
 
@@ -404,6 +405,11 @@ claude mcp add kiriko -- node <このリポジトリ>/mcp/server.js
 ```
 
 「セリフの所に keep」でも「無音の所に cut」でも、Kiriko 側は同じ流れで処理できる。
+
+セリフの書き起こしは `whisper.cpp` をローカルで回す（音声はマシンから出ない）。
+**無音には whisper をかけない** — 何も言っていない所に文章を作ってしまうため、
+Kiriko の音量データで「音がある区間」だけを切り出して渡している。
+詳細は `mcp/README.md`。
 
 ## ブラウザ内の操作フック
 

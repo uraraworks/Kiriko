@@ -38,6 +38,28 @@ claude mcp add kiriko -- node /Users/haruurara/MyProject/_WebService/BrowserMovi
 | `kiriko_get_project` / `kiriko_set_project` | 編集内容の JSON を丸ごと |
 | `kiriko_notes` | 作業メモの読み書き |
 | `kiriko_seek` | 再生位置を動かす |
+| `kiriko_whisper_models` | 使える音声認識モデルの一覧 |
+| `kiriko_transcribe` | **セリフを書き起こしてマーカーにする** |
+
+## セリフの書き起こし
+
+ローカルの `whisper.cpp` を使う。音声はこのマシンから出ない。
+
+```bash
+brew install whisper-cpp ffmpeg
+# モデルを ~/whisper-models/ に置く（環境変数 KIRIKO_WHISPER_MODELS で場所を変えられる）
+```
+
+```
+このファイルのセリフを書き起こしてマーカーにして
+/Users/haruurara/Desktop/動画編集/2025.10.01_ウーバーイーツ/PXL_....mp4
+```
+
+**無音には whisper をかけない**設計にしてある。何も言っていない所に whisper は
+文章を作ってしまうため（幻聴）、Kiriko の音量データで「音がある区間」だけを切り出して渡す。
+処理時間も喋っていない分だけ減る。
+
+長い素材は時間が掛かる（M2 で実時間の 1〜1.5 倍）。まず `from` / `to` で短く試すとよい。
 
 ## 方針
 

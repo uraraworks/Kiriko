@@ -10,6 +10,8 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
 const { WebSocketServer } = require('ws');
+const path = require('path');
+const { findModels, pickModel, transcribePieces } = require('./transcribe.js');
 
 const PORT = Number(process.env.KIRIKO_PORT || 8910);
 
@@ -192,6 +194,104 @@ server.registerTool('kiriko_seek', {
   description: 'Kiriko の再生位置を動かす。人間に見てほしい場所へ合わせる時に。',
   inputSchema: { time: z.number().min(0) },
 }, async (a) => asText(await call('seek', a)));
+
+server.registerTool('kiriko_whisper_models', {
+  title: '使える音声認識モデルを見る',
+  description: 'このマシンに入っている whisper.cpp のモデル一覧。kiriko_transcribe の model に名前を渡せる。',
+  inputSchema: {},
+}, async () => asText({ models: findModels(), default: pickModel()?.name ?? null }));
+
+server.registerTool('kiriko_transcribe', {
+  title: 'セリフを書き起こしてマーカーにする',
+  description:
+    'ローカルの whisper.cpp でセリフを書き起こし、タイムライン時刻に直して返す。\n'
+    + '音声はこのマシンから出ない。\n\n'
+    + '**音がある区間だけを渡す**ので、無音での幻聴（何も言っていない所に文が出る）を避けられ、'
+    + '処理時間も喋っていない分だけ減る。\n\n'
+    + 'sourcePaths に素材の絶対パスを渡すこと（ブラウザ側はファイルの場所を知らないため）。\n'
+    + 'addMarkers: true にすると、そのまま「残す」区間マーカーとして立てる。\n\n'
+    + '**長い素材は時間が掛かる**（M2 で実時間の 1〜1.5 倍）。'
+    + 'まず from / to で短く試してから範囲を広げるとよい。',
+  inputSchema: {
+    sourcePaths: z.array(z.string()).describe('素材ファイルの絶対パス'),
+    from: z.number().min(0).optional().describe('タイムライン上の開始秒（既定 0）'),
+    to: z.number().min(0).optional().describe('タイムライン上の終了秒（既定は最後まで）'),
+    language: z.string().optional().describe("言語（既定 'ja'）"),
+    model: z.string().optional().describe('モデル名。kiriko_whisper_models で確認できる'),
+    threshold: z.number().min(0).max(1).optional().describe('音があるとみなす音量（既定 0.06）'),
+    minSec: z.number().min(0).optional().describe('これより短い静かさは区切りにしない（既定 0.6）'),
+    addMarkers: z.boolean().optional().describe('true なら結果をそのまま区間マーカーにする'),
+    markerKind: z.enum(['keep', 'cut', 'note']).optional().describe("マーカーの種別（既定 'keep'）"),
+  },
+}, async (a) => {
+  const model = pickModel(a.model);
+  if (!model) {
+    throw new Error(
+      'whisper.cpp のモデルが見つかりません。~/whisper-models に ggml-*.bin を置くか、'
+      + '環境変数 KIRIKO_WHISPER_MODELS で場所を指定してください'
+    );
+  }
+
+  // 1) 音がある区間を Kiriko に聞く（無音を渡さないため）
+  const sil = await call('find_silence', {
+    threshold: a.threshold ?? 0.06, minSec: a.minSec ?? 0.6, from: a.from ?? 0, to: a.to ?? null,
+  }, 300000);
+  if (!sil.sound.length) return asText({ model: model.name, segments: [], note: '音がある区間が見つかりませんでした' });
+
+  // 2) タイムラインの区間を「素材のどこか」に読み替える
+  const clips = await call('get_clips');
+  const byName = new Map(a.sourcePaths.map((p2) => [path.basename(p2), p2]));
+  const pieces = [];
+  for (const s of sil.sound) {
+    for (const c of clips) {
+      const cs = c.start, ce = c.start + c.duration;
+      const from = Math.max(s.start, cs), to = Math.min(s.end, ce);
+      if (to - from < 0.15) continue;
+      const file = byName.get(c.source);
+      if (!file) continue;  // パスをもらっていない素材は飛ばす
+      pieces.push({
+        path: file,
+        srcFrom: c.sourceIn + (from - cs),
+        srcTo: c.sourceIn + (to - cs),
+        tlFrom: from,
+      });
+    }
+  }
+  if (!pieces.length) {
+    throw new Error(
+      '素材のパスが合いません。sourcePaths にタイムラインで使っているファイルの絶対パスを渡してください'
+      + `（使用中: ${[...new Set(clips.map((c) => c.source))].join(', ')}）`
+    );
+  }
+
+  const total = pieces.reduce((acc, p2) => acc + (p2.srcTo - p2.srcFrom), 0);
+  process.stderr.write(`kiriko MCP: 書き起こし開始 ${pieces.length} 区間 / 合計 ${total.toFixed(1)} 秒（${model.name}）\n`);
+
+  const segments = await transcribePieces(pieces, {
+    model,
+    language: a.language ?? 'ja',
+    onProgress: (i, n, p2) => process.stderr.write(
+      `kiriko MCP: ${i}/${n} ${p2.srcFrom.toFixed(1)}–${p2.srcTo.toFixed(1)}s\n`
+    ),
+  });
+
+  let markers = null;
+  if (a.addMarkers && segments.length) {
+    markers = await call('add_markers', {
+      markers: segments.map((s) => ({
+        time: s.time, duration: s.duration, text: s.text, kind: a.markerKind ?? 'keep',
+      })),
+    });
+  }
+
+  return asText({
+    model: model.name,
+    transcribedSec: +total.toFixed(1),
+    segments,
+    markers,
+    note: '時刻はタイムライン基準。区間はあとから Kiriko 側で詰められる',
+  });
+});
 
 // ---------------------------------------------------------------- 起動
 
