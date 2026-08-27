@@ -48,7 +48,12 @@ export async function openApp(base) {
   const browser = await puppeteer.launch({
     executablePath: CHROME,
     headless: 'shell',
-    args: ['--no-first-run', '--hide-scrollbars', '--autoplay-policy=no-user-gesture-required'],
+    args: [
+      '--no-first-run', '--hide-scrollbars', '--autoplay-policy=no-user-gesture-required',
+      // CI の Linux ランナーは SUID サンドボックスが設定されておらず起動できない。
+      // 手元では既定のまま（サンドボックスを効かせたまま）にしておく
+      ...(process.env.CI ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
+    ],
   });
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 820, deviceScaleFactor: 1 });
