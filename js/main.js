@@ -4559,6 +4559,11 @@ const bridge = new Bridge(
   (state) => {
     const el = $('mcpDot');
     if (!el) return;
+    // 繋がった時だけ知らせる。待っている間はランプの色で足りるので、
+    // ステータス行を占領しない（サーバーを立てていない人には出っぱなしになる）
+    if (state === 'on' && el.classList.contains('mcp-dot') && !el.classList.contains('on')) {
+      status('MCP つながりました');
+    }
     el.className = `mcp-dot ${state}`;
     el.title = {
       on: 'MCP つながっています（クリックで切断）',
@@ -4581,10 +4586,8 @@ $('mcpDot').onclick = () => {
   const q = new URLSearchParams(location.search);
   const port = q.get('bridgePort');
   if (port) bridge.url = `ws://127.0.0.1:${port}`;
-  if (q.get('bridge') === '1' || localStorage.getItem('kiriko.autoBridge') === '1') {
-    bridge.connect();
-    status('MCP サーバーに接続します…');
-  }
+  // 自動接続はランプの色だけで知らせる（繋がったらステータスに出る）
+  if (q.get('bridge') === '1' || localStorage.getItem('kiriko.autoBridge') === '1') bridge.connect();
 })();
 
 // Phase 4（AI 連携 / MCP）に向けた操作フック。
