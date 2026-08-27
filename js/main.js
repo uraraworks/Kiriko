@@ -689,63 +689,105 @@ function deleteSelected() {
 // 数字だけ書き換える——という使い方を想定している。
 // 中身は JSON なので、丸ごと複製して時刻だけ差し替えればよい。
 
-/** 選択中のものをコピーする */
+/**
+ * コピーする。
+ *  - 範囲（I〜O）が選ばれていれば、そこに掛かっているものを**まとめて**コピーする
+ *    （テロップと効果音を組で持っていきたい時はこちら）
+ *  - 範囲が無ければ、選択中のもの 1 つ
+ * 位置は先頭からの相対で覚えるので、貼り付け先でも間隔が保たれる。
+ */
 function copySelected() {
+  const zone = zoneRange();
+  if (zone) return copyRange(zone[0], zone[1]);
+
   const pick = [
     ['telop', selectedTelop()],
     ['audio', selectedAudio()],
     ['image', selectedImage()],
     ['blur', selectedBlur()],
   ].find(([, v]) => v);
-  if (!pick) return status('コピーするものが選ばれていません', true);
+  if (!pick) return status('コピーするものが選ばれていません（範囲を選ぶとまとめてコピーできます）', true);
   const [kind, item] = pick;
-  S.clipboard = { kind, data: JSON.parse(JSON.stringify(item)) };
+  S.clipboard = { base: item.start, items: [{ kind, data: clone(item) }] };
   status(`${KIND_NAME[kind]}をコピーしました（⌘V で再生位置に貼り付け）`);
+}
+
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+/** 範囲に掛かっているものをまとめてコピーする */
+function copyRange(a, b) {
+  const P0 = S.project;
+  const hit = (s0, e0) => s0 < b && e0 > a;   // 少しでも重なっていれば対象
+  const items = [];
+  for (const x of P0.telops) if (hit(x.start, x.end)) items.push({ kind: 'telop', data: clone(x) });
+  for (const x of P0.images) if (hit(x.start, x.end)) items.push({ kind: 'image', data: clone(x) });
+  for (const x of P0.blurs) if (hit(x.start, x.end)) items.push({ kind: 'blur', data: clone(x) });
+  for (const x of P0.audioClips) if (hit(x.start, x.start + x.duration)) items.push({ kind: 'audio', data: clone(x) });
+  if (!items.length) return status('この範囲にはコピーするものがありません', true);
+
+  // いちばん早いものを基準にする。貼り付けた時、それが再生位置に来て、
+  // 残りは同じ間隔で並ぶ（範囲の取り方に結果が左右されない）
+  const base = Math.min(...items.map((it) => it.data.start));
+  S.clipboard = { base, items };
+  const n = {};
+  for (const it of items) n[it.kind] = (n[it.kind] ?? 0) + 1;
+  const list = Object.entries(n).map(([k, v]) => `${KIND_NAME[k]} ${v}`).join('・');
+  status(`範囲の ${list} をコピーしました（⌘V で再生位置に貼り付け）`);
 }
 
 const KIND_NAME = { telop: 'テロップ', audio: '音源', image: '画像', blur: 'ぼかし' };
 
-/** コピーしたものを再生位置に貼り付ける。長さ・書式はそのまま */
+/** コピーしたものを再生位置に貼り付ける。長さ・書式・間隔はそのまま */
 function pasteClipboard() {
   const cb = S.clipboard;
-  if (!cb) return status('コピーされていません', true);
+  if (!cb?.items?.length) return status('コピーされていません', true);
   const total = P.totalDuration(S.project);
   if (total <= 0) return status('先にクリップを作ってください', true);
 
   const t0 = Math.min(currentTimelineTime(), Math.max(0, total - 0.2));
-  const src = cb.data;
-  commit(`${KIND_NAME[cb.kind]}を貼り付け`);
+  const only = cb.items.length === 1 ? cb.items[0].kind : null;
+  commit(only ? `${KIND_NAME[only]}を貼り付け` : 'まとめて貼り付け');
 
-  if (cb.kind === 'audio') {
-    const ac = { ...src, id: P.newId('ac'), start: t0 };
-    // 同じ時間に既に何か置いてあるトラックは避ける
-    ac.track = 0;
-    while (S.project.audioClips.some((o) => (o.track ?? 0) === ac.track
-      && t0 < o.start + o.duration && t0 + ac.duration > o.start)) ac.track++;
-    S.project.audioClips.push(ac);
-    select('audio', ac.id);
-  } else {
-    const len = src.end - src.start;
-    const prefix = { telop: 'tel', image: 'img', blur: 'blur' }[cb.kind];
-    const item = { ...src, id: P.newId(prefix), start: t0, end: Math.min(total, t0 + len) };
-    if (cb.kind !== 'blur') item.z = zRange()[1] + 1;
-    if (cb.kind === 'telop') {
-      // 同じ時間に既にテロップがあるトラックは避ける
-      item.track = 0;
-      while (S.project.telops.some((o) =>
-        (o.track ?? 0) === item.track && item.start < o.end && item.end > o.start)) item.track++;
+  let last = null;
+  for (const { kind, data: src } of cb.items) {
+    const at = t0 + (src.start - cb.base);   // コピー元の間隔を保つ
+    if (at >= total) continue;               // 尺の外に出るものは置かない
+    if (kind === 'audio') {
+      const ac = { ...src, id: P.newId('ac'), start: Math.max(0, at) };
+      ac.track = 0;
+      while (S.project.audioClips.some((o) => (o.track ?? 0) === ac.track
+        && ac.start < o.start + o.duration && ac.start + ac.duration > o.start)) ac.track++;
+      S.project.audioClips.push(ac);
+      last = ['audio', ac.id];
+    } else {
+      const len = src.end - src.start;
+      const prefix = { telop: 'tel', image: 'img', blur: 'blur' }[kind];
+      const item = { ...src, id: P.newId(prefix), start: Math.max(0, at), end: Math.min(total, at + len) };
+      if (item.end - item.start < 0.02) continue;
+      if (kind !== 'blur') item.z = zRange()[1] + 1;
+      if (kind === 'telop') {
+        // 同じ時間に既にテロップがあるトラックは避ける
+        item.track = 0;
+        while (S.project.telops.some((o) =>
+          (o.track ?? 0) === item.track && item.start < o.end && item.end > o.start)) item.track++;
+      }
+      ({ telop: S.project.telops, image: S.project.images, blur: S.project.blurs })[kind].push(item);
+      last = [kind, item.id];
     }
-    const bucket = { telop: S.project.telops, image: S.project.images, blur: S.project.blurs }[cb.kind];
-    bucket.push(item);
-    select(cb.kind, item.id);
   }
+  if (!last) return status('貼り付けられませんでした（尺の外です）', true);
+
+  select(...last);
   setMode('program');
   seekProgram(t0, true);
   renderAll();
   renderTelopForm(true);
   renderFxForm(true);
-  if (cb.kind === 'telop') openTelopEditor();   // すぐ文字を直せるように
-  status(`${KIND_NAME[cb.kind]}を ${tc(t0, false)} に貼り付けました`);
+  // 1 つだけのテロップなら、すぐ文字を直せるように開く
+  if (only === 'telop') openTelopEditor();
+  status(only
+    ? `${KIND_NAME[only]}を ${tc(t0, false)} に貼り付けました`
+    : `${cb.items.length} 件を ${tc(t0, false)} から貼り付けました`);
 }
 
 // ---------------------------------------------------------------- テロップ
@@ -3558,9 +3600,12 @@ tlCanvas.addEventListener('contextmenu', (e) => {
   }
   if (zoneRange()) {
     items.push({ label: '範囲を切り取って詰める', key: 'Delete', run: () => extractZone() });
+    items.push({ label: '範囲のテロップ・音源などをまとめてコピー', key: '⌘C', run: () => copySelected() });
   }
   if (S.clipboard) {
-    items.push({ label: `ここに${KIND_NAME[S.clipboard.kind]}を貼り付け`, key: '⌘V',
+    items.push({ label: S.clipboard.items.length === 1
+      ? `ここに${KIND_NAME[S.clipboard.items[0].kind]}を貼り付け`
+      : `ここに ${S.clipboard.items.length} 件を貼り付け`, key: '⌘V',
       run: () => { seekProgram(xToSec(x), true); pasteClipboard(); } });
   }
   if (!hit && trackAt(y)?.kind === 'marker') {
