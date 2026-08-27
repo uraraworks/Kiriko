@@ -3319,9 +3319,15 @@ async function reloadMissingAssets(ask = false) {
   const want = missingAssets();
   if (!want.length) { renderMissingBar(); return { loaded: 0, missing: [] }; }
 
-  let loaded = 0;
+  let loaded = 0, fromLib = 0;
   for (const a of want) {
-    const file = await FS.resolveFile(a.name, ask);
+    let file = await FS.resolveFile(a.name, ask);
+    // 画像だけは、テロップライブラリに同じ名前で入っていればそこから戻せる
+    // （ライブラリから置いたテロップの画像は、元ファイルが手元に無いことがある）
+    if (!file && a.kind === 'image') {
+      const asset = await Lib.findAssetByName(a.name).catch(() => null);
+      if (asset) { file = await Lib.dataURLToFile(asset.dataUrl, asset.name); fromLib++; }
+    }
     if (!file) continue;
     status(`${a.name} を読み込んでいます…`);
     try {
@@ -3351,9 +3357,10 @@ async function reloadMissingAssets(ask = false) {
   renderAll();
   renderMissingBar();
   if (loaded) {
+    const via = fromLib ? `（うち ${fromLib} 件はテロップライブラリから）` : '';
     status(missing.length
-      ? `素材 ${loaded} 件を読み直しました。${missing.length} 件は見つかりませんでした`
-      : `素材 ${loaded} 件を読み直しました`);
+      ? `素材 ${loaded} 件を読み直しました${via}。${missing.length} 件は見つかりませんでした`
+      : `素材 ${loaded} 件を読み直しました${via}`);
   } else if (missing.length) {
     status(`${missing.length} 件の素材が見つかりません。［素材を探す］から選んでください`, true);
   }

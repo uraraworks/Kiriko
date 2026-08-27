@@ -96,3 +96,16 @@ export async function importAll(text, replace = false) {
   }
   return { added, skipped };
 }
+
+/**
+ * 名前でライブラリの中の画像を探す。
+ * ライブラリから置いたテロップの画像は、元ファイルが手元に無くてもここから戻せる。
+ * @returns {Promise<{name:string, dataUrl:string}|null>}
+ */
+export async function findAssetByName(name) {
+  for (const set of await listSets()) {
+    const hit = (set.assets ?? []).find((a) => a.name === name);
+    if (hit) return hit;
+  }
+  return null;
+}
