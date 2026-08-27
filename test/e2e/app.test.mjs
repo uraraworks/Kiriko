@@ -210,6 +210,33 @@ describe('ブラウザ結合', { skip }, () => {
     await ev(`document.getElementById('telopDialogClose').click()`);
   });
 
+  // 文字の位置の自由指定が、画像の設定より後ろに埋もれていて見つからなかった
+  test('テロップの設定は「文字 → 背景と画像」の順に並ぶ', async () => {
+    const r = await ev(`(async () => {
+      bme.state.selectedTelopId = bme.project.telops.at(-1).id;
+      document.getElementById('btnAddTelop').click();
+      await new Promise((r) => setTimeout(r, 300));
+      const form = document.getElementById('telopForm');
+      const at = (sel) => [...form.querySelectorAll('*')].indexOf(form.querySelector(sel));
+      const cb = document.getElementById('telTextFree');
+      cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 300));
+      return {
+        textFree: at('#telTextFree'),
+        bgFill: at('#telBgFillOn'),
+        bgImg: at('#telBg'),
+        hasXY: !!document.getElementById('telTextX') && !!document.getElementById('telTextY'),
+        headers: [...form.querySelectorAll('.panel-head')].map((e) => e.textContent.trim()),
+      };
+    })()`);
+    assert.ok(r.hasXY, '自由指定にしても位置の欄が出ない');
+    assert.ok(r.textFree > 0, '文字の位置の指定が見当たらない');
+    assert.ok(r.textFree < r.bgFill && r.textFree < r.bgImg,
+      '文字の設定が背景・画像より後ろに埋もれている');
+    assert.deepEqual(r.headers, ['文字の配置（セット全体）', '背景と画像']);
+    await ev(`document.getElementById('telopDialogClose').click()`);
+  });
+
   test('テロップの背景色と内縁の切り替えが効く', async () => {
     const r = await ev(`(async () => {
       const t = bme.project.telops.at(-1);

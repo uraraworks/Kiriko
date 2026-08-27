@@ -2126,8 +2126,21 @@ function renderTelopForm(force = false) {
       <div class="align-grid">${['left', 'center', 'right'].map((a) =>
         `<button data-h="${a}" class="${row.hAlign === a ? 'on' : ''}" title="${a}">${AL[a]}</button>`).join('')}</div></label>
 
-    <div class="panel-head sub inline">セット全体</div>
+    <div class="panel-head sub inline">文字の配置（セット全体）</div>
+    <label>縦の寄せ
+      <div class="align-grid">${['top', 'middle', 'bottom'].map((a) =>
+        `<button data-v="${a}" class="${tel.vAlign === a ? 'on' : ''}" title="${a}">${VA[a]}</button>`).join('')}</div></label>
+    <label class="chk"><input type="checkbox" id="telTextFree" ${tel.textFree ? 'checked' : ''}> 文字の位置を自由に決める</label>
+    ${tel.textFree ? `
+    <div class="grid2">
+      <label title="テロップの枠の左上からのずれ">右へ
+        <input class="num" type="number" id="telTextX" step="4" value="${Math.round(tel.textX ?? 0)}"></label>
+      <label title="テロップの枠の左上からのずれ">下へ
+        <input class="num" type="number" id="telTextY" step="4" value="${Math.round(tel.textY ?? 0)}"></label>
+    </div>` : ''}
+    <label class="chk"><input type="checkbox" id="telWrap" ${tel.wrap ? 'checked' : ''}> 枠の幅で折り返す</label>
 
+    <div class="panel-head sub inline">背景と画像</div>
     <label class="chk"><input type="checkbox" id="telBgFillOn" ${tel.bgFillOn ? 'checked' : ''}> 背景色をつける</label>
     ${tel.bgFillOn ? colorField('telBgFill', '背景色', tel.bgFill ?? '#000000') : ''}
 
@@ -2183,18 +2196,6 @@ function renderTelopForm(force = false) {
       `}
     </div>` : ''}
 
-    <label>縦の寄せ
-      <div class="align-grid">${['top', 'middle', 'bottom'].map((a) =>
-        `<button data-v="${a}" class="${tel.vAlign === a ? 'on' : ''}" title="${a}">${VA[a]}</button>`).join('')}</div></label>
-    <label class="chk"><input type="checkbox" id="telTextFree" ${tel.textFree ? 'checked' : ''}> 文字の位置を自由に決める</label>
-    ${tel.textFree ? `
-    <div class="grid2">
-      <label title="テロップの枠の左上からのずれ">右へ
-        <input class="num" type="number" id="telTextX" step="4" value="${Math.round(tel.textX ?? 0)}"></label>
-      <label title="テロップの枠の左上からのずれ">下へ
-        <input class="num" type="number" id="telTextY" step="4" value="${Math.round(tel.textY ?? 0)}"></label>
-    </div>` : ''}
-    <label class="chk"><input type="checkbox" id="telWrap" ${tel.wrap ? 'checked' : ''}> 枠の幅で折り返す</label>
 
     <div class="z-row">
       <button class="mini" id="telZFront" title="他の画像・テロップより手前に出す">最前面へ</button>

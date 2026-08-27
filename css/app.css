@@ -449,6 +449,8 @@ kbd {
 .row-tab.del { color: #e09a94; }
 .panel-head.sub.inline {
   margin: 4px -10px 0; border-top: 1px solid #14161a; border-bottom: none;
+  /* 設定が多いので、スクロールしても今どの区分を見ているか分かるようにする */
+  position: sticky; top: 0; z-index: 2;
 }
 .align-grid.four { grid-template-columns: repeat(4, 1fr); }
 
