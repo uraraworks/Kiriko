@@ -168,6 +168,48 @@ describe('ブラウザ結合', { skip }, () => {
     await ev(`document.getElementById('telopDialogClose').click()`);
   });
 
+  // 一覧（queryLocalFonts）に載らないのに CSS からは使えるフォントがあるため
+  test('一覧に無いフォントを名前で足せる／無い名前は断る', async () => {
+    const r = await ev(`(async () => {
+      bme.state.selectedTelopId = bme.project.telops.at(-1).id;
+      document.getElementById('btnAddTelop').click();
+      await new Promise((r) => setTimeout(r, 300));
+      document.getElementById('telFontBtn').click();
+      await new Promise((r) => setTimeout(r, 200));
+
+      const input = document.getElementById('fontManual');
+      const note = document.getElementById('fontManualNote');
+      // 存在しない名前は断る
+      input.value = '__ぜったいに無いフォント__';
+      document.getElementById('fontManualAdd').click();
+      await new Promise((r) => setTimeout(r, 200));
+      const rejected = { cls: note.className, added: bme.state.manualFonts.length,
+                         open: !document.getElementById('fontPick').classList.contains('hidden') };
+
+      // 使える名前は足せる（この環境で確実に使えるものを選ぶ）
+      const T = await import('/js/telop.js');
+      const ok = ['serif', 'monospace', 'sans-serif'].find((f) => T.fontAvailable(f));
+      let accepted = null;
+      if (ok) {
+        input.value = ok;
+        document.getElementById('fontManualAdd').click();
+        await new Promise((r) => setTimeout(r, 300));
+        accepted = { list: bme.state.manualFonts, font: bme.project.telops.at(-1).rows[0].font,
+                     closed: document.getElementById('fontPick').classList.contains('hidden') };
+      }
+      return { rejected, accepted, ok };
+    })()`);
+    assert.equal(r.rejected.cls, 'manual-note bad', '無い名前を受け付けてしまった');
+    assert.equal(r.rejected.added, 0);
+    assert.ok(r.rejected.open, '断った時は開いたままにする');
+    if (r.accepted) {
+      assert.ok(r.accepted.list.includes(r.ok), '一覧に足されていない');
+      assert.equal(r.accepted.font, r.ok, '選んだ書体が反映されない');
+      assert.ok(r.accepted.closed);
+    }
+    await ev(`document.getElementById('telopDialogClose').click()`);
+  });
+
   test('テロップの背景色と内縁の切り替えが効く', async () => {
     const r = await ev(`(async () => {
       const t = bme.project.telops.at(-1);

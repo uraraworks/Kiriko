@@ -468,6 +468,32 @@ export async function ensureFontsLoaded(telops) {
 }
 
 /** ユーザーが追加した .ttf / .otf を読み込む */
+/**
+ * その名前のフォントが実際に使えるか調べる。
+ *
+ * Local Font Access API の一覧に出てこないフォントでも、CSS からは使えることがある
+ * （macOS の追加ダウンロード分など）。名前を直接指定できるようにするため、
+ * 「本当にその書体で描かれているか」を測って確かめる。
+ *
+ * 手口: まったく形の違う 2 つの代替（serif と monospace）を指定して測り、
+ * 幅が同じなら「代替ではなく指定した書体が使われている」と分かる。
+ */
+export function fontAvailable(family, ctx = null) {
+  if (!family) return false;
+  const c = ctx ?? new OffscreenCanvas(8, 8).getContext('2d');
+  const probe = 'あ亜ｱAgW0';
+  const width = (fallback) => {
+    c.font = `72px "${family}", ${fallback}`;
+    return c.measureText(probe).width;
+  };
+  const a = width('serif'), b = width('monospace');
+  if (Math.abs(a - b) > 0.01) return false;         // 代替に落ちている
+  // 代替同士が元々同じ幅の環境では判定できないので、その時は「分からない」= 使えない扱い
+  c.font = `72px serif`; const s1 = c.measureText(probe).width;
+  c.font = `72px monospace`; const s2 = c.measureText(probe).width;
+  return Math.abs(s1 - s2) > 0.01;
+}
+
 export async function loadFontFile(file) {
   const name = file.name.replace(/\.(ttf|otf|woff2?|ttc)$/i, '');
   const face = new FontFace(name, await file.arrayBuffer());

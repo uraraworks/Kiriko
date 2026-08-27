@@ -42,7 +42,8 @@ const S = {
   pendingKdenlive: null,   // { cuts, files } 素材の読み込み待ち
   videoSourceId: null,     // <video> に現在ロードしている素材
   selectedTelopId: null,
-  userFonts: [],           // ユーザーが追加した .ttf/.otf
+  userFonts: [],
+  manualFonts: [],         // 一覧に出ないので名前で指定したフォント           // ユーザーが追加した .ttf/.otf
   installedFonts: null,    // Local Font Access API で列挙した結果
   telopStyle: { ...T.DEFAULT_STYLE }, // 次に追加するテロップの既定スタイル
   selectedBlurId: null,
@@ -1977,6 +1978,7 @@ function fontList() {
     ...T.SYSTEM_FONTS.map((f) => ({ ...f, group: 'システム' })),
     ...T.WEB_FONTS.map((f) => ({ ...f, group: 'Web フォント' })),
     ...S.userFonts.map((f) => ({ css: f, label: f, group: '追加したフォント' })),
+    ...S.manualFonts.map((f) => ({ css: f, label: f, group: '名前で指定したフォント' })),
     ...(S.installedFonts ?? []).map((f) => ({ ...f, group: 'インストール済み' })),
   ];
   // 同じ書体が二重に出ないように
@@ -2463,6 +2465,38 @@ $('fontPickClose').onclick = closeFontPicker;
 $('fontSearch').addEventListener('input', renderFontList);
 $('fontPickLocal').onclick = () => loadInstalledFonts().then(renderFontList);
 $('fontPickFile').onclick = () => $('fontInput').click();
+
+// 一覧に出てこないフォントを名前で使う。
+// macOS の追加ダウンロード分など、queryLocalFonts に載らないのに
+// CSS からは使えるものがあるため
+$('fontManualAdd').onclick = () => addManualFont();
+$('fontManual').addEventListener('keydown', (e) => { if (e.key === 'Enter') addManualFont(); });
+
+function addManualFont() {
+  const name = $('fontManual').value.trim();
+  const note = $('fontManualNote');
+  if (!name) return;
+  if (!T.fontAvailable(name)) {
+    note.className = 'manual-note bad';
+    note.textContent =
+      `「${name}」は見つかりませんでした。名前が違うか、このパソコンに入っていないようです`;
+    return;
+  }
+  if (!S.manualFonts.includes(name)) S.manualFonts.push(name);
+  try { localStorage.setItem('kiriko.manualFonts', JSON.stringify(S.manualFonts)); } catch {}
+  note.className = 'manual-note ok';
+  note.textContent = `「${name}」を一覧に加えました`;
+  $('fontManual').value = '';
+  renderFontList();
+  fontPick.onPick?.(name);
+  closeFontPicker();
+}
+
+// 前に名前で足したフォントを覚えておく
+try {
+  const saved = JSON.parse(localStorage.getItem('kiriko.manualFonts') || '[]');
+  if (Array.isArray(saved)) S.manualFonts = saved.filter((x) => typeof x === 'string');
+} catch { /* 壊れていたら無視 */ }
 $('fontPick').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFontPicker(); });
 
 /** PC のフォントを読み込む（ボタンの直後でないと許可が取れない） */
