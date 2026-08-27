@@ -2035,6 +2035,26 @@ function openTelopEditor() {
   setTimeout(() => $('telText')?.focus(), 0);
 }
 
+/**
+ * 色の見本。RGB を直に触らなくても、よく使う色をすぐ選べるようにする。
+ * テロップで使う想定の並び（白・黒・切子の黄 …）。
+ */
+const COLOR_PRESETS = [
+  ['#ffffff', '白'], ['#000000', '黒'], ['#f5e04b', '黄'], ['#ff5a5a', '赤'],
+  ['#4c9aff', '青'], ['#4bd18a', '緑'], ['#ff9f43', '橙'], ['#ff8ac4', '桃'],
+  ['#9b7bff', '紫'], ['#8b93a1', '灰'], ['#4a3b00', '焦茶'], ['#1a2030', '紺'],
+];
+
+/** 色入力 1 つぶん（入力欄＋見本） */
+function colorField(id, label, value) {
+  return `<div class="swatch">
+    <input type="color" id="${id}" value="${value}"><span>${label}</span>
+    <div class="chips" data-for="${id}">${COLOR_PRESETS.map(([c, n]) =>
+      `<button type="button" class="chip${c.toLowerCase() === String(value).toLowerCase() ? ' on' : ''}"
+        style="background:${c}" data-color="${c}" title="${n}"></button>`).join('')}</div>
+  </div>`;
+}
+
 function renderTelopForm(force = false) {
   const form = $('telopForm');
   const tel = selectedTelop();
@@ -2087,12 +2107,12 @@ function renderTelopForm(force = false) {
         <input class="num" type="number" id="telRowGap" step="2" value="${Math.round(tel.rowGap ?? 0)}"></label>
     </div>
 
-    <div class="grid2">
-      <div class="swatch"><input type="color" id="telFill" value="${row.fill}"><span>文字</span></div>
-      <div class="swatch"><input type="color" id="telStroke" value="${row.stroke}"><span>内縁</span></div>
-      <div class="swatch"><input type="color" id="telOuter" value="${row.outerStroke}"><span>白フチ</span></div>
-      <label>白フチ倍率 <input class="num" type="number" id="telOuterScale" step="0.1" min="0" max="5" value="${row.outerScale}"></label>
-    </div>
+    ${colorField('telFill', '文字', row.fill)}
+    <label class="chk"><input type="checkbox" id="telStrokeOn" ${row.strokeOn !== false ? 'checked' : ''}> 内縁をつける</label>
+    ${row.strokeOn !== false ? colorField('telStroke', '内縁', row.stroke) : ''}
+    ${colorField('telOuter', '白フチ', row.outerStroke)}
+    <label>白フチ倍率（0 でなし）
+      <input class="num" type="number" id="telOuterScale" step="0.1" min="0" max="5" value="${row.outerScale}"></label>
 
     <label>影 <span id="telShadowLbl">${Math.round(row.shadow * 100)}%</span>
       <input type="range" id="telShadow" min="0" max="100" value="${Math.round(row.shadow * 100)}"></label>
@@ -2103,15 +2123,18 @@ function renderTelopForm(force = false) {
 
     <div class="panel-head sub inline">セット全体</div>
 
+    <label class="chk"><input type="checkbox" id="telBgFillOn" ${tel.bgFillOn ? 'checked' : ''}> 背景色をつける</label>
+    ${tel.bgFillOn ? colorField('telBgFill', '背景色', tel.bgFill ?? '#000000') : ''}
+
     <label>背景画像
       <select id="telBg">
         <option value="">なし</option>
         ${imgs.map((a) => `<option value="${a.id}"${a.id === tel.bgAssetId ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}
       </select></label>
-    ${tel.bgAssetId ? `
+    ${tel.bgAssetId || tel.bgFillOn ? `
     <div class="grid2">
       <label>不透明度 <input class="num" type="number" id="telBgOp" min="0" max="100" value="${Math.round((tel.bgOpacity ?? 1) * 100)}"></label>
-      <label class="chk" style="align-self:end"><input type="checkbox" id="telBgStretch" ${tel.bgFit === 'stretch' ? 'checked' : ''}> 引き伸ばす</label>
+      ${tel.bgAssetId ? `<label class="chk" style="align-self:end"><input type="checkbox" id="telBgStretch" ${tel.bgFit === 'stretch' ? 'checked' : ''}> 引き伸ばす</label>` : ''}
     </div>` : ''}
 
     <label>アイコン画像
@@ -2212,6 +2235,28 @@ function renderTelopForm(force = false) {
 
   // --- セット全体 ---
   bind('telBg', (v) => { tel.bgAssetId = v || null; renderTelopForm(true); });
+  bind('telBgFill', (v) => { tel.bgFill = v; });
+  $('telBgFillOn')?.addEventListener('change', (e) => {
+    commit('背景色の切り替え');
+    tel.bgFillOn = e.target.checked;
+    renderTelopForm(true); live();
+  });
+  $('telStrokeOn')?.addEventListener('change', (e) => {
+    commit('内縁の切り替え');
+    row.strokeOn = e.target.checked;
+    renderTelopForm(true); live();
+  });
+  // 色の見本を押したら、その色を入れる
+  for (const chips of form.querySelectorAll('.chips')) {
+    const input = $(chips.dataset.for);
+    for (const b of chips.querySelectorAll('.chip')) {
+      b.onclick = () => {
+        input.value = b.dataset.color;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        for (const o of chips.querySelectorAll('.chip')) o.classList.toggle('on', o === b);
+      };
+    }
+  }
   bind('telBgOp', (v) => { tel.bgOpacity = Math.max(0, Math.min(1, +v / 100)); });
   $('telBgStretch')?.addEventListener('change', (e) => {
     commit('背景の伸縮を切り替え'); tel.bgFit = e.target.checked ? 'stretch' : 'contain'; live();

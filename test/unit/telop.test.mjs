@@ -71,6 +71,26 @@ test('migrateTelop: 字間を持たない古い行にも 0 が入る', () => {
   assert.equal(t.rows[0].letterSpacing, 0);
 });
 
+test('内縁は既定で入り、切れる', () => {
+  assert.equal(T.DEFAULT_STYLE.strokeOn, true);
+  assert.equal(T.createRow('あ').strokeOn, true);
+  assert.equal(T.createRow('あ', { strokeOn: false }).strokeOn, false);
+});
+
+test('背景色は既定で無し。色は覚えておく', () => {
+  const t = T.createTelop(0, 1);
+  assert.equal(t.bgFillOn, false);
+  assert.ok(/^#[0-9a-f]{6}$/i.test(t.bgFill), '既定の色が入っていない');
+});
+
+test('migrateTelop: 古いテロップにも内縁 ON と背景色の欄が入る', () => {
+  const t = T.migrateTelop({ id: 'a', start: 0, end: 1, box: { x: 0, y: 0, w: 10, h: 10 },
+    rows: [{ text: 'あ' }] });
+  assert.equal(t.rows[0].strokeOn, true, '既存のテロップの見た目が変わってしまう');
+  assert.equal(t.bgFillOn, false);
+  assert.equal(t.bgFill, '#000000');
+});
+
 test('プリセットは枠と縦寄せをセットで持つ', () => {
   assert.ok(T.DEFAULT_PRESETS.length >= 4);
   for (const p of T.DEFAULT_PRESETS) {

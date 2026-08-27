@@ -11,6 +11,7 @@ export const DEFAULT_STYLE = {
   bold: true,
   fill: '#f5e04b',
   stroke: '#4a3b00',      // 内側の濃い縁
+  strokeOn: true,         // 内縁を描くか（白フチは outerScale 0 で消せる）
   strokeWidth: 16,
   outerStroke: '#ffffff', // 外側の白フチ
   outerScale: 2.2,        // strokeWidth に対する倍率（0 で白フチなし）
@@ -63,6 +64,8 @@ export function createTelop(t0, t1, style = {}, text = 'テロップ') {
     wrap: s.wrap ?? true,
     rowGap: 0,
     bgAssetId: null,      // 背景画像（枠に合わせて敷く）
+    bgFillOn: false,      // 背景色を敷くか
+    bgFill: '#000000',
     bgOpacity: 1,
     bgFit: 'contain',
     // アイコン画像（ロゴなど）。文字の左右上下に添える
@@ -89,12 +92,14 @@ export function migrateTelop(t) {
       vAlign: vAlign ?? 'middle',
       wrap: wrap ?? true,
       rowGap: 0,
-      bgAssetId: null, bgOpacity: 1, bgFit: 'contain',
+      bgAssetId: null, bgFillOn: false, bgFill: '#000000', bgOpacity: 1, bgFit: 'contain',
       rows: [createRow(text ?? '', style)],
     };
   }
   out.rows = out.rows.map((r) => ({ ...DEFAULT_STYLE, ...r }));
   out.icon = { assetId: null, side: 'left', size: 120, gap: 20, valign: 'middle', trim: true, ...(out.icon ?? {}) };
+  out.bgFillOn = out.bgFillOn ?? false;
+  out.bgFill = out.bgFill ?? '#000000';
   out.bgOpacity = out.bgOpacity ?? 1;
   out.bgFit = out.bgFit ?? 'contain';
   out.rowGap = out.rowGap ?? 0;
@@ -282,13 +287,24 @@ function drawRowLine(ctx, row, text, x, y) {
     ctx.strokeText(text, x, y);
   }
   ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-  if (w > 0) {
+  if (w > 0 && row.strokeOn !== false) {
     ctx.strokeStyle = row.stroke;
     ctx.lineWidth = w;
     ctx.strokeText(text, x, y);
   }
   ctx.fillStyle = row.fill;
   ctx.fillText(text, x, y);
+}
+
+/** 背景色を枠に敷く（画像より下） */
+function drawTelopFill(ctx, t) {
+  if (!t.bgFillOn || !t.bgFill) return;
+  ctx.save();
+  ctx.globalAlpha = t.bgOpacity ?? 1;
+  ctx.fillStyle = t.bgFill;
+  const b = t.box;
+  ctx.fillRect(b.x, b.y, b.w, b.h);
+  ctx.restore();
 }
 
 /** 背景画像を枠に敷く */
@@ -311,6 +327,7 @@ function drawTelopBg(ctx, t, imageLib) {
 /** テロップ 1 個（背景画像＋全行）を描く */
 export function drawTelop(ctx, t, imageLib = null) {
   if (!t.box) return;
+  drawTelopFill(ctx, t);
   drawTelopBg(ctx, t, imageLib);
   ctx.save();
   ctx.textBaseline = 'middle';
@@ -349,7 +366,8 @@ export function textBounds(ctx, t, imageLib = null) {
     let maxW = 0;
     for (const l of r.lines) maxW = Math.max(maxW, inkWidth(ctx, r.row, l));
     const x = r.row.hAlign === 'left' ? r.x : r.row.hAlign === 'right' ? r.x - maxW : r.x - maxW / 2;
-    const pad = (r.row.strokeWidth || 0) * (r.row.outerScale || 1) * 0.5;
+    const outer = (r.row.outerScale ?? 0) > 0 ? (r.row.outerScale || 1) : (r.row.strokeOn === false ? 0 : 1);
+    const pad = (r.row.strokeWidth || 0) * outer * 0.5;
     left = Math.min(left, x - pad);
     right = Math.max(right, x + maxW + pad);
     top = Math.min(top, r.firstY - r.row.size / 2 - pad);

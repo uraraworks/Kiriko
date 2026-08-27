@@ -150,6 +150,8 @@ a.tb { text-decoration: none; }
 .inspector { overflow: auto; }
 .form { padding: 9px 10px; display: flex; flex-direction: column; gap: 8px; }
 .form label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
+/* チェックボックスだけは横並び（.form label の縦積みに負けていた） */
+.form label.chk { flex-direction: row; align-items: center; gap: 6px; }
 .form select, .form input[type=text], .form input[type=number] {
   background: #2a2e37; color: var(--text); border: 1px solid #3c424e; border-radius: 4px;
   padding: 4px 6px; font-size: 12px;
@@ -628,3 +630,14 @@ body.exporting .statusbar > .progress { display: block; }
 
 /* 説明が付いているタイムライン見出し */
 .panel-head > span[title] { cursor: help; border-bottom: 1px dotted #4a5160; }
+
+/* 色の見本（基本色をすぐ選べるように） */
+#telopForm .swatch { flex-wrap: wrap; }
+#telopForm .chips { display: flex; gap: 3px; flex: 1; min-width: 0; flex-wrap: wrap; }
+#telopForm .chip {
+  width: 16px; height: 16px; padding: 0; flex: none;
+  border: 1px solid #00000060; border-radius: 3px; cursor: pointer;
+  box-shadow: inset 0 0 0 1px #ffffff20;
+}
+#telopForm .chip:hover { transform: scale(1.15); }
+#telopForm .chip.on { outline: 2px solid var(--accent); outline-offset: 1px; }
