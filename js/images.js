@@ -65,21 +65,27 @@ export function createImageClip(assetId, start, end, box, opacity = 1) {
   };
 }
 
+/** 枠の中で画像が実際に描かれる矩形（contain のときは余白ができる） */
+export function drawnRect(im, bmp) {
+  const b = im.box;
+  if (im.fit === 'stretch' || !bmp) return { ...b };
+  const s = Math.min(b.w / bmp.width, b.h / bmp.height);
+  const w = bmp.width * s, h = bmp.height * s;
+  return { x: b.x + (b.w - w) / 2, y: b.y + (b.h - h) / 2, w, h };
+}
+
+export function drawImageClip(ctx, im, library) {
+  const bmp = library?.get(im.assetId);
+  if (!bmp) return;
+  const r = drawnRect(im, bmp);
+  ctx.save();
+  ctx.globalAlpha = im.opacity ?? 1;
+  ctx.drawImage(bmp, r.x, r.y, r.w, r.h);
+  ctx.restore();
+}
+
 export function drawImagesAt(ctx, images, t, library) {
   for (const im of images || []) {
-    if (t < im.start || t >= im.end) continue;
-    const bmp = library?.get(im.assetId);
-    if (!bmp) continue;
-    ctx.save();
-    ctx.globalAlpha = im.opacity ?? 1;
-    const b = im.box;
-    if (im.fit === 'stretch') {
-      ctx.drawImage(bmp, b.x, b.y, b.w, b.h);
-    } else {
-      const s = Math.min(b.w / bmp.width, b.h / bmp.height);
-      const w = bmp.width * s, h = bmp.height * s;
-      ctx.drawImage(bmp, b.x + (b.w - w) / 2, b.y + (b.h - h) / 2, w, h);
-    }
-    ctx.restore();
+    if (t >= im.start && t < im.end) drawImageClip(ctx, im, library);
   }
 }

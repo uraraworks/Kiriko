@@ -315,3 +315,7 @@ kbd {
   resize: vertical; min-height: 90px; width: 100%;
 }
 #notes::placeholder { color: #626a78; }
+
+/* 重ね順（最前面／最背面） */
+.z-row { display: flex; gap: 5px; }
+.z-row .mini { flex: 1; padding: 4px 0; }

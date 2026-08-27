@@ -4,11 +4,11 @@ import * as P from './project.js';
 import { exportProject } from './exporter.js';
 import { parseKdenlive, basename } from './kdenlive.js';
 import * as T from './telop.js';
-import { composeFrame, activeBlur } from './compose.js';
+import { composeFrame, activeBlur, drawOverlaysAt, overlaysAt } from './compose.js';
 import { AudioLibrary, AudioPreview, mixInto } from './audio.js';
 import { History } from './history.js';
 import * as B from './boxes.js';
-import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageClip, drawImagesAt } from './images.js';
+import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageClip, drawImageClip, drawnRect } from './images.js';
 
 // ---------------------------------------------------------------- 状態
 
@@ -150,11 +150,22 @@ function doRedo() {
   status(l ? `やり直しました：${l}` : 'これ以上進めません');
 }
 
+/** 重ね物（画像・テロップ）の z の範囲 */
+function zRange() {
+  const all = [...S.project.images, ...S.project.telops].map((x) => x.z ?? 0);
+  return all.length ? [Math.min(...all), Math.max(...all)] : [0, 0];
+}
+const bringToFront = (item) => { item.z = zRange()[1] + 1; };
+const sendToBack = (item) => { item.z = zRange()[0] - 1; };
+
 /** 旧いプロジェクトを現在の形に揃える */
 function normalizeProject() {
   const p = S.project;
   p.telops = (p.telops ?? []).map(T.migrateTelop);
   p.images = p.images ?? [];
+  // z 未設定のものを補う。従来の見た目（テロップが画像より前）を保つ
+  p.images.forEach((im, i) => { if (typeof im.z !== 'number') im.z = i; });
+  p.telops.forEach((tl, i) => { if (typeof tl.z !== 'number') tl.z = 1000 + i; });
   p.imageAssets = p.imageAssets ?? [];
   p.blurs = p.blurs ?? [];
   p.audioClips = p.audioClips ?? [];
@@ -551,6 +562,7 @@ function addTelop() {
   const t1 = Math.min(total, t0 + 3);
   commit('テロップ追加');
   const tel = T.createTelop(t0, t1, S.telopStyle, 'テロップ');
+  tel.z = zRange()[1] + 1;
   S.project.telops.push(tel);
   select('telop', tel.id);
   setMode('program');
@@ -652,6 +664,7 @@ function placeImage(assetId, placement = null) {
   const start = Math.min(currentTimelineTime(), Math.max(0, total - 0.5));
   commit(`${asset.name} を配置`);
   const im = createImageClip(assetId, start, Math.min(total, start + 4), placementBox(place, asset, W, H));
+  im.z = zRange()[1] + 1;
   S.project.images.push(im);
   select('image', im.id);
   setMode('program');
@@ -723,11 +736,10 @@ function renderOverlay() {
 
   const sel = activeBox();
   if (S.mode === 'program') {
-    drawImagesAt(ctx, S.project.images, t, S.imageLib);
-    T.drawTelopsAt(ctx, S.project.telops, t);
+    drawOverlaysAt(ctx, S.project, t, S.imageLib);
   } else if (sel) {
     // ソースモニターでは、位置調整しやすいよう選択中のものだけ出す
-    if (sel.kind === 'image') drawImagesAt(ctx, [sel.item], sel.item.start, S.imageLib);
+    if (sel.kind === 'image') drawImageClip(ctx, sel.item, S.imageLib);
     else T.drawTelop(ctx, sel.item);
   }
 
@@ -751,20 +763,15 @@ function stagePoint(e) {
 /** クリック位置にある枠を拾う（テロップ優先、後ろに描いたものから）*/
 function pickBox(p, t) {
   const ctx = overlay.getContext('2d');
-  const tels = S.mode === 'program'
-    ? S.project.telops.filter((x) => t >= x.start && t < x.end)
-    : (selectedTelop() ? [selectedTelop()] : []);
-  for (let i = tels.length - 1; i >= 0; i--) {
-    const tb = T.textBounds(ctx, tels[i]);
-    if (B.insideBox(tels[i].box, p.x, p.y) || B.insideBox(tb, p.x, p.y)) {
-      return { kind: 'telop', item: tels[i] };
-    }
-  }
-  const imgs = S.mode === 'program'
-    ? S.project.images.filter((x) => t >= x.start && t < x.end)
-    : (selectedImage() ? [selectedImage()] : []);
-  for (let i = imgs.length - 1; i >= 0; i--) {
-    if (B.insideBox(imgs[i].box, p.x, p.y)) return { kind: 'image', item: imgs[i] };
+  const sel = activeBox();
+  const list = S.mode === 'program'
+    ? overlaysAt(S.project, t)
+    : (sel ? [{ kind: sel.kind, item: sel.item }] : []);
+  // 手前（z が大きい方）から拾う
+  for (let i = list.length - 1; i >= 0; i--) {
+    const { kind, item } = list[i];
+    if (B.insideBox(item.box, p.x, p.y)) return { kind, item };
+    if (kind === 'telop' && B.insideBox(T.textBounds(ctx, item), p.x, p.y)) return { kind, item };
   }
   return null;
 }
@@ -783,8 +790,11 @@ overlay.addEventListener('pointerdown', (e) => {
     const h = B.hitHandle(sel.item.box, p.x, p.y, r);
     if (h) {
       try { overlay.setPointerCapture(e.pointerId); } catch {}
-      commit(sel.kind === 'image' ? '画像の大きさを変更' : 'テロップの枠を変更', `box:${sel.item.id}`);
-      boxDrag = { ...sel, mode: 'resize', handle: h, startX: p.x, startY: p.y, orig: { ...sel.item.box }, guides: [] };
+      boxDrag = {
+        ...sel, mode: 'resize', handle: h, startX: p.x, startY: p.y,
+        orig: { ...sel.item.box }, guides: [], committed: false,
+        label: sel.kind === 'image' ? '画像の大きさを変更' : 'テロップの枠を変更',
+      };
       renderOverlay();
       return;
     }
@@ -795,8 +805,11 @@ overlay.addEventListener('pointerdown', (e) => {
   try { overlay.setPointerCapture(e.pointerId); } catch {}
   const changed = hit.item.id !== (sel?.item.id ?? null);
   select(hit.kind, hit.item.id);
-  commit(hit.kind === 'image' ? '画像の位置を変更' : 'テロップの位置を変更', `box:${hit.item.id}`);
-  boxDrag = { ...hit, mode: 'move', startX: p.x, startY: p.y, orig: { ...hit.item.box }, guides: [] };
+  boxDrag = {
+    ...hit, mode: 'move', startX: p.x, startY: p.y,
+    orig: { ...hit.item.box }, guides: [], committed: false,
+    label: hit.kind === 'image' ? '画像の位置を変更' : 'テロップの位置を変更',
+  };
   overlay.classList.add('grabbing');
   renderAll();
   if (changed) { renderTelopForm(true); renderFxForm(true); }
@@ -821,16 +834,28 @@ overlay.addEventListener('pointermove', (e) => {
 
   const dx = p.x - boxDrag.startX, dy = p.y - boxDrag.startY;
   const item = boxDrag.item;
+  if (!boxDrag.committed) {
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return; // クリックだけでは履歴に積まない
+    commit(boxDrag.label, `box:${item.id}`);
+    boxDrag.committed = true;
+  }
   if (boxDrag.mode === 'resize') {
     const asset = boxDrag.kind === 'image' && e.shiftKey
       ? S.project.imageAssets.find((a) => a.id === item.assetId)
       : null;
-    const box = B.resizeBox(boxDrag.orig, boxDrag.handle, dx, dy, {
+    let box = B.resizeBox(boxDrag.orig, boxDrag.handle, dx, dy, {
       min: 40,
       aspect: asset ? asset.width / asset.height : null,
     });
+    if (!e.altKey && !asset) {
+      // 引いている辺を画面端・中央に吸着させる（Alt で解除。比率固定中は無効）
+      const snapped = B.snapResize(box, boxDrag.handle, W, H);
+      box = snapped.box;
+      boxDrag.guides = snapped.guides;
+    } else {
+      boxDrag.guides = [];
+    }
     item.box = B.clampBox(box, W, H);
-    boxDrag.guides = [];
   } else {
     let box = { ...boxDrag.orig, x: boxDrag.orig.x + dx, y: boxDrag.orig.y + dy };
     if (!e.altKey) {
@@ -851,6 +876,48 @@ overlay.addEventListener('pointerup', () => {
   boxDrag = null;
   overlay.classList.remove('grabbing');
   renderOverlay();
+});
+
+/**
+ * ダブルクリック。
+ *  - つまみの上 … 中身にぴったり合うように枠を詰める
+ *  - 画像の上   … 等倍（100%）に戻す。画面からはみ出す場合は収まる大きさまで縮める
+ */
+overlay.addEventListener('dblclick', (e) => {
+  const sel = activeBox();
+  if (!sel) return;
+  const p = stagePoint(e);
+  const W = overlay.width, H = overlay.height;
+  const onHandle = B.hitHandle(sel.item.box, p.x, p.y, 9 * stageScale());
+
+  if (onHandle) {
+    commit(sel.kind === 'image' ? '枠を画像に合わせる' : '枠を文字に合わせる');
+    if (sel.kind === 'image') {
+      const bmp = S.imageLib.get(sel.item.assetId);
+      if (bmp) sel.item.box = B.clampBox(drawnRect(sel.item, bmp), W, H);
+    } else {
+      const tb = T.textBounds(overlay.getContext('2d'), sel.item);
+      sel.item.box = B.clampBox({ x: tb.x, y: tb.y, w: Math.max(40, tb.w), h: Math.max(40, tb.h) }, W, H);
+    }
+    status(sel.kind === 'image' ? '枠を画像の大きさに合わせました' : '枠を文字の大きさに合わせました');
+  } else if (sel.kind === 'image' && B.insideBox(sel.item.box, p.x, p.y)) {
+    const asset = S.project.imageAssets.find((a) => a.id === sel.item.assetId);
+    if (!asset) return;
+    commit('画像を等倍に戻す');
+    const b = sel.item.box;
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    const full = { x: cx - asset.width / 2, y: cy - asset.height / 2, w: asset.width, h: asset.height };
+    const fitted = B.fitInto(full, W, H); // 画面より大きければ収まるところまで縮める
+    sel.item.box = fitted;
+    status(fitted.w < asset.width
+      ? `等倍だと画面からはみ出すため ${Math.round((fitted.w / asset.width) * 100)}% にしました`
+      : '画像を等倍（100%）に戻しました');
+  } else {
+    return;
+  }
+  renderAll();
+  renderFxForm(true);
+  renderTelopForm(true);
 });
 
 /** カーソルキーで 1px（Shift で 10px）動かす */
@@ -1076,6 +1143,11 @@ function renderTelopForm(force = false) {
     </div>
     <label class="chk"><input type="checkbox" id="telWrap" ${tel.wrap ? 'checked' : ''}> 枠の幅で折り返す</label>
 
+    <div class="z-row">
+      <button class="mini" id="telZFront" title="他の画像・テロップより手前に出す">最前面へ</button>
+      <button class="mini" id="telZBack" title="他の画像・テロップより奥に送る">最背面へ</button>
+    </div>
+
     <div class="grid2">
       <div class="swatch"><input type="color" id="telFill" value="${tel.fill}"><span>文字</span></div>
       <div class="swatch"><input type="color" id="telStroke" value="${tel.stroke}"><span>内縁</span></div>
@@ -1097,7 +1169,8 @@ function renderTelopForm(force = false) {
       <label>枠 高さ <input class="num" type="number" id="boxH" value="${Math.round(tel.box.h)}"></label>
     </div>
     <div class="sub-label">プレビュー上で枠をドラッグして移動、四隅・辺で大きさを変更。<br>
-      端と中央に吸着（Alt で解除）。カーソルキーで 1px（Shift で 10px）。</div>`;
+      移動もリサイズも端と中央に吸着（Alt で解除）。カーソルキーで 1px（Shift で 10px）。<br>
+      つまみをダブルクリックすると枠を文字の大きさに合わせます。</div>`;
 
   const live = () => { renderOverlay(); renderTimeline(); };
   const bind = (id, fn, ev = 'input') => $(id).addEventListener(ev, (e) => {
@@ -1143,6 +1216,9 @@ function renderTelopForm(force = false) {
       live();
     };
   }
+
+  $('telZFront').onclick = () => { commit('最前面へ'); bringToFront(tel); renderAll(); };
+  $('telZBack').onclick = () => { commit('最背面へ'); sendToBack(tel); renderAll(); };
 
   $('telPreset').onchange = (e) => {
     const p = presets()[+e.target.value];
@@ -1223,6 +1299,10 @@ function renderFxForm(force = false) {
     form.innerHTML = `
       <div class="sub-label">${esc(a?.name ?? im.assetId)}${a ? `（${a.width}×${a.height}）` : ''}</div>
       <div class="place-row">${PLACEMENTS.map((pl) => `<button data-p="${pl.id}">${pl.name}</button>`).join('')}</div>
+      <div class="z-row">
+        <button class="mini" id="zFront" title="他の画像・テロップより手前に出す">最前面へ</button>
+        <button class="mini" id="zBack" title="他の画像・テロップより奥に送る">最背面へ</button>
+      </div>
       <label>不透明度 <span id="imOpLbl">${Math.round((im.opacity ?? 1) * 100)}%</span>
         <input type="range" id="imOp" min="0" max="100" value="${Math.round((im.opacity ?? 1) * 100)}"></label>
       <label class="chk"><input type="checkbox" id="imStretch" ${im.fit === 'stretch' ? 'checked' : ''}> 枠いっぱいに引き伸ばす（比率を無視）</label>
@@ -1237,7 +1317,9 @@ function renderFxForm(force = false) {
         <label>枠 高さ <input class="num" type="number" id="boxH" value="${Math.round(im.box.h)}"></label>
       </div>
       <div class="sub-label">プレビュー上で枠をドラッグして移動、四隅・辺で拡大縮小。<br>
-        Shift ＋ 角のドラッグで比率を保つ。カーソルキーで 1px（Shift で 10px）。</div>`;
+        移動もリサイズも端と中央に吸着（Alt で解除）。Shift ＋ 角のドラッグで比率を保つ。<br>
+        カーソルキーで 1px（Shift で 10px）。<br>
+        <b>つまみをダブルクリック</b>＝枠を画像に合わせる／<b>画像をダブルクリック</b>＝等倍に戻す。</div>`;
     const b = (id, fn) => $(id).addEventListener('input', (e) => {
       commit('画像を編集', `imF:${im.id}:${id}`); fn(e.target.value); live();
     });
@@ -1248,6 +1330,8 @@ function renderFxForm(force = false) {
     b('boxY', (v) => { im.box.y = +v; });
     b('boxW', (v) => { im.box.w = Math.max(20, +v); });
     b('boxH', (v) => { im.box.h = Math.max(20, +v); });
+    $('zFront').onclick = () => { commit('最前面へ'); bringToFront(im); renderAll(); };
+    $('zBack').onclick = () => { commit('最背面へ'); sendToBack(im); renderAll(); };
     $('imStretch').addEventListener('change', (e) => {
       commit('画像の伸縮を切り替え'); im.fit = e.target.checked ? 'stretch' : 'contain'; live();
     });

@@ -1,12 +1,12 @@
 // compose.js
 // 1 フレーム分の絵を組み立てる。プレビューと書き出しで共有する唯一の合成経路。
 //
-//   映像フレーム → （区間ぼかし）→ 画像 → テロップ
+//   映像フレーム → （区間ぼかし）→ 重ね物（画像・テロップを z 順に）
 //
 // ぼかしはプライバシー保護用の全画面ぼかし（企画書の必須機能）。
 
-import { drawTelopsAt } from './telop.js';
-import { drawImagesAt } from './images.js';
+import { drawTelop } from './telop.js';
+import { drawImageClip } from './images.js';
 
 /** 時刻 t に効いているぼかしの強さ（出力ピクセル単位）。無ければ 0 */
 export function activeBlur(blurs, t) {
@@ -43,6 +43,28 @@ export function composeFrame(ctx, frame, t, w, h, project, imageLib = null) {
     if (px > 0) drawBlurred(ctx, frame, w, h, px);
     else ctx.drawImage(frame, 0, 0, w, h);
   }
-  drawImagesAt(ctx, project.images || [], t, imageLib);
-  drawTelopsAt(ctx, project.telops || [], t);
+  drawOverlaysAt(ctx, project, t, imageLib);
+}
+
+/**
+ * 画像とテロップを z の小さい順に重ねる。
+ * z は「最前面へ / 最背面へ」で振り直すだけなので、値が他と重ならなければ何でもよい。
+ */
+export function overlaysAt(project, t) {
+  const items = [];
+  for (const im of project.images || []) {
+    if (t >= im.start && t < im.end) items.push({ kind: 'image', item: im, z: im.z ?? 0 });
+  }
+  for (const tl of project.telops || []) {
+    if (t >= tl.start && t < tl.end) items.push({ kind: 'telop', item: tl, z: tl.z ?? 0 });
+  }
+  items.sort((a, b) => a.z - b.z);
+  return items;
+}
+
+export function drawOverlaysAt(ctx, project, t, imageLib) {
+  for (const o of overlaysAt(project, t)) {
+    if (o.kind === 'image') drawImageClip(ctx, o.item, imageLib);
+    else drawTelop(ctx, o.item);
+  }
 }

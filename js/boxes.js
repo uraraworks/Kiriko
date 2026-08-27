@@ -98,6 +98,45 @@ export function snapBox(b, W, H, tol = 14, margin = 60) {
   return { box: { x, y, w, h }, guides };
 }
 
+/**
+ * リサイズ中の吸着。ドラッグしている辺だけを、画面端・中央・セーフマージンに合わせる。
+ * @returns {{ box, guides }}
+ */
+export function snapResize(b, handle, W, H, tol = 14, margin = 60) {
+  const guides = [];
+  let { x, y, w, h } = b;
+
+  const snapTo = (value, targets) => {
+    for (const t of targets) if (Math.abs(value - t) <= tol) return t;
+    return null;
+  };
+
+  if (handle.includes('w')) {
+    const t = snapTo(x, [0, margin, W / 2]);
+    if (t !== null) { w += x - t; x = t; guides.push({ axis: 'x', at: t }); }
+  }
+  if (handle.includes('e')) {
+    const t = snapTo(x + w, [W, W - margin, W / 2]);
+    if (t !== null) { w = t - x; guides.push({ axis: 'x', at: t }); }
+  }
+  if (handle.includes('n')) {
+    const t = snapTo(y, [0, margin, H / 2]);
+    if (t !== null) { h += y - t; y = t; guides.push({ axis: 'y', at: t }); }
+  }
+  if (handle.includes('s')) {
+    const t = snapTo(y + h, [H, H - margin, H / 2]);
+    if (t !== null) { h = t - y; guides.push({ axis: 'y', at: t }); }
+  }
+  return { box: { x, y, w: Math.max(20, w), h: Math.max(20, h) }, guides };
+}
+
+/** 枠を canvas に収まる大きさへ（比率は保つ）。中心は保つ */
+export function fitInto(b, W, H) {
+  const s = Math.min(1, W / b.w, H / b.h);
+  const w = b.w * s, h = b.h * s;
+  return clampBox({ x: b.x + (b.w - w) / 2, y: b.y + (b.h - h) / 2, w, h }, W, H);
+}
+
 /** 選択枠とハンドルを描く。scale は「出力px / 表示px」なので、見た目の太さを一定に保てる */
 export function drawBoxChrome(ctx, b, scale = 1, { color = '#4c9aff', handles = true } = {}) {
   const lw = 2 * scale;
