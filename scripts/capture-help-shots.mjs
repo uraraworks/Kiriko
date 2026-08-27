@@ -87,8 +87,17 @@ async function main() {
 
     console.error('撮影中:');
 
-    // 1) 起動直後
+    // 1) 起動直後（作業フォルダを開く案内）
     await shot('01-start');
+
+    // 以降の撮影用に案内を閉じる。
+    // showDirectoryPicker はユーザー操作が要るので自動では出せない。
+    // ここではフォルダを開いた後と同じ状態にしてから撮る
+    await run(`(() => {
+      document.body.classList.remove('no-workdir');
+      document.getElementById('welcome').classList.add('hidden');
+    })()`);
+    await sleep(200);
 
     // 2) 素材を読み込んだところ
     await run(loadFiles([S.mp4]));
@@ -159,6 +168,32 @@ async function main() {
     await run(`document.querySelector('.insptab[data-insp=output]').click()`);
     await sleep(500);
     await shot('08-export');
+
+    // 9) テロップライブラリ（ライブラリフォルダの説明に使う）
+    //    フォルダ選択はユーザー操作が要るので、撮影用に置き場所だけ差し替えて
+    //    実際のボタンの処理（setLibDir → 表示更新）を通す
+    await run(`(async () => {
+      const Lib = await import('/js/library.js');
+      const now = Date.now();
+      const mk = (name, text) => ({
+        id: 'shot_' + name, name, savedAt: now,
+        telop: { rows: [{ text, font: '', size: 96 }] }, assets: [],
+      });
+      for (const e of [mk('見出しセット', 'お昼休みチャレンジ'),
+                       mk('金額セット', '1,450 円'),
+                       mk('注釈セット', '※ 配達件数は日によって変わります')]) {
+        await Lib.putSet(e);
+      }
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle('テロップ素材', { create: true });
+      window.showDirectoryPicker = async () => dir;
+      document.querySelector('button.bintab[data-bin=lib]').click();
+      document.getElementById('libDirPick').click();
+    })()`);
+    await sleep(700);
+    await run(`document.getElementById('libRefresh').click()`);
+    await sleep(900);
+    await shot('09-library');
 
     console.error(`出力先: ${OUT_DIR}`);
   } finally {

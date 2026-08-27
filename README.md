@@ -463,7 +463,12 @@ claude mcp add kiriko -- node <このリポジトリ>/mcp/server.js
 扱われるため。ただし **Safari は塞いでいる**ので Chrome 系か Firefox を使うこと。
 （`?bridgePort=9999` でポートも変えられる）
 
-詳細は `mcp/README.md`、ページ内 JS から直接叩く場合は `docs/AUTOMATION.md`。
+詳細な手順と提供ツールの一覧は [mcp/README.md](mcp/README.md)、
+ページ内 JS から直接叩く場合は [docs/AUTOMATION.md](docs/AUTOMATION.md)。
+
+**お使いの生成 AI に [mcp/README.md](mcp/README.md) を示して**
+「ここに書いてある通りに Kiriko へ MCP 接続できるようにして」と指示すれば、
+そのままセットアップできる。
 
 **方針**
 
