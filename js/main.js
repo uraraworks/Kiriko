@@ -1532,7 +1532,9 @@ function renderLibraryBin() {
   const list = $('libList');
   if (!S.libSets.length) {
     list.innerHTML = '<div class="empty">テロップを選んで「ライブラリに保存」すると、'
-      + 'ここに貯まります。<br>別のプロジェクトでもそのまま使えます。</div>';
+      + 'ここに貯まります。別のプロジェクトでもそのまま使えます。'
+      + '<br><br>画像を使ったセットは、<b>元の画像ファイルも残しておいてください</b>。'
+      + 'ライブラリの中のコピーは、セットを消すと一緒に無くなります。</div>';
     return;
   }
   list.innerHTML = '';
