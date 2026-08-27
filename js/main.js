@@ -6,6 +6,7 @@ import { parseKdenlive, basename } from './kdenlive.js';
 import * as T from './telop.js';
 import { composeFrame, activeBlur } from './compose.js';
 import { AudioLibrary, AudioPreview, mixInto } from './audio.js';
+import { History } from './history.js';
 
 // ---------------------------------------------------------------- 状態
 
@@ -66,6 +67,59 @@ const selectedTelop = () => S.project.telops.find((t) => t.id === S.selectedTelo
 const selectedBlur = () => S.project.blurs.find((b) => b.id === S.selectedBlurId) || null;
 const selectedAudio = () => S.project.audioClips.find((a) => a.id === S.selectedAudioId) || null;
 const presets = () => S.project.telopPresets ?? T.DEFAULT_PRESETS;
+
+// ---------------------------------------------------------------- 履歴（アンドゥ / リドゥ）
+
+const history = new History(
+  () => JSON.stringify(S.project),
+  (json) => {
+    S.project = JSON.parse(json);
+    // 読み込み済みメディアは履歴の対象外。巻き戻しで消えないよう復元する
+    for (const [id, src] of S.sources) {
+      if (!S.project.sources.some((x) => x.id === id)) {
+        S.project.sources.push({ id, name: src.name, size: src.file.size, duration: src.duration });
+      }
+    }
+    if (S.library) {
+      for (const [id, buf] of S.library.buffers) {
+        if (!S.project.audioAssets.some((x) => x.id === id)) {
+          S.project.audioAssets.push({ id, name: id, duration: buf.duration, channels: buf.numberOfChannels });
+        }
+      }
+    }
+    // 消えた要素を選択したままにしない
+    if (!S.project.clips.some((c) => c.id === S.selectedClipId)) S.selectedClipId = null;
+    if (!S.project.telops.some((t) => t.id === S.selectedTelopId)) S.selectedTelopId = null;
+    if (!S.project.blurs.some((b) => b.id === S.selectedBlurId)) S.selectedBlurId = null;
+    if (!S.project.audioClips.some((a) => a.id === S.selectedAudioId)) S.selectedAudioId = null;
+    S.programTime = Math.min(S.programTime, P.totalDuration(S.project));
+    S.programIndex = -1;
+    seekProgram(S.programTime, true);
+    renderAll();
+    renderTelopForm(true);
+    renderFxForm(true);
+  },
+);
+
+/** 変更を加える直前に呼ぶ */
+const commit = (label, key = null) => history.commit(label, key);
+
+function renderHistoryUI() {
+  $('btnUndo').disabled = !history.canUndo;
+  $('btnRedo').disabled = !history.canRedo;
+  $('btnUndo').title = history.canUndo ? `元に戻す：${history.undoLabel}　［ ⌘Z / Ctrl+Z ］` : '元に戻す　［ ⌘Z / Ctrl+Z ］';
+  $('btnRedo').title = history.canRedo ? `やり直す：${history.redoLabel}　［ ⇧⌘Z / Ctrl+Y ］` : 'やり直す　［ ⇧⌘Z / Ctrl+Y ］';
+}
+history.onChange = renderHistoryUI;
+
+function doUndo() {
+  const l = history.undo();
+  status(l ? `元に戻しました：${l}` : 'これ以上戻せません');
+}
+function doRedo() {
+  const l = history.redo();
+  status(l ? `やり直しました：${l}` : 'これ以上進めません');
+}
 
 function status(msg, isErr = false) {
   const el = $('status');
@@ -144,6 +198,7 @@ function bindPendingKdenlive() {
   for (const [id, src] of S.sources) byName.set(src.name, id);
   if (!pend.files.every((f) => byName.has(basename(f)))) return;
 
+  commit('Kdenlive からカットを取り込み');
   S.project.clips = pend.cuts.map((c) => ({
     id: P.newId('clip'),
     sourceId: byName.get(basename(c.resource)),
@@ -273,6 +328,7 @@ function addClip() {
   const a = S.markIn ?? 0;
   const b = S.markOut ?? Math.min(src.duration, a + 5);
   if (b - a < 0.05) return status('区間が短すぎます', true);
+  commit('クリップ追加');
   const clip = { id: P.newId('clip'), sourceId: S.currentSourceId, in: a, out: b, volume: 1 };
   S.project.clips.push(clip);
   select('clip', clip.id);
@@ -332,6 +388,7 @@ function extractZone() {
   if (!r) return status('先に範囲を選択してください（I / O）', true);
   const [a, b] = r;
   const len = b - a;
+  commit(`${tc(len, false)} をカット`);
 
   const kept = [];
   let t = 0;
@@ -379,6 +436,7 @@ function rippleAfter(a, b) {
 function placeWholeSource(sourceId) {
   const src = S.sources.get(sourceId);
   if (!src) return;
+  commit('素材をタイムラインに配置');
   const clip = { id: P.newId('clip'), sourceId, in: 0, out: src.duration, volume: 1 };
   S.project.clips.push(clip);
   select('clip', clip.id);
@@ -392,14 +450,17 @@ function deleteSelected() {
   // プログラムモニターで範囲が選ばれていれば「切り取って詰める」を優先する
   if (S.mode === 'program' && zoneRange()) { extractZone(); return; }
   if (S.selectedBlurId) {
+    commit('ぼかしを削除');
     S.project.blurs = S.project.blurs.filter((b) => b.id !== S.selectedBlurId);
     S.selectedBlurId = null; renderAll(); renderFxForm(true); return;
   }
   if (S.selectedAudioId) {
+    commit('音源を削除');
     S.project.audioClips = S.project.audioClips.filter((a) => a.id !== S.selectedAudioId);
     S.selectedAudioId = null; renderAll(); renderFxForm(true); return;
   }
   if (S.selectedTelopId) {
+    commit('テロップを削除');
     S.project.telops = S.project.telops.filter((t) => t.id !== S.selectedTelopId);
     S.selectedTelopId = null;
     renderAll();
@@ -408,6 +469,7 @@ function deleteSelected() {
   if (!S.selectedClipId) return;
   const i = S.project.clips.findIndex((c) => c.id === S.selectedClipId);
   if (i < 0) return;
+  commit('クリップを削除');
   S.project.clips.splice(i, 1);
   select('clip', S.project.clips[Math.min(i, S.project.clips.length - 1)]?.id ?? null);
   renderAll();
@@ -434,6 +496,7 @@ function addTelop() {
   if (total <= 0) return status('先にクリップを作ってください', true);
   const t0 = Math.min(currentTimelineTime(), Math.max(0, total - 0.5));
   const t1 = Math.min(total, t0 + 3);
+  commit('テロップ追加');
   const tel = T.createTelop(t0, t1, S.telopStyle, 'テロップ');
   S.project.telops.push(tel);
   select('telop', tel.id);
@@ -451,6 +514,7 @@ function addBlur() {
   const total = P.totalDuration(S.project);
   if (total <= 0) return status('先にクリップを作ってください', true);
   const t0 = Math.min(currentTimelineTime(), Math.max(0, total - 0.5));
+  commit('ぼかし追加');
   const b = { id: P.newId('blur'), start: t0, end: Math.min(total, t0 + 3), strength: 40 };
   S.project.blurs.push(b);
   select('blur', b.id);
@@ -489,6 +553,7 @@ function placeAudio(assetId) {
   const total = P.totalDuration(S.project);
   if (total <= 0) return status('先にクリップを作ってください', true);
   const start = Math.min(currentTimelineTime(), Math.max(0, total - 0.2));
+  commit(`${asset.name} を配置`);
   const isBgm = asset.duration > 20;
   const ac = {
     id: P.newId('ac'),
@@ -579,9 +644,10 @@ overlay.addEventListener('pointerdown', (e) => {
     ? T.hitTelop(ctx, pool, t, p.x, p.y)
     : (pool[0] && insideBounds(ctx, pool[0], p) ? pool[0] : null);
   if (!hit) return;
-  overlay.setPointerCapture(e.pointerId);
+  try { overlay.setPointerCapture(e.pointerId); } catch {}
   const rebuild = hit.id !== S.selectedTelopId;
   select('telop', hit.id);
+  commit('テロップの位置を変更', `telopPos:${hit.id}`);
   telopDrag = { tel: hit, dx: p.x - hit.x, dy: p.y - hit.y };
   overlay.classList.add('grabbing');
   renderAll();
@@ -671,9 +737,12 @@ function renderInspector() {
     <label>音量 <span id="fVolLbl">${Math.round((clip.volume ?? 1) * 100)}%</span>
       <input type="range" id="fVol" min="0" max="200" value="${Math.round((clip.volume ?? 1) * 100)}"></label>
     <div class="m" style="color:var(--dim);font-size:11px">長さ ${tc(P.clipDuration(clip), false)}</div>`;
-  $('fIn').onchange = (e) => { clip.in = Math.max(0, +e.target.value); renderAll(); };
-  $('fOut').onchange = (e) => { clip.out = Math.max(clip.in + 0.05, +e.target.value); renderAll(); };
-  $('fVol').oninput = (e) => { clip.volume = +e.target.value / 100; $('fVolLbl').textContent = `${e.target.value}%`; };
+  $('fIn').onchange = (e) => { commit('イン点を変更'); clip.in = Math.max(0, +e.target.value); renderAll(); };
+  $('fOut').onchange = (e) => { commit('アウト点を変更'); clip.out = Math.max(clip.in + 0.05, +e.target.value); renderAll(); };
+  $('fVol').oninput = (e) => {
+    commit('クリップ音量を変更', `vol:${clip.id}`);
+    clip.volume = +e.target.value / 100; $('fVolLbl').textContent = `${e.target.value}%`;
+  };
 }
 
 // ---------------------------------------------------------------- テロップ編集パネル
@@ -763,9 +832,16 @@ function renderTelopForm(force = false) {
     <div class="sub-label">プレビュー上でドラッグして位置を決められます（Alt でスナップ解除）</div>`;
 
   const live = () => { renderOverlay(); renderTimeline(); };
-  const bind = (id, fn, ev = 'input') => $(id).addEventListener(ev, (e) => { fn(e.target.value, e); live(); });
+  // 連続入力（スライダー・文字入力）は 1 エントリにまとめる
+  const bind = (id, fn, ev = 'input') => $(id).addEventListener(ev, (e) => {
+    commit('テロップを編集', `tel:${tel.id}:${id}`);
+    fn(e.target.value, e); live();
+  });
 
-  $('telText').addEventListener('input', (e) => { tel.text = e.target.value; live(); });
+  $('telText').addEventListener('input', (e) => {
+    commit('テロップの文字を編集', `telText:${tel.id}`);
+    tel.text = e.target.value; live();
+  });
   bind('telFont', (v) => { tel.font = v; S.telopStyle.font = v; });
   bind('telSize', (v) => { tel.size = Math.max(8, +v); S.telopStyle.size = tel.size; });
   bind('telSW', (v) => { tel.strokeWidth = Math.max(0, +v); S.telopStyle.strokeWidth = tel.strokeWidth; });
@@ -781,6 +857,7 @@ function renderTelopForm(force = false) {
 
   for (const b of form.querySelectorAll('.align-group button')) {
     b.onclick = () => {
+      commit('テロップの配置を変更');
       tel.align = b.dataset.align; S.telopStyle.align = tel.align;
       for (const o of form.querySelectorAll('.align-group button')) o.classList.toggle('on', o === b);
       live();
@@ -790,6 +867,7 @@ function renderTelopForm(force = false) {
   $('telPreset').onchange = (e) => {
     const p = presets()[+e.target.value];
     if (!p) return;
+    commit(`プリセット「${p.name}」を適用`);
     Object.assign(tel, p.style);
     S.telopStyle = { ...p.style };
     e.target.value = '';
@@ -799,6 +877,7 @@ function renderTelopForm(force = false) {
   $('telPresetSave').onclick = () => {
     const name = prompt('プリセット名', `プリセット ${presets().length + 1}`);
     if (!name) return;
+    commit('プリセットを保存');
     const { id, text, start, end, ...style } = tel;
     S.project.telopPresets = [...presets(), { name, style }];
     renderTelopForm(true);
@@ -837,9 +916,12 @@ function renderFxForm(force = false) {
         <label>終了（秒）<input class="num" type="number" id="fxEnd" step="0.1" value="${blur.end.toFixed(2)}"></label>
       </div>
       <div class="sub-label">長さ ${tc(blur.end - blur.start, false)}</div>`;
-    $('fxStr').oninput = (e) => { blur.strength = +e.target.value; $('fxStrLbl').textContent = e.target.value; live(); };
-    $('fxStart').oninput = (e) => { blur.start = Math.max(0, +e.target.value); live(); };
-    $('fxEnd').oninput = (e) => { blur.end = Math.max(blur.start + 0.1, +e.target.value); live(); };
+    const b = (id, fn) => $(id).addEventListener('input', (e) => {
+      commit('ぼかしを編集', `blurF:${blur.id}:${id}`); fn(e.target.value); live();
+    });
+    b('fxStr', (v) => { blur.strength = +v; $('fxStrLbl').textContent = v; });
+    b('fxStart', (v) => { blur.start = Math.max(0, +v); });
+    b('fxEnd', (v) => { blur.end = Math.max(blur.start + 0.1, +v); });
     return;
   }
 
@@ -858,12 +940,15 @@ function renderFxForm(force = false) {
     </div>
     <label>素材の頭出し（秒）<input class="num" type="number" id="fxOff" step="0.1" min="0" value="${(ac.offset ?? 0).toFixed(2)}"></label>
     <div class="sub-label">BGM を重ねて両方にフェードを付ければクロスフェードになります</div>`;
-  $('fxVol').oninput = (e) => { ac.volume = +e.target.value / 100; $('fxVolLbl').textContent = `${e.target.value}%`; live(); };
-  $('fxFi').oninput = (e) => { ac.fadeIn = Math.max(0, +e.target.value); live(); };
-  $('fxFo').oninput = (e) => { ac.fadeOut = Math.max(0, +e.target.value); live(); };
-  $('fxStart').oninput = (e) => { ac.start = Math.max(0, +e.target.value); live(); };
-  $('fxDur').oninput = (e) => { ac.duration = Math.max(0.1, +e.target.value); live(); };
-  $('fxOff').oninput = (e) => { ac.offset = Math.max(0, +e.target.value); live(); };
+  const b = (id, fn) => $(id).addEventListener('input', (e) => {
+    commit('音源を編集', `acF:${ac.id}:${id}`); fn(e.target.value); live();
+  });
+  b('fxVol', (v) => { ac.volume = +v / 100; $('fxVolLbl').textContent = `${v}%`; });
+  b('fxFi', (v) => { ac.fadeIn = Math.max(0, +v); });
+  b('fxFo', (v) => { ac.fadeOut = Math.max(0, +v); });
+  b('fxStart', (v) => { ac.start = Math.max(0, +v); });
+  b('fxDur', (v) => { ac.duration = Math.max(0.1, +v); });
+  b('fxOff', (v) => { ac.offset = Math.max(0, +v); });
 }
 
 function syncFxNumbers() {
@@ -961,7 +1046,7 @@ function renderScrub() {
 
 $('scrubBar').addEventListener('pointerdown', (e) => {
   const cv = e.currentTarget;
-  cv.setPointerCapture(e.pointerId);
+  try { cv.setPointerCapture(e.pointerId); } catch {}
   const move = (ev) => {
     const r = cv.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
@@ -1265,12 +1350,13 @@ let drag = null;
 tlCanvas.addEventListener('pointerdown', (e) => {
   const r = tlCanvas.getBoundingClientRect();
   const x = e.clientX - r.left, y = e.clientY - r.top;
-  tlCanvas.setPointerCapture(e.pointerId);
+  try { tlCanvas.setPointerCapture(e.pointerId); } catch {}
 
   // ぼかしトラック
   const bh = hitBlurBlock(x, y);
   if (bh) {
     select('blur', bh.blur.id);
+    commit('ぼかしを編集', `blur:${bh.blur.id}`);
     const eL = Math.abs(x - bh.cx) < 6, eR = Math.abs(x - (bh.cx + bh.cw)) < 6;
     drag = eL || eR
       ? { type: 'blurTrim', blur: bh.blur, side: eL ? 'start' : 'end', startX: x, orig: { ...bh.blur } }
@@ -1283,6 +1369,7 @@ tlCanvas.addEventListener('pointerdown', (e) => {
   const ah = hitAudioClip(x, y);
   if (ah) {
     select('audio', ah.ac.id);
+    commit('音源を編集', `audio:${ah.ac.id}`);
     const eL = Math.abs(x - ah.cx) < 6, eR = Math.abs(x - (ah.cx + ah.cw)) < 6;
     drag = eL || eR
       ? { type: 'audioTrim', ac: ah.ac, side: eL ? 'start' : 'end', startX: x, orig: { ...ah.ac } }
@@ -1296,6 +1383,7 @@ tlCanvas.addEventListener('pointerdown', (e) => {
   if (th) {
     const rebuild = th.tel.id !== S.selectedTelopId;
     select('telop', th.tel.id);
+    commit('テロップの時間を変更', `telopTime:${th.tel.id}`);
     const edgeL = Math.abs(x - th.cx) < 6, edgeR = Math.abs(x - (th.cx + th.cw)) < 6;
     drag = edgeL || edgeR
       ? { type: 'telopTrim', tel: th.tel, side: edgeL ? 'start' : 'end', startX: x, orig: { start: th.tel.start, end: th.tel.end } }
@@ -1320,6 +1408,7 @@ tlCanvas.addEventListener('pointerdown', (e) => {
   }
   const rebuildTel = !!S.selectedTelopId, rebuildFx = !!(S.selectedBlurId || S.selectedAudioId);
   select('clip', hit.clip.id);
+  commit('クリップを編集', `clip:${hit.clip.id}`);
   if (rebuildTel) renderTelopForm(true);
   if (rebuildFx) renderFxForm(true);
   const edgeL = Math.abs(x - hit.cx) < 6, edgeR = Math.abs(x - (hit.cx + hit.cw)) < 6;
@@ -1405,6 +1494,9 @@ tlCanvas.addEventListener('pointermove', (e) => {
     }
   }
 });
+
+document.addEventListener('pointerup', () => history.endGroup());
+document.addEventListener('focusin', () => history.endGroup());
 
 tlCanvas.addEventListener('pointerup', () => {
   if (drag && drag.type === 'move' && !drag.moved) {
@@ -1498,6 +1590,7 @@ async function loadProject(file) {
     }
     p.clips = p.clips.map((c) => ({ ...c, sourceId: remap.get(c.sourceId) ?? c.sourceId }));
     p.sources = S.project.sources;
+    commit('プロジェクトを読み込み');
     S.project = p;
     select(null, null);
     const missing = p.clips.filter((c) => !S.sources.has(c.sourceId)).length;
@@ -1584,6 +1677,8 @@ async function doExport() {
 
 $('btnOpen').onclick = () => openFiles().catch((e) => status(e.message, true));
 $('btnSaveProj').onclick = saveProject;
+$('btnUndo').onclick = doUndo;
+$('btnRedo').onclick = doRedo;
 $('btnLoadProj').onclick = () => $('projInput').click();
 $('btnMarkIn').onclick = markIn;
 $('btnMarkOut').onclick = markOut;
@@ -1625,6 +1720,7 @@ $('btnZoneOut').onclick = () => { setMode('program'); zoneOut(); };
 $('btnExtract').onclick = extractZone;
 $('btnZoneClear').onclick = clearZone;
 $('optRes').onchange = (e) => {
+  commit('出力解像度を変更');
   const [w, h] = e.target.value.split('x').map(Number);
   S.project.output.width = w; S.project.output.height = h;
   renderOverlay();
@@ -1695,7 +1791,11 @@ document.addEventListener('drop', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.target instanceof Element && e.target.matches('input, select, textarea')) return;
   const k = e.key.toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); saveProject(); return; }
+  if (e.ctrlKey || e.metaKey) {
+    if (k === 's') { e.preventDefault(); saveProject(); return; }
+    if (k === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+    if (k === 'y') { e.preventDefault(); doRedo(); return; }   // Windows 流
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   switch (k) {
     case ' ': e.preventDefault(); togglePlay(); break;
@@ -1745,6 +1845,7 @@ function renderAll() {
 if (!('VideoEncoder' in window)) {
   status('このブラウザは WebCodecs 非対応です（Chrome / Edge をお使いください）', true);
 }
+renderHistoryUI();
 renderAll();
 status('準備完了 — 「素材を開く」または mp4 をドロップしてください');
 
