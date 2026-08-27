@@ -477,3 +477,13 @@ kbd {
 }
 .tip.show { opacity: 1; }
 .tip.hidden { display: none; }
+
+/* MCP 接続ランプ */
+.mcp-dot {
+  width: 10px; height: 10px; border-radius: 50%; border: none; padding: 0; cursor: pointer;
+  flex: none; margin-right: 4px; background: #4a5160;
+}
+.mcp-dot.off { background: #4a5160; }
+.mcp-dot.connecting, .mcp-dot.waiting { background: #c9a94e; animation: mcpPulse 1.2s ease-in-out infinite; }
+.mcp-dot.on { background: #4bd18a; box-shadow: 0 0 6px #4bd18a88; }
+@keyframes mcpPulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }

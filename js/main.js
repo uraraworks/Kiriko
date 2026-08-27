@@ -8,6 +8,8 @@ import { composeFrame, activeBlur, drawOverlaysAt, overlaysAt, blurRectAt, activ
 import { AudioLibrary, AudioPreview, mixInto } from './audio.js';
 import { History } from './history.js';
 import * as Lib from './library.js';
+import { Bridge } from './bridge.js';
+import { createCommands } from './commands.js';
 import { ThumbCache, THUMB_W, THUMB_H } from './thumbs.js';
 import { WaveformCache, BINS_PER_SEC, bufferPeaks } from './waveform.js';
 import * as B from './boxes.js';
@@ -198,7 +200,10 @@ function normalizeProject() {
   p.blurs = (p.blurs ?? []).map((b) => ({
     shape: 'full', feather: 0.25, round: true, keys: [], ...b,
   }));
-  p.markers = (p.markers ?? []).map((m) => ({ duration: 0, text: '', ...m })).sort((a, b) => a.time - b.time);
+  // kind: keep=ここは残す / cut=ここは消す / note=ただのメモ
+  p.markers = (p.markers ?? [])
+    .map((m) => ({ duration: 0, text: '', kind: (m.duration ?? 0) > 0 ? 'keep' : 'note', ...m }))
+    .sort((a, b) => a.time - b.time);
   p.audioClips = p.audioClips ?? [];
   p.audioClips.forEach((a) => { if (typeof a.track !== 'number') a.track = a.kind === 'bgm' ? 1 : 0; });
   p.audioAssets = p.audioAssets ?? [];
@@ -640,12 +645,19 @@ function addTelop() {
 
 // ---------------------------------------------------------------- マーカー
 
-function addMarker(time = null, text = '', duration = 0) {
+const MARKER_KINDS = {
+  keep: { name: '残す', color: '#4bd18a' },
+  cut: { name: '消す', color: '#e0574f' },
+  note: { name: 'メモ', color: '#e0b84c' },
+};
+
+function addMarker(time = null, text = '', duration = 0, kind = null) {
   const total = P.totalDuration(S.project);
   if (total <= 0) return status('先にクリップを作ってください', true);
   const t = Math.max(0, Math.min(total, time ?? currentTimelineTime()));
   commit('マーカーを追加');
-  const m = { id: P.newId('mk'), time: t, duration, text, color: '#e0b84c' };
+  const k = MARKER_KINDS[kind] ? kind : (duration > 0 ? 'keep' : 'note');
+  const m = { id: P.newId('mk'), time: t, duration, text, kind: k, color: MARKER_KINDS[k].color };
   S.project.markers.push(m);
   S.project.markers.sort((a, b) => a.time - b.time);
   select('marker', m.id);
@@ -685,10 +697,10 @@ function selectBetweenMarkers() {
   status(`マーカー間を選択しました（${tc(a, false)} 〜 ${tc(b, false)}）`);
 }
 
-/** 区間マーカーをまとめた「残す区間」（重なりは統合する） */
-function keepRanges() {
+/** 同じ種別の区間マーカーをまとめる（重なりは統合する） */
+function rangesOf(kind) {
   const ranges = S.project.markers
-    .filter((m) => (m.duration ?? 0) > 0.02)
+    .filter((m) => (m.duration ?? 0) > 0.02 && (m.kind ?? 'keep') === kind)
     .map((m) => [m.time, m.time + m.duration])
     .sort((a, b) => a[0] - b[0]);
   const merged = [];
@@ -699,13 +711,23 @@ function keepRanges() {
   }
   return merged;
 }
+const keepRanges = () => rangesOf('keep');
 
-/** 「残す区間」の外側（＝消す候補）の一覧 */
+/**
+ * 消す候補。
+ *  - 「消す」マーカーがあれば、それ自体が候補
+ *  - 無ければ「残す」マーカーの外側が候補
+ * どちらの立て方でも同じ流れ（G / F で送って、確認して Delete）で進められる。
+ */
 function gapRanges() {
+  const cut = rangesOf('cut');
+  if (cut.length) return cut;
+  const keep = keepRanges();
+  if (!keep.length) return [];
   const total = P.totalDuration(S.project);
   const gaps = [];
   let prev = 0;
-  for (const [a, b] of keepRanges()) {
+  for (const [a, b] of keep) {
     if (a - prev > 0.02) gaps.push([prev, Math.min(a, total)]);
     prev = Math.max(prev, b);
   }
@@ -721,7 +743,7 @@ function gapRanges() {
  */
 function selectGap(dir = 1) {
   const gaps = gapRanges();
-  if (!gaps.length) return status('区間マーカーの外側がありません（先に区間マーカーを立ててください）', true);
+  if (!gaps.length) return status('消す候補がありません（区間マーカーを立ててください）', true);
   // いま同じ範囲を選んでいるなら、そこから 1 つ進める（選択後はカーソルが区間の頭に来るので、
   // 再生位置だけを見ると同じ区間を選び続けてしまう）
   const t = S.programTime;
@@ -765,9 +787,8 @@ function selectMarkerRange() {
  * 「セリフのある所に区間マーカーを立てて」→ ここを押す、が本命の使い方。
  */
 function keepMarkedRangesOnly() {
-  if (!keepRanges().length) return status('区間マーカー（長さのあるマーカー）がありません', true);
   const gaps = gapRanges();
-  if (!gaps.length) return status('切り取る所がありません');
+  if (!gaps.length) return status('区間マーカー（長さのあるマーカー）がありません', true);
 
   const removed = gaps.reduce((acc, g) => acc + (g[1] - g[0]), 0);
   if (!confirm(`区間マーカーの外側 ${gaps.length} 箇所（合計 ${tc(removed, false)}）を切り取ります。よろしいですか？`)) return;
@@ -1883,20 +1904,32 @@ function renderFxForm(force = false) {
 
   if (mk) {
     form.innerHTML = `
-      <div class="sub-label">タイムラインのメモ。長さを付けると「ここは残す」の印になります</div>
+      <label>種別
+        <div class="align-grid">${Object.entries(MARKER_KINDS).map(([k, v]) =>
+          `<button data-mkind="${k}" class="${(mk.kind ?? 'note') === k ? 'on' : ''}">${v.name}</button>`).join('')}</div></label>
       <label>メモ<textarea id="mkText" rows="3">${esc(mk.text ?? '')}</textarea></label>
       <div class="grid2">
         <label>位置（秒）<input class="num" type="number" id="mkTime" step="0.1" value="${mk.time.toFixed(2)}"></label>
         <label>長さ（秒）<input class="num" type="number" id="mkDur" step="0.1" min="0" value="${(mk.duration ?? 0).toFixed(2)}"></label>
       </div>
-      <div class="sub-label">長さ 0 なら点、0 より大きければ区間マーカー。<br>
-        タイムライン上で端をドラッグしても伸ばせます。</div>`;
+      <div class="sub-label">長さ 0 なら点、0 より大きければ区間。端をドラッグでも伸縮できます。<br>
+        <b>残す</b>を立てるとその外側が、<b>消す</b>を立てるとそこ自体が、
+        G / F で送る「消す候補」になります。</div>`;
     const b = (id, fn) => $(id).addEventListener('input', (e) => {
       commit('マーカーを編集', `mk:${mk.id}:${id}`); fn(e.target.value); live();
     });
     b('mkText', (v) => { mk.text = v; });
     b('mkTime', (v) => { mk.time = Math.max(0, +v); });
     b('mkDur', (v) => { mk.duration = Math.max(0, +v); });
+    for (const btn of form.querySelectorAll('[data-mkind]')) {
+      btn.onclick = () => {
+        commit('マーカーの種別を変更');
+        mk.kind = btn.dataset.mkind;
+        mk.color = MARKER_KINDS[mk.kind].color;
+        for (const o of form.querySelectorAll('[data-mkind]')) o.classList.toggle('on', o === btn);
+        live();
+      };
+    }
     return;
   }
 
@@ -2394,12 +2427,12 @@ function renderTimeline() {
     ctx.save();
     if (mw > 1) {
       // 区間マーカー（ここは残す、の印）
-      ctx.fillStyle = sel ? '#f0d68a' : (m.color ?? '#e0b84c') + 'cc';
+      ctx.fillStyle = sel ? '#ffffff' : (MARKER_KINDS[m.kind]?.color ?? '#e0b84c');
       ctx.beginPath(); roundRect(ctx, x, mkY + 3, Math.max(3, mw), MARK_H - 7, 3); ctx.fill();
       ctx.strokeStyle = sel ? '#ffffffdd' : '#00000055'; ctx.lineWidth = sel ? 2 : 1; ctx.stroke();
     } else {
       // 点マーカー（旗）
-      ctx.fillStyle = sel ? '#ffe9a8' : (m.color ?? '#e0b84c');
+      ctx.fillStyle = sel ? '#ffffff' : (MARKER_KINDS[m.kind]?.color ?? '#e0b84c');
       ctx.beginPath();
       ctx.moveTo(x, mkY + 3); ctx.lineTo(x + 11, mkY + 7); ctx.lineTo(x, mkY + 11);
       ctx.closePath(); ctx.fill();
@@ -2412,7 +2445,7 @@ function renderTimeline() {
       ctx.setLineDash([]);
     }
     if (m.text) {
-      ctx.fillStyle = mw > 40 ? '#2a1f00' : '#d9c07a';
+      ctx.fillStyle = mw > 40 ? '#101a14' : (MARKER_KINDS[m.kind]?.color ?? '#d9c07a');
       ctx.font = '10.5px -apple-system, sans-serif'; ctx.textBaseline = 'middle';
       const tx = mw > 40 ? x + 5 : x + 14;
       ctx.save();
@@ -3518,6 +3551,137 @@ renderAll();
 reloadLibrary();
 status('準備完了 — メディアタブから素材を読み込むか、mp4 をここへドロップしてください');
 
+// ---------------------------------------------------------------- MCP 連携
+
+/** プロジェクトを丸ごと差し替える（素材は名前で取り直す） */
+function applyProject(p) {
+  const byName = new Map();
+  for (const [id, src] of S.sources) byName.set(src.name, id);
+  const remap = new Map();
+  for (const s of p.sources ?? []) {
+    const hit = byName.get(s.name);
+    if (hit) remap.set(s.id, hit);
+  }
+  p.clips = (p.clips ?? []).map((c) => ({ ...c, sourceId: remap.get(c.sourceId) ?? c.sourceId }));
+  p.sources = S.project.sources;
+  S.project = p;
+  normalizeProject();
+  select(null, null);
+  syncProjectUI();
+  zoomFit();
+  renderAll();
+}
+
+/** タイムライン上の音量エンベロープ。素材の波形をクリップの並びに沿って読み出す */
+async function timelineLevels(from, to, binsPerSec) {
+  const n = Math.max(1, Math.ceil((to - from) * binsPerSec));
+  const out = new Float32Array(n);
+  const entries = P.withTimelineOffsets(S.project);
+
+  // 必要な範囲の波形を用意する（未デコードなら取りに行く）
+  for (const { clip, offset } of entries) {
+    const dur = P.clipDuration(clip);
+    if (offset + dur < from || offset > to) continue;
+    const src = S.sources.get(clip.sourceId);
+    if (!src?.audio) continue;
+    waves.ensure(src, clip.in, clip.out);
+  }
+  // 取り終わるまで待つ（見えている所だけの遅延生成なので、ここでは明示的に待つ）
+  for (let i = 0; i < 600 && (waves.busy || waves.queue.length); i++) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+
+  for (const { clip, offset } of entries) {
+    const dur = P.clipDuration(clip);
+    if (offset + dur < from || offset > to) continue;
+    const src = S.sources.get(clip.sourceId);
+    if (!src?.audio) continue;
+    const peaks = waves.peaksFor(src);
+    const scale = waves.scaleFor(src);
+    const gain = clip.volume ?? 1;
+    for (let i = 0; i < n; i++) {
+      const t = from + i / binsPerSec;          // タイムライン時刻
+      if (t < offset || t >= offset + dur) continue;
+      const srcT = clip.in + (t - offset);      // 素材の時刻
+      const b0 = Math.floor(srcT * BINS_PER_SEC);
+      const b1 = Math.max(b0 + 1, Math.floor((srcT + 1 / binsPerSec) * BINS_PER_SEC));
+      let v = 0;
+      for (let b = b0; b < b1 && b < peaks.length; b++) if (peaks[b] > v) v = peaks[b];
+      out[i] = Math.max(out[i], Math.min(1, v * scale * gain));
+    }
+  }
+  return [...out];
+}
+
+/** 指定時刻の完成フレームを PNG dataURL で返す（テロップ・ぼかしも入った状態） */
+async function frameAt(time, width) {
+  const total = P.totalDuration(S.project);
+  const t = Math.max(0, Math.min(total, time));
+  const loc = locate(t);
+  if (!loc) throw new Error('クリップがありません');
+  const src = S.sources.get(loc.clip.sourceId);
+  if (!src) throw new Error('素材が読み込まれていません');
+
+  const W = S.project.output.width, H = S.project.output.height;
+  const v = document.createElement('video');
+  v.muted = true; v.preload = 'auto'; v.src = src.previewUrl;
+  await new Promise((res, rej) => {
+    v.addEventListener('loadeddata', res, { once: true });
+    v.addEventListener('error', () => rej(new Error('素材を開けませんでした')), { once: true });
+  });
+  await new Promise((res, rej) => {
+    const to = setTimeout(() => rej(new Error('シークできませんでした')), 5000);
+    v.addEventListener('seeked', () => { clearTimeout(to); res(); }, { once: true });
+    v.currentTime = loc.localTime;
+  });
+
+  const cv = new OffscreenCanvas(W, H);
+  const ctx = cv.getContext('2d');
+  composeFrame(ctx, v, t, W, H, S.project, S.imageLib);
+
+  const h = Math.round((width * H) / W);
+  const small = new OffscreenCanvas(width, h);
+  small.getContext('2d').drawImage(cv, 0, 0, width, h);
+  const blob = await small.convertToBlob({ type: 'image/png' });
+  return await new Promise((res) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.readAsDataURL(blob);
+  });
+}
+
+const mcpCommands = createCommands({
+  S, P, T, MARKER_KINDS,
+  commit, renderAll, status,
+  applyProject, timelineLevels, frameAt, syncProjectUI,
+  nextZ: () => zRange()[1] + 1,
+  seekTo: (t) => { setMode('program'); seekProgram(t, true); renderAll(); },
+});
+
+const bridge = new Bridge(
+  async (cmd, args) => {
+    const fn = mcpCommands[cmd];
+    if (!fn) throw new Error(`知らないコマンドです: ${cmd}`);
+    return await fn(args ?? {});
+  },
+  (state) => {
+    const el = $('mcpDot');
+    if (!el) return;
+    el.className = `mcp-dot ${state}`;
+    el.title = {
+      on: 'MCP つながっています（クリックで切断）',
+      connecting: 'MCP 接続中…',
+      waiting: 'MCP サーバーを待っています（mcp/server.js を起動してください）',
+      off: 'MCP 未接続（クリックで接続）',
+    }[state];
+  },
+);
+
+$('mcpDot').onclick = () => {
+  if (bridge.wanted) { bridge.disconnect(); status('MCP 連携を切りました'); }
+  else { bridge.connect(); status('MCP サーバーに接続します…'); }
+};
+
 // Phase 4（AI 連携 / MCP）に向けた操作フック。
 // プロジェクト JSON をそのまま差し替えられるようにしておく。
 window.bme = {
@@ -3529,6 +3693,7 @@ window.bme = {
   addBlur,
   addMarker,
   keepMarkedRangesOnly,
+  MARKER_KINDS,
   jumpMarker,
   selectNextGap,
   selectPrevGap,
@@ -3542,4 +3707,8 @@ window.bme = {
   loadProjectJSON(text) { S.project = P.deserialize(text); zoomFit(); renderAll(); },
   exportProjectJSON() { return P.serialize(S.project); },
   render: renderAll,
+  bridge,
+  commands: mcpCommands,
+  timelineLevels,
+  frameAt,
 };
