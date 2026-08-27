@@ -2091,10 +2091,7 @@ function renderTelopForm(force = false) {
     <label>フォント
       <button type="button" id="telFontBtn" class="font-btn" title="押すと一覧から選べます"
         style="font-family:'${esc(row.font)}',sans-serif">${esc(fontLabel(row.font))}</button></label>
-    <div class="font-actions">
-      <button class="mini" id="telFontFile">.ttf を追加</button>
-      <button class="mini" id="telFontLocal">PC のフォント一覧</button>
-    </div>
+
 
     <div class="grid2">
       <label>サイズ <input class="num" type="number" id="telSize" min="16" max="400" value="${row.size}"></label>
@@ -2130,10 +2127,23 @@ function renderTelopForm(force = false) {
         <option value="">なし</option>
         ${imgs.map((a) => `<option value="${a.id}"${a.id === tel.bgAssetId ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}
       </select></label>
+    ${tel.bgAssetId ? `
+    <label class="chk"><input type="checkbox" id="telBgFree" ${tel.bgFree ? 'checked' : ''}> 位置と大きさを自由に決める</label>` : ''}
+    ${tel.bgAssetId && tel.bgFree ? `
+    <div class="grid2">
+      <label title="テロップの枠の左上からの位置">右へ
+        <input class="num" type="number" id="telBgX" step="4" value="${Math.round(tel.bgBox?.x ?? 0)}"></label>
+      <label title="テロップの枠の左上からの位置">下へ
+        <input class="num" type="number" id="telBgY" step="4" value="${Math.round(tel.bgBox?.y ?? 0)}"></label>
+      <label title="0 なら画像そのままの大きさ">幅
+        <input class="num" type="number" id="telBgW" step="4" min="0" value="${Math.round(tel.bgBox?.w ?? 0)}"></label>
+      <label title="0 なら画像そのままの大きさ">高さ
+        <input class="num" type="number" id="telBgH" step="4" min="0" value="${Math.round(tel.bgBox?.h ?? 0)}"></label>
+    </div>` : ''}
     ${tel.bgAssetId || tel.bgFillOn ? `
     <div class="grid2">
       <label>不透明度 <input class="num" type="number" id="telBgOp" min="0" max="100" value="${Math.round((tel.bgOpacity ?? 1) * 100)}"></label>
-      ${tel.bgAssetId ? `<label class="chk" style="align-self:end"><input type="checkbox" id="telBgStretch" ${tel.bgFit === 'stretch' ? 'checked' : ''}> 引き伸ばす</label>` : ''}
+      ${tel.bgAssetId && !tel.bgFree ? `<label class="chk" style="align-self:end"><input type="checkbox" id="telBgStretch" ${tel.bgFit === 'stretch' ? 'checked' : ''}> 引き伸ばす</label>` : ''}
     </div>` : ''}
 
     <label>アイコン画像
@@ -2142,16 +2152,26 @@ function renderTelopForm(force = false) {
         ${imgs.map((a) => `<option value="${a.id}"${a.id === tel.icon?.assetId ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}
       </select></label>
     ${tel.icon?.assetId ? `
+    <label class="chk"><input type="checkbox" id="telIconFree" ${tel.icon.free ? 'checked' : ''}> 位置を自由に決める</label>
     <div class="grid2">
+      ${tel.icon.free ? `
+      <label title="テロップの枠の左上からの位置">右へ
+        <input class="num" type="number" id="telIconX" step="4" value="${Math.round(tel.icon.x ?? 0)}"></label>
+      <label title="テロップの枠の左上からの位置">下へ
+        <input class="num" type="number" id="telIconY" step="4" value="${Math.round(tel.icon.y ?? 0)}"></label>
+      ` : `
       <label>位置
         <div class="align-grid four">${[['left', '左'], ['right', '右'], ['top', '上'], ['bottom', '下']].map(([v, n]) =>
           `<button data-icside="${v}" class="${tel.icon.side === v ? 'on' : ''}">${n}</button>`).join('')}</div></label>
-      <label>大きさ <input class="num" type="number" id="telIconSize" min="8" max="600" value="${Math.round(tel.icon.size)}"></label>
       <label>文字との間隔 <input class="num" type="number" id="telIconGap" min="0" max="200" value="${Math.round(tel.icon.gap)}"></label>
+      `}
+      <label>大きさ <input class="num" type="number" id="telIconSize" min="8" max="600" value="${Math.round(tel.icon.size)}"></label>
       <label class="chk" style="align-self:end"><input type="checkbox" id="telIconTrim" ${tel.icon.trim !== false ? 'checked' : ''}> 余白を切り詰める</label>
+      ${tel.icon.free ? '' : `
       <label>縦位置（左右のとき）
         <div class="align-grid">${[['top', '⤒'], ['middle', '↕'], ['bottom', '⤓']].map(([v, n]) =>
           `<button data-icv="${v}" class="${tel.icon.valign === v ? 'on' : ''}">${n}</button>`).join('')}</div></label>
+      `}
     </div>` : ''}
 
     <label>縦の寄せ
@@ -2264,6 +2284,32 @@ function renderTelopForm(force = false) {
   bind('telIcon', (v) => { tel.icon = { ...tel.icon, assetId: v || null }; renderTelopForm(true); });
   bind('telIconSize', (v) => { tel.icon.size = Math.max(8, +v); });
   bind('telIconGap', (v) => { tel.icon.gap = Math.max(0, +v); });
+  // 自由配置（枠の左上からの位置）
+  bind('telIconX', (v) => { tel.icon.x = +v || 0; });
+  bind('telIconY', (v) => { tel.icon.y = +v || 0; });
+  bind('telBgX', (v) => { tel.bgBox = { ...tel.bgBox, x: +v || 0 }; });
+  bind('telBgY', (v) => { tel.bgBox = { ...tel.bgBox, y: +v || 0 }; });
+  bind('telBgW', (v) => { tel.bgBox = { ...tel.bgBox, w: Math.max(0, +v || 0) }; });
+  bind('telBgH', (v) => { tel.bgBox = { ...tel.bgBox, h: Math.max(0, +v || 0) }; });
+  $('telIconFree')?.addEventListener('change', (e) => {
+    commit('アイコンの配置を切り替え');
+    tel.icon.free = e.target.checked;
+    renderTelopForm(true); live();
+  });
+  $('telBgFree')?.addEventListener('change', (e) => {
+    commit('背景画像の配置を切り替え');
+    tel.bgFree = e.target.checked;
+    // 切り替えた瞬間に飛ばないよう、今見えている位置と大きさを引き継ぐ
+    if (tel.bgFree) {
+      const bmp = S.imageLib.get(tel.bgAssetId);
+      if (bmp) {
+        const r = T.bgRect({ ...tel, bgFree: false }, bmp);
+        tel.bgBox = { x: Math.round(r.x - tel.box.x), y: Math.round(r.y - tel.box.y),
+          w: Math.round(r.w), h: Math.round(r.h) };
+      }
+    }
+    renderTelopForm(true); live();
+  });
   $('telIconTrim')?.addEventListener('change', (e) => {
     commit('アイコンの余白設定を変更'); tel.icon.trim = e.target.checked; live();
   });
@@ -2325,8 +2371,6 @@ function renderTelopForm(force = false) {
     renderTelopForm(true);
     status(`プリセット「${name}」を保存しました`);
   };
-  $('telFontFile').onclick = () => $('fontInput').click();
-  $('telFontLocal').onclick = async () => { await loadInstalledFonts(); renderTelopForm(true); };
   $('telFontBtn').onclick = () => openFontPicker(row.font, (css) => {
     commit('フォントを変更');
     row.font = css;
@@ -2386,6 +2430,7 @@ function renderFontList() {
 $('fontPickClose').onclick = closeFontPicker;
 $('fontSearch').addEventListener('input', renderFontList);
 $('fontPickLocal').onclick = () => loadInstalledFonts().then(renderFontList);
+$('fontPickFile').onclick = () => $('fontInput').click();
 $('fontPick').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFontPicker(); });
 
 /** PC のフォントを読み込む（ボタンの直後でないと許可が取れない） */
@@ -4349,12 +4394,14 @@ $('fontInput').onchange = async (e) => {
       const name = await T.loadFontFile(f);
       if (!S.userFonts.includes(name)) S.userFonts.push(name);
       const tel = selectedTelop();
-      if (tel) { tel.font = name; S.telopStyle.font = name; }
+      const row = tel?.rows?.[Math.min(S.telopRow, (tel.rows?.length ?? 1) - 1)];
+      if (row) { row.font = name; S.telopStyle.font = name; }
       status(`フォント「${name}」を追加しました`);
     } catch (err) { status(`フォント読み込み失敗: ${f.name}`, true); }
   }
   e.target.value = '';
   renderTelopForm(true);
+  if (!$('fontPick').classList.contains('hidden')) renderFontList();
   renderOverlay();
 };
 $('btnExport').onclick = () => doExport().catch((e) => status(e.message, true));

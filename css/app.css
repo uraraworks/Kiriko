@@ -268,8 +268,6 @@ kbd {
   border-radius: 4px; padding: 3px 0; font-size: 11px; cursor: pointer;
 }
 .align-group button.on { background: var(--accent2); border-color: #3d80e6; color: #fff; }
-.font-actions { display: flex; gap: 5px; }
-.font-actions button { flex: 1; }
 .sub-label { color: #6f7684; font-size: 10.5px; margin-top: 2px; }
 
 /* ---------- Phase 3: 音まわり / ぼかし ---------- */
@@ -671,3 +669,5 @@ body.exporting .statusbar > .progress { display: block; }
 .font-name { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .font-sample { font-size: 14px; color: var(--dim); white-space: nowrap; }
 .font-en { grid-column: 1 / -1; font-size: 10.5px; color: var(--dim); }
+.fl-foot.font-foot { display: flex; gap: 6px; }
+.fl-foot.font-foot .mini { flex: 1; justify-content: center; }

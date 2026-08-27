@@ -91,6 +91,22 @@ test('migrateTelop: 古いテロップにも内縁 ON と背景色の欄が入�
   assert.equal(t.bgFill, '#000000');
 });
 
+test('画像の自由配置は既定で無効', () => {
+  const t = T.createTelop(0, 1);
+  assert.equal(t.bgFree, false);
+  assert.equal(t.icon.free, false);
+  assert.deepEqual(t.bgBox, { x: 0, y: 0, w: 0, h: 0 });
+});
+
+test('migrateTelop: 古いテロップにも自由配置の欄が入る（既定は寄せのまま）', () => {
+  const t = T.migrateTelop({ id: 'a', start: 0, end: 1, box: { x: 0, y: 0, w: 10, h: 10 },
+    rows: [{ text: 'あ' }], icon: { assetId: 'x', side: 'left', size: 100, gap: 10 } });
+  assert.equal(t.bgFree, false);
+  assert.equal(t.icon.free, false);
+  assert.equal(t.icon.assetId, 'x', '元の設定を消してはいけない');
+  assert.deepEqual(t.bgBox, { x: 0, y: 0, w: 0, h: 0 });
+});
+
 test('プリセットは枠と縦寄せをセットで持つ', () => {
   assert.ok(T.DEFAULT_PRESETS.length >= 4);
   for (const p of T.DEFAULT_PRESETS) {

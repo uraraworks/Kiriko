@@ -66,12 +66,16 @@ export function createTelop(t0, t1, style = {}, text = 'テロップ') {
     wrap: s.wrap ?? true,
     rowGap: 0,
     bgAssetId: null,      // 背景画像（枠に合わせて敷く）
+    bgFree: false,        // true なら bgBox で自由配置（枠の左上からの相対）
+    bgBox: { x: 0, y: 0, w: 0, h: 0 },
     bgFillOn: false,      // 背景色を敷くか
     bgFill: '#000000',
     bgOpacity: 1,
     bgFit: 'contain',
     // アイコン画像（ロゴなど）。文字の左右上下に添える
-    icon: { assetId: null, side: 'left', size: 120, gap: 20, valign: 'middle', trim: true },
+    // side は寄せ。free にすると x, y（枠の左上からの相対）で自由に置ける
+    icon: { assetId: null, side: 'left', size: 120, gap: 20, valign: 'middle', trim: true,
+      free: false, x: 0, y: 0 },
     rows: [createRow(text, s)],
   };
 }
@@ -94,16 +98,20 @@ export function migrateTelop(t) {
       vAlign: vAlign ?? 'middle',
       wrap: wrap ?? true,
       rowGap: 0,
-      bgAssetId: null, bgFillOn: false, bgFill: '#000000', bgOpacity: 1, bgFit: 'contain',
+      bgAssetId: null, bgFree: false, bgBox: { x: 0, y: 0, w: 0, h: 0 },
+      bgFillOn: false, bgFill: '#000000', bgOpacity: 1, bgFit: 'contain',
       rows: [createRow(text ?? '', style)],
     };
   }
   out.rows = out.rows.map((r) => ({ ...DEFAULT_STYLE, ...r }));
-  out.icon = { assetId: null, side: 'left', size: 120, gap: 20, valign: 'middle', trim: true, ...(out.icon ?? {}) };
+  out.icon = { assetId: null, side: 'left', size: 120, gap: 20, valign: 'middle', trim: true,
+    free: false, x: 0, y: 0, ...(out.icon ?? {}) };
   out.bgFillOn = out.bgFillOn ?? false;
   out.bgFill = out.bgFill ?? '#000000';
   out.bgOpacity = out.bgOpacity ?? 1;
   out.bgFit = out.bgFit ?? 'contain';
+  out.bgFree = out.bgFree ?? false;
+  out.bgBox = out.bgBox ?? { x: 0, y: 0, w: 0, h: 0 };   // 枠の左上からの相対
   out.rowGap = out.rowGap ?? 0;
   return out;
 }
@@ -228,7 +236,7 @@ export function layoutTelop(ctx, t, imageLib = null) {
 
   // 文字を流し込む領域（アイコンのぶんを除いたところ）
   const tb = { ...b };
-  if (isz) {
+  if (isz && !ic.free) {
     if (ic.side === 'left') { tb.x += isz.w + ic.gap; tb.w -= isz.w + ic.gap; }
     else if (ic.side === 'right') { tb.w -= isz.w + ic.gap; }
     else if (ic.side === 'top') { tb.y += isz.h + ic.gap; tb.h -= isz.h + ic.gap; }
@@ -257,7 +265,10 @@ export function layoutTelop(ctx, t, imageLib = null) {
 
   // アイコンは文字のかたまりに揃える（左右に置いた時に浮かないように）
   let icon = null;
-  if (isz) {
+  if (isz && ic.free) {
+    // 自由配置。枠の左上からの相対
+    icon = { x: b.x + (ic.x ?? 0), y: b.y + (ic.y ?? 0), w: isz.w, h: isz.h };
+  } else if (isz) {
     let ix, iy;
     if (ic.side === 'left') ix = b.x;
     else if (ic.side === 'right') ix = b.x + b.w - isz.w;
@@ -313,17 +324,30 @@ function drawTelopFill(ctx, t) {
 function drawTelopBg(ctx, t, imageLib) {
   const bmp = t.bgAssetId && imageLib?.get(t.bgAssetId);
   if (!bmp) return;
-  const b = t.box;
+  const r = bgRect(t, bmp);
   ctx.save();
   ctx.globalAlpha = t.bgOpacity ?? 1;
-  if (t.bgFit === 'stretch') {
-    ctx.drawImage(bmp, b.x, b.y, b.w, b.h);
-  } else {
-    const s = Math.min(b.w / bmp.width, b.h / bmp.height);
-    const w = bmp.width * s, h = bmp.height * s;
-    ctx.drawImage(bmp, b.x + (b.w - w) / 2, b.y + (b.h - h) / 2, w, h);
-  }
+  ctx.drawImage(bmp, r.x, r.y, r.w, r.h);
   ctx.restore();
+}
+
+/**
+ * 背景画像を描く場所。
+ * 自由配置のときは枠の左上からの相対（bgBox）で置く。
+ * 位置の基準を枠の左上にしてあるので、枠ごと動かせば画像も付いてくる。
+ */
+export function bgRect(t, bmp) {
+  const b = t.box;
+  if (t.bgFree) {
+    const g = t.bgBox ?? { x: 0, y: 0, w: 0, h: 0 };
+    const w = g.w > 0 ? g.w : bmp.width;
+    const h = g.h > 0 ? g.h : bmp.height;
+    return { x: b.x + g.x, y: b.y + g.y, w, h };
+  }
+  if (t.bgFit === 'stretch') return { x: b.x, y: b.y, w: b.w, h: b.h };
+  const s = Math.min(b.w / bmp.width, b.h / bmp.height);
+  const w = bmp.width * s, h = bmp.height * s;
+  return { x: b.x + (b.w - w) / 2, y: b.y + (b.h - h) / 2, w, h };
 }
 
 /** テロップ 1 個（背景画像＋全行）を描く */

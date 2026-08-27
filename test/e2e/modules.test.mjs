@@ -123,6 +123,58 @@ describe('ブラウザが要るモジュール', { skip: haveChrome() ? false : 
     assert.equal(left, '0px');
   });
 
+  test('テロップ: 背景画像とアイコンを枠の左上からの位置で置ける', async () => {
+    const r = await ev(`(async () => {
+      const T = await import('/js/telop.js');
+      const ctx = new OffscreenCanvas(1920, 1080).getContext('2d');
+      const bmp = { width: 400, height: 120 };
+      const lib = { get: () => bmp };
+      const t = T.createTelop(0, 3, { box: { x: 200, y: 700, w: 1000, h: 300 } }, 'あ');
+      t.bgAssetId = 'a'; t.icon.assetId = 'a'; t.icon.size = 120;
+
+      // 自由配置：枠の左上 + 指定した分
+      t.bgFree = true; t.bgBox = { x: 50, y: 20, w: 300, h: 90 };
+      t.icon.free = true; t.icon.x = 600; t.icon.y = 40;
+      const bg = T.bgRect(t, bmp);
+      const icon = T.layoutTelop(ctx, t, lib).icon;
+
+      // 枠ごと動かすと、画像も付いてくる
+      t.box = { ...t.box, x: 300, y: 800 };
+      const bg2 = T.bgRect(t, bmp);
+      const icon2 = T.layoutTelop(ctx, t, lib).icon;
+
+      // 幅・高さ 0 なら画像そのままの大きさ
+      t.bgBox = { x: 0, y: 0, w: 0, h: 0 };
+      const raw = T.bgRect(t, bmp);
+      return {
+        bg: [bg.x, bg.y, bg.w, bg.h], icon: [icon.x, icon.y],
+        bg2: [bg2.x, bg2.y], icon2: [icon2.x, icon2.y],
+        raw: [raw.w, raw.h],
+      };
+    })()`);
+    assert.deepEqual(r.bg, [250, 720, 300, 90], '背景画像が枠の左上基準になっていない');
+    assert.deepEqual(r.icon, [800, 740], 'アイコンが枠の左上基準になっていない');
+    assert.deepEqual(r.bg2, [350, 820], '枠を動かしても背景画像が付いてこない');
+    assert.deepEqual(r.icon2, [900, 840], '枠を動かしてもアイコンが付いてこない');
+    assert.deepEqual(r.raw, [400, 120], '幅 0 で画像そのままの大きさにならない');
+  });
+
+  test('テロップ: 自由配置にしても文字の領域は削られない', async () => {
+    const r = await ev(`(async () => {
+      const T = await import('/js/telop.js');
+      const ctx = new OffscreenCanvas(1920, 1080).getContext('2d');
+      const lib = { get: () => ({ width: 400, height: 120 }) };
+      const t = T.createTelop(0, 3, {}, 'あ');
+      t.icon.assetId = 'a';
+      const anchored = T.layoutTelop(ctx, t, lib).textBox.w;
+      t.icon.free = true;
+      const free = T.layoutTelop(ctx, t, lib).textBox.w;
+      return { anchored, free, box: t.box.w };
+    })()`);
+    assert.ok(r.anchored < r.box, '寄せ配置ではアイコンのぶん狭くなる');
+    assert.equal(r.free, r.box, '自由配置なのに文字の領域が狭められている');
+  });
+
   test('テロップ: 文字の外形が枠の中に収まる', async () => {
     const r = await ev(`(async () => {
       const T = await import('/js/telop.js');
