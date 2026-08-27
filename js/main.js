@@ -334,13 +334,22 @@ function selectSource(id) {
   setMode('source');
   setVideoSource(id);
   video.currentTime = 0;
-  $('noMedia').style.display = 'none';
   renderAll();
 }
 
 // ---------------------------------------------------------------- モニター
 
 /** <video> に流す素材を切り替える（同じなら何もしない） */
+/**
+ * モニターの「素材が未読み込みです」を出し入れする。
+ * 素材の読み込みは選択（selectSource）以外の経路もある（プロジェクトを開いた時など）ので、
+ * 状態から毎回決める。
+ */
+function renderNoMedia() {
+  const el = $('noMedia');
+  if (el) el.style.display = S.sources.size ? 'none' : '';
+}
+
 function setVideoSource(id) {
   if (S.videoSourceId === id) return;
   const src = S.sources.get(id);
@@ -3485,6 +3494,11 @@ async function reloadMissingAssets(ask = false) {
     }
   }
 
+  // 読み直した素材をモニターにも載せる（開いただけでは selectSource を通らない）
+  if (S.currentSourceId && !S.videoSourceId) {
+    setVideoSource(S.currentSourceId);
+    $('monName').textContent = curSource()?.name ?? '—';
+  }
   const missing = missingAssets();
   refreshProgram();
   renderAll();
@@ -3906,6 +3920,7 @@ new ResizeObserver(() => { renderTimeline(); renderScrub(); renderOverlay(); }).
 // ---------------------------------------------------------------- 起動
 
 function renderAll() {
+  renderNoMedia();
   renderBin();
   renderInspTabs();
   renderInspector();
