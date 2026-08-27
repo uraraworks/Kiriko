@@ -4,7 +4,7 @@ import * as P from './project.js';
 import { exportProject } from './exporter.js';
 import { parseKdenlive, basename } from './kdenlive.js';
 import * as T from './telop.js';
-import { composeFrame, activeBlur, drawOverlaysAt, overlaysAt, blurRectAt, activeRectBlurs } from './compose.js';
+import { composeFrame, activeBlur, drawOverlaysAt, overlaysAt, blurRectAt, activeRectBlurs, drawRectBlur } from './compose.js';
 import { AudioLibrary, AudioPreview, mixInto } from './audio.js';
 import { History } from './history.js';
 import * as Lib from './library.js';
@@ -970,6 +970,11 @@ function renderOverlay() {
 
   const sel = activeBox();
   if (S.mode === 'program') {
+    // 部分ぼかしは <video> の CSS filter では表現できないので、
+    // その区間だけ映像をキャンバスに描き直して重ねる
+    if (video.readyState >= 2) {
+      for (const b of activeRectBlurs(S.project.blurs, t)) drawRectBlur(ctx, video, W, H, b, t);
+    }
     drawOverlaysAt(ctx, S.project, t, S.imageLib);
   } else if (sel) {
     // ソースモニターでは、位置調整しやすいよう選択中のものだけ出す
@@ -998,8 +1003,12 @@ function stagePoint(e) {
 function pickBox(p, t) {
   const ctx = overlay.getContext('2d');
   const sel = activeBox();
+  // 部分ぼかしは一番奥に置く（テロップ・画像が重なっていればそちらを優先して掴む）
   const list = S.mode === 'program'
-    ? [...(sel?.kind === 'blur' ? [{ kind: 'blur', item: sel.item }] : []), ...overlaysAt(S.project, t)]
+    ? [
+        ...activeRectBlurs(S.project.blurs, t).map((b) => ({ kind: 'blur', item: blurBoxProxy(b, t) })),
+        ...overlaysAt(S.project, t),
+      ]
     : (sel ? [{ kind: sel.kind, item: sel.item }] : []);
   // 手前（z が大きい方）から拾う
   for (let i = list.length - 1; i >= 0; i--) {
@@ -1039,6 +1048,7 @@ overlay.addEventListener('pointerdown', (e) => {
   try { overlay.setPointerCapture(e.pointerId); } catch {}
   const changed = hit.item.id !== (sel?.item.id ?? null);
   select(hit.kind, hit.item.id);
+  if (hit.kind === 'blur') S.inspTab = 'props';
   boxDrag = {
     ...hit, mode: 'move', startX: p.x, startY: p.y,
     orig: { ...hit.item.box }, guides: [], committed: false,
