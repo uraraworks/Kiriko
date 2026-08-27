@@ -13,9 +13,7 @@
 
 ![Kiriko の編集画面](public/help/03-timeline.png)
 
-<!-- 共有時に出る画像は public/social.png（npm run social で作り直せる）。
-     GitHub の Social preview は API から設定できないので、
-     Settings → General → Social preview から手で上げる -->
+<!-- 共有時に出る画像は public/social.png（npm run social で作り直せる） -->
 
 ## できること
 
@@ -156,9 +154,12 @@ npm run test:e2e  # 実 Chrome での結合テスト（1 分ほど。ffmpeg が�
 npm run social
 ```
 
-各ページの `og:image` はこれを指している。**GitHub のリポジトリ側**（`github.com/uraraworks/Kiriko`
-を貼った時に出る画像）は API から設定できないので、
-Settings → General → Social preview から手で上げる。
+各ページの `og:image` はこれを指しているので、**Pages の URL を貼れば**この画像が出る。
+
+`github.com/uraraworks/Kiriko` の方を貼った時は、GitHub が自動生成した画像
+（リポジトリ名・説明・アバター）になる。他のリポジトリ（FMSound / Sprout68k）も同じ扱いで、
+そちらは設定していない。変えたい場合だけ Settings → General → Social preview から手で上げる
+（この項目は REST API に無い）。
 
 `npm run hooks:install` を一度実行すると、**push の前に `npm test` が走る**ようになる
 （急ぐときは `git push --no-verify`）。結合テストは GitHub Actions でも回している。

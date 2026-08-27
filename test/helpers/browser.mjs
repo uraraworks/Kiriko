@@ -1,47 +1,14 @@
 // 実 Chrome で index.html を開いて操作するための土台。
 // アプリ側の入口は window.bme（MCP と同じコマンドを通る）。
-import { createServer } from 'node:http';
-import { createReadStream, existsSync, statSync } from 'node:fs';
-import { join, normalize, extname } from 'node:path';
+import { existsSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
-import { ROOT } from './fixtures.mjs';
+import { serve } from '../../scripts/static-server.mjs';
+
+export { serve };
 
 const CHROME = process.env.CHROME_PATH
   ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 export const haveChrome = () => existsSync(CHROME);
-
-const TYPES = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
-  '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.svg': 'image/svg+xml',
-};
-
-/**
- * テスト用の静的サーバー。
- * ポートは OS に空きを選ばせる（テストファイルが並列に走っても取り合わない）。
- */
-export function serve() {
-  const srv = createServer((req, res) => {
-    const rel = normalize(decodeURIComponent(req.url.split('?')[0])).replace(/^(\.\.[/])+/, '');
-    const file = join(ROOT, rel === '/' ? 'index.html' : rel);
-    if (!file.startsWith(ROOT) || !existsSync(file) || statSync(file).isDirectory()) {
-      res.writeHead(404); res.end('not found'); return;
-    }
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
-    createReadStream(file).pipe(res);
-  });
-  let base = null;
-  return {
-    get base() { return base; },
-    stop: () => srv.close(),
-    ready: async () => {
-      await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-      base = `http://127.0.0.1:${srv.address().port}`;
-      return base;
-    },
-  };
-}
 
 /** ブラウザを開いて、アプリの準備ができた状態のページを返す */
 export async function openApp(base) {

@@ -1,7 +1,8 @@
 // public/help/*.png（使い方ページの説明用スクリーンショット）を撮り直す。
 //
-//   python3 -m http.server 8901   # 別ターミナルで起動しておく
 //   node scripts/capture-help-shots.mjs
+//
+// サーバーは中で立てるので、別ターミナルでの起動は要らない。
 //
 // 実素材は同梱できないので、撮影用の短い動画・音源・画像はこのスクリプトが
 // その場で作る（ffmpeg / Canvas）。撮影用プロファイルは毎回捨てるので、
@@ -14,9 +15,9 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
+import { serve } from './static-server.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const BASE_URL = process.env.KIRIKO_URL ?? 'http://localhost:8901';
 const CHROME = process.env.CHROME_PATH
   ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const OUT_DIR = join(ROOT, 'public/help');
@@ -63,6 +64,8 @@ const loadFiles = (paths) => `(async () => {
 async function main() {
   const S = buildSamples();
   await mkdir(OUT_DIR, { recursive: true });
+  const server = serve();
+  const BASE_URL = await server.ready();
   const profile = await mkdtemp(join(tmpdir(), 'kiriko-shots-'));
   const browser = await puppeteer.launch({
     executablePath: CHROME,
@@ -137,6 +140,12 @@ async function main() {
       window.bme.render();
     })()`);
     await sleep(900);
+    // 設定が増えたので、既定より広げて写す（実際に右下のつまみで広げられる）
+    await run(`(() => {
+      const d = document.getElementById('telopDialog');
+      d.style.width = '390px'; d.style.height = '740px'; d.style.maxHeight = 'none';
+    })()`);
+    await sleep(400);
     await shot('05-telop');
 
     // 6) 画像と音源
@@ -169,7 +178,19 @@ async function main() {
     await sleep(500);
     await shot('08-export');
 
-    // 9) テロップライブラリ（ライブラリフォルダの説明に使う）
+    // 9) フォント選び（テロップ編集を開き直してから）
+    await run(`(() => {
+      window.bme.state.selectedTelopId = window.bme.project.telops[0].id;
+      document.getElementById('btnAddTelop').click();
+    })()`);
+    await sleep(600);
+    await run(`document.getElementById('telFontBtn').click()`);
+    await sleep(700);
+    await shot('09-font');
+    await run(`document.getElementById('fontPickClose').click()`);
+    await run(`document.getElementById('telopDialogClose').click()`);
+
+    // 10) テロップライブラリ（ライブラリフォルダの説明に使う）
     //    フォルダ選択はユーザー操作が要るので、撮影用に置き場所だけ差し替えて
     //    実際のボタンの処理（setLibDir → 表示更新）を通す
     await run(`(async () => {
@@ -193,11 +214,12 @@ async function main() {
     await sleep(700);
     await run(`document.getElementById('libRefresh').click()`);
     await sleep(900);
-    await shot('09-library');
+    await shot('10-library');
 
     console.error(`出力先: ${OUT_DIR}`);
   } finally {
     await browser.close();
+    server.stop();
     await rm(profile, { recursive: true, force: true });
   }
 }
