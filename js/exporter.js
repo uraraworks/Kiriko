@@ -82,9 +82,23 @@ export async function exportProject(project, sourceMap, opts = {}) {
   const audioRate = audioSrc ? audioSrc.sampleRate : 48000;
   const audioCh = audioSrc ? Math.min(2, audioSrc.channels) : 2;
 
+  // mp4 の索引（moov）はファイルの先頭に置く。
+  // 末尾にあると、Web に置いて再生する時に索引を探しに行く分だけ再生開始が遅れる
+  // （YouTube やローカル再生では差は出ないが、先頭に置いて損をする場面は無い）。
+  //
+  // ディスクへ直接書く場合は、先に moov の場所を空けておく必要があるので、
+  // フレーム数を前もって見積もる。足りないと書き出しの最後で失敗するため多めに取る。
+  // 余った分は free ボックスで埋まるだけで、無駄になるのは数 MB。
+  const totalSec = clips.reduce((a, c) => a + clipDuration(c), 0);
+  const room = (n) => Math.ceil(n * 1.2) + 1000;
   const muxer = new Muxer({
     target,
-    fastStart: streaming ? false : 'in-memory',
+    fastStart: streaming
+      ? {
+        expectedVideoChunks: room(totalSec * fps),
+        expectedAudioChunks: room((totalSec * audioRate) / 1024),  // AAC は 1024 サンプルで 1 個
+      }
+      : 'in-memory',
     firstTimestampBehavior: 'offset',
     video: { codec: 'avc', width, height, frameRate: fps },
     audio: { codec: 'aac', sampleRate: audioRate, numberOfChannels: audioCh },
