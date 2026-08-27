@@ -92,8 +92,22 @@ test('name テーブルの位置を探せる', () => {
   };
   put(0, 'cmap', 100, 10);
   put(1, 'name', 500, 42);
-  assert.deepEqual(findNameTable(buf), { offset: 500, length: 42, base: 0 });
+  assert.deepEqual(findNameTable(buf), { offset: 500, length: 42 });
   assert.equal(findNameTable(new ArrayBuffer(12 + 16)), null, '無ければ null');
+});
+
+// TrueType Collection（ヒラギノなど）はテーブルの位置が**ファイル先頭からの絶対値**。
+// フォントの開始位置を足してしまうと読み先がずれ、日本語名が取れなくなる。
+test('ttc: テーブルの位置に、フォントの開始位置を足さない', () => {
+  const FONT_AT = 200, NAME_AT = 900;
+  const buf = new ArrayBuffer(64);
+  const v = new DataView(buf);
+  v.setUint32(0, 0x00010000); v.setUint16(4, 1);
+  for (let k = 0; k < 4; k++) v.setUint8(12 + k, 'name'.charCodeAt(k));
+  v.setUint32(20, NAME_AT); v.setUint32(24, 33);
+  const t = findNameTable(buf);
+  assert.equal(t.offset, NAME_AT, `${FONT_AT} を足してしまっている`);
+  assert.equal(t.length, 33);
 });
 
 test('ヘッダの読み方: 普通のフォントと ttc', () => {

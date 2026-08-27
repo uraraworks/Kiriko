@@ -39,17 +39,21 @@ export function firstFontOffset(probe16) {
 
 /**
  * テーブル一覧から name テーブルの位置を探す。
+ *
+ * 返す offset は**ファイル先頭からの絶対位置**。
+ * TrueType Collection でも、テーブル一覧に入っている値は絶対位置なので、
+ * フォントの開始位置を足してはいけない（足すと読み先がずれて名前が取れない）。
+ *
  * @param {ArrayBuffer} header そのフォントの先頭から 12 + 16*numTables バイト
- * @param {number} base フォント自体の開始位置（ttcf のとき用）
  */
-export function findNameTable(header, base = 0) {
+export function findNameTable(header) {
   const v = new DataView(header);
   const numTables = U16(v, 4);
   for (let i = 0; i < numTables; i++) {
     const o = 12 + i * 16;
     if (o + 16 > v.byteLength) break;
     if (U32(v, o) === 0x6e616d65) {   // 'name'
-      return { offset: U32(v, o + 8), length: U32(v, o + 12), base };
+      return { offset: U32(v, o + 8), length: U32(v, o + 12) };
     }
   }
   return null;

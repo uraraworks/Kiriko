@@ -510,18 +510,34 @@ export async function queryInstalledFonts(onProgress = null) {
       : '許可ダイアログをキャンセルしたため取得できませんでした。もう一度押して「許可」を選んでください');
   }
 
+  // 一覧はファミリ単位にまとめる（Font Book は書体（ウェイト）ごとに数えるので、
+  // 向こうの件数より少なくなるのが普通）
   const byFamily = new Map();
   for (const f of fonts) if (!byFamily.has(f.family)) byFamily.set(f.family, f);
   const families = [...byFamily.keys()].sort();
 
-  // 日本語名はフォント自身が持っている（API は英語名しか返さない）。
-  // ファイル全部は読まず、name テーブルだけ切り出して読む
-  const out = [];
-  for (const family of families) {
-    const ja = await japaneseName(byFamily.get(family)).catch(() => null);
-    out.push({ css: family, label: ja && ja !== family ? ja : family, en: family });
-  }
-  if (onProgress) onProgress(out.length, out.length);
+  // まず英語名のまま返す。数百フォントの日本語名を待たせると、
+  // 一覧が出てこないように見えてしまう
+  const out = families.map((family) => ({ css: family, label: family, en: family }));
+  out.faces = fonts.length;   // 書体（ウェイト違いを含む）の数
+
+  // 日本語名は後から差し替える（フォント自身の name テーブルから読む）。
+  // 何本かまとめて並行に読む — 1 本ずつ待つと数百フォントで待たされる
+  (async () => {
+    let done = 0, at = 0;
+    const LANES = 8;
+    const worker = async () => {
+      while (at < out.length) {
+        const i = at++;
+        const ja = await japaneseName(byFamily.get(out[i].css)).catch(() => null);
+        if (ja && ja !== out[i].css) out[i].label = ja;
+        done++;
+        if (onProgress && (done % 25 === 0 || done === out.length)) onProgress(done, out.length);
+      }
+    };
+    await Promise.all(Array.from({ length: LANES }, worker));
+  })();
+
   return out;
 }
 
@@ -540,9 +556,9 @@ async function japaneseName(fontData) {
     if (!plan) return null;
   }
   const header = await blob.slice(base, base + plan.need).arrayBuffer();
-  const tbl = FN.findNameTable(header, base);
+  const tbl = FN.findNameTable(header);
   if (!tbl) return null;
-  const at = base + tbl.offset;
-  const table = await blob.slice(at, at + tbl.length).arrayBuffer();
+  // offset はファイル先頭からの絶対位置（ttc でも同じ）
+  const table = await blob.slice(tbl.offset, tbl.offset + tbl.length).arrayBuffer();
   return FN.readFamilyNames(table).ja;
 }

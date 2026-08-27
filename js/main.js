@@ -2469,10 +2469,17 @@ $('fontPick').addEventListener('keydown', (e) => { if (e.key === 'Escape') close
 async function loadInstalledFonts() {
   try {
     status('フォントを調べています…');
-    S.installedFonts = await T.queryInstalledFonts();
-    const ja = S.installedFonts.filter((f) => f.label !== f.en).length;
-    status(`インストール済みフォント ${S.installedFonts.length} 件`
-      + (ja ? `（うち ${ja} 件は日本語名で表示）` : ''));
+    // 一覧はすぐ返り、日本語名だけ後から入る。届くたびに描き直す
+    S.installedFonts = await T.queryInstalledFonts((done, total) => {
+      if (!$('fontPick').classList.contains('hidden')) renderFontList();
+      status(done < total
+        ? `日本語のフォント名を読んでいます… ${done} / ${total}`
+        : `フォント ${total} 種類`
+          + `（うち ${S.installedFonts.filter((f) => f.label !== f.en).length} 件は日本語名で表示）`);
+    });
+    const n = S.installedFonts.length, faces = S.installedFonts.faces ?? n;
+    status(`フォント ${n} 種類を読み込みました`
+      + (faces > n ? `（太さ違いを含めると ${faces} 書体）` : ''));
   } catch (e) { status(e.message, true); }
 }
 
