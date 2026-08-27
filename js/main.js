@@ -2319,10 +2319,13 @@ $('tlWrap').addEventListener('wheel', (e) => {
 async function saveProject() {
   S.project.title = S.project.title || '無題プロジェクト';
   const text = P.serialize(S.project);
-  const name = `${S.project.title}.bme.json`;
+  const name = `${S.project.title || '無題プロジェクト'}.json`;
   if ('showSaveFilePicker' in window) {
     try {
-      const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'BME プロジェクト', accept: { 'application/json': ['.json'] } }] });
+      const h = await window.showSaveFilePicker({
+        suggestedName: name,
+        types: [{ description: 'Kiriko プロジェクト', accept: { 'application/json': ['.json'] } }],
+      });
       const w = await h.createWritable();
       await w.write(text); await w.close();
       status('プロジェクトを保存しました');
