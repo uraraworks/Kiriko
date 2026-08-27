@@ -259,12 +259,17 @@ async function addFiles(files) {
       status(`${file.name} を解析中…`);
       const src = new Mp4Source(file);
       await src.load((m) => status(`${file.name}: ${m}`));
-      const id = P.newId('src');
+      // 同じ名前で「未接続」の枠があればそこへ繋ぐ（プロジェクトを開いた直後の再接続）
+      const slot = S.project.sources.find((x) => x.name === src.name && !S.sources.has(x.id));
+      const id = slot?.id ?? P.newId('src');
       S.sources.set(id, src);
-      S.project.sources.push({ id, name: src.name, size: file.size, duration: src.duration });
+      if (slot) Object.assign(slot, { size: file.size, duration: src.duration });
+      else S.project.sources.push({ id, name: src.name, size: file.size, duration: src.duration });
       status(`${file.name} 読み込み完了（${tc(src.duration)}）`);
       if (!S.currentSourceId) selectSource(id);
       bindPendingKdenlive();
+      // 既にクリップが載っているなら、素材そのものではなく仕上がりを見せる
+      if (S.project.clips.length) refreshProgram();
     } catch (e) {
       console.error(e);
       status(`${file.name}: ${e.message}`, true);
@@ -305,6 +310,8 @@ function bindPendingKdenlive() {
   }));
   S.pendingKdenlive = null;
   zoomFit();
+  S.programTime = 0;
+  refreshProgram();
   const notes = [];
   if (pend.overlaps) notes.push(`${pend.overlaps} 箇所のトランジションは詰めて並べました`);
   if (pend.dropped) notes.push(`重ねて置かれていた ${pend.dropped} 件は取り込めていません`);
@@ -368,6 +375,14 @@ function clipOffset(index) {
   let acc = 0;
   for (let i = 0; i < index; i++) acc += P.clipDuration(S.project.clips[i]);
   return acc;
+}
+
+/** クリップの並びが変わった後に、プレビューを今の位置の絵に合わせ直す */
+function refreshProgram() {
+  if (!P.totalDuration(S.project)) return;
+  setMode('program');
+  S.programIndex = -1;
+  seekProgram(Math.min(S.programTime, P.totalDuration(S.project)), true);
 }
 
 function seekProgram(t, force = false) {
@@ -835,9 +850,11 @@ async function addAudioAssets(files) {
   const lib = library();
   for (const f of files) {
     try {
-      const id = P.newId('aud');
+      const slot = S.project.audioAssets.find((x) => x.name === f.name && !lib.has(x.id));
+      const id = slot?.id ?? P.newId('aud');
       const meta = await lib.add(f, id);
-      S.project.audioAssets.push(meta);
+      if (slot) Object.assign(slot, meta);
+      else S.project.audioAssets.push(meta);
       status(`${f.name} を読み込みました（${tc(meta.duration, false)}）`);
     } catch (e) {
       status(`${f.name}: 音源を読み込めませんでした`, true);
@@ -880,9 +897,11 @@ function placeAudio(assetId) {
 async function addImageAssets(files) {
   for (const f of files) {
     try {
-      const id = P.newId('img');
+      const slot = S.project.imageAssets.find((x) => x.name === f.name && !S.imageLib.get(x.id));
+      const id = slot?.id ?? P.newId('img');
       const meta = await S.imageLib.add(f, id);
-      S.project.imageAssets.push(meta);
+      if (slot) Object.assign(slot, meta);
+      else S.project.imageAssets.push(meta);
       status(`${f.name} を読み込みました（${meta.width}×${meta.height}）`);
     } catch {
       status(`${f.name}: 画像を読み込めませんでした`, true);
@@ -1161,7 +1180,6 @@ function toggleHelp(show) {
     helpDlg.style.top = '58px';
   }
 }
-$('btnHelp').onclick = () => window.open('help.html', '_blank', 'noopener');
 $('helpDialogClose').onclick = () => toggleHelp(false);
 (() => {
   const head = $('helpDialogHead');
@@ -1374,35 +1392,49 @@ function renderMediaBin() {
   if (empty) return;
 
   for (const s of S.project.sources) {
+    const loaded = S.sources.has(s.id);
     const el = document.createElement('div');
-    el.className = 'bin-item' + (s.id === S.currentSourceId ? ' active' : '');
+    el.className = 'bin-item' + (s.id === S.currentSourceId ? ' active' : '') + (loaded ? '' : ' missing');
     el.innerHTML = `<div class="row"><div class="n">${esc(s.name)}</div>`
-      + `<button class="bin-add" title="この素材をまるごとタイムラインに置く。ここから要らない範囲を切り取っていく">全体を置く</button></div>`
-      + `<div class="m">${tc(s.duration)} ／ ${(s.size / 1e9).toFixed(2)} GB</div>`;
-    el.querySelector('.bin-add').onclick = (ev) => { ev.stopPropagation(); placeWholeSource(s.id); };
-    el.onclick = () => selectSource(s.id);
+      + (loaded ? `<button class="bin-add" title="この素材をまるごとタイムラインに置く。ここから要らない範囲を切り取っていく">全体を置く</button>` : '')
+      + `</div>`
+      + (loaded
+        ? `<div class="m">${tc(s.duration)} ／ ${(s.size / 1e9).toFixed(2)} GB</div>`
+        : `<div class="m warnline">未接続 — このファイルをドロップするとつながります</div>`);
+    if (loaded) {
+      el.querySelector('.bin-add').onclick = (ev) => { ev.stopPropagation(); placeWholeSource(s.id); };
+      el.onclick = () => selectSource(s.id);
+    } else {
+      el.onclick = () => status(`${s.name} を開くと、このプロジェクトのクリップがつながります`);
+    }
     list.appendChild(el);
   }
 
   for (const a of S.project.audioAssets) {
+    const ok = !!S.library?.has(a.id);
     const el = document.createElement('div');
-    el.className = 'bin-item audio';
+    el.className = 'bin-item audio' + (ok ? '' : ' missing');
     el.innerHTML = `<div class="row"><div class="n">♪ ${esc(a.name)}</div>`
-      + `<button class="bin-add" title="再生位置に配置">＋</button></div>`
-      + `<div class="m">${tc(a.duration, false)} ／ ${a.duration > 20 ? 'BGM' : '効果音'}</div>`;
-    el.querySelector('.bin-add').onclick = (e) => { e.stopPropagation(); placeAudio(a.id); };
-    el.onclick = () => placeAudio(a.id);
+      + (ok ? `<button class="bin-add" title="再生位置に配置">＋</button>` : '') + `</div>`
+      + (ok ? `<div class="m">${tc(a.duration, false)} ／ ${a.duration > 20 ? 'BGM' : '効果音'}</div>`
+            : `<div class="m warnline">未接続 — このファイルをドロップするとつながります</div>`);
+    if (ok) {
+      el.querySelector('.bin-add').onclick = (e) => { e.stopPropagation(); placeAudio(a.id); };
+      el.onclick = () => placeAudio(a.id);
+    }
     list.appendChild(el);
   }
 
   for (const a of S.project.imageAssets) {
+    const ok = !!S.imageLib.get(a.id);
     const el = document.createElement('div');
-    el.className = 'bin-item image';
+    el.className = 'bin-item image' + (ok ? '' : ' missing');
     el.innerHTML = `<div class="row"><div class="n">▣ ${esc(a.name)}</div></div>`
-      + `<div class="m">${a.width}×${a.height}</div>`
-      + `<div class="place-row">${PLACEMENTS.map((pl) => `<button data-p="${pl.id}">${pl.name}</button>`).join('')}</div>`;
+      + (ok ? `<div class="m">${a.width}×${a.height}</div>`
+            : `<div class="m warnline">未接続 — このファイルをドロップするとつながります</div>`)
+      + (ok ? `<div class="place-row">${PLACEMENTS.map((pl) => `<button data-p="${pl.id}">${pl.name}</button>`).join('')}</div>` : '');
     const bmp = S.imageLib.get(a.id);
-    if (bmp) {
+    if (bmp && el.querySelector('.place-row')) {
       const cv = document.createElement('canvas');
       const s2 = Math.min(200 / bmp.width, 54 / bmp.height);
       cv.width = Math.max(1, Math.round(bmp.width * s2));
@@ -1414,6 +1446,7 @@ function renderMediaBin() {
     for (const b of el.querySelectorAll('.place-row button')) {
       b.onclick = (e) => { e.stopPropagation(); placeImage(a.id, b.dataset.p); };
     }
+    if (!ok) el.onclick = () => status(`${a.name} を開くと、この画像がつながります`);
     list.appendChild(el);
   }
 }
@@ -3232,25 +3265,37 @@ async function loadProject(file) {
   }
   try {
     const p = P.deserialize(text);
-    // 素材は名前で突き合わせる（ファイル参照はブラウザ側に保持できないため）
-    const byName = new Map();
-    for (const [id, src] of S.sources) byName.set(src.name, id);
+    // ファイルの実体はブラウザに保持できないので、名前で突き合わせる。
+    // 保存されていた素材の一覧は捨てずに残す（どのファイルが要るか分かるように）。
+    // 既に開いている素材があれば、そちらの id に寄せる。
+    const loaded = new Map();
+    for (const [id, src] of S.sources) loaded.set(src.name, id);
     const remap = new Map();
-    for (const s of p.sources) {
-      const existing = byName.get(s.name);
-      if (existing) remap.set(s.id, existing);
+    const sources = [];
+    for (const s of p.sources ?? []) {
+      const hit = loaded.get(s.name);
+      if (hit) { remap.set(s.id, hit); sources.push({ ...s, id: hit }); loaded.delete(s.name); }
+      else sources.push({ ...s });
     }
-    p.clips = p.clips.map((c) => ({ ...c, sourceId: remap.get(c.sourceId) ?? c.sourceId }));
-    p.sources = S.project.sources;
+    // 読み込む前から開いていて、プロジェクトに載っていない素材も残す
+    for (const [name, id] of loaded) {
+      const src = S.sources.get(id);
+      sources.push({ id, name, size: src.file.size, duration: src.duration });
+    }
+    p.sources = sources;
+    p.clips = (p.clips ?? []).map((c) => ({ ...c, sourceId: remap.get(c.sourceId) ?? c.sourceId }));
     commit('プロジェクトを読み込み');
     S.project = p;
     normalizeProject();
     syncProjectUI();
     select(null, null);
-    const missing = p.clips.filter((c) => !S.sources.has(c.sourceId)).length;
+    const need = [...new Set(p.sources.filter((x) => !S.sources.has(x.id)).map((x) => x.name))];
     zoomFit();
+    refreshProgram();
     renderAll();
-    status(missing ? `読み込みました（素材未接続のクリップ ${missing} 件。該当 mp4 を開いてください）` : 'プロジェクトを読み込みました');
+    status(need.length
+      ? `読み込みました。${need.join('・')} を開くとつながります`
+      : 'プロジェクトを読み込みました');
   } catch (e) {
     status(`プロジェクトを読み込めませんでした（${file.name}）: ${e.message}`, true);
   }
