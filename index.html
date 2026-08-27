@@ -124,6 +124,14 @@
   </header>
 
   <!-- ============ ワークスペース ============ -->
+  <!-- 素材が見つからない時の案内 -->
+  <div id="missingBar" class="missing-bar hidden">
+    <svg class="ic"><use href="#i-image"/></svg>
+    <span class="mb-text"></span>
+    <button id="mbFind" class="tb">素材を探す</button>
+    <button id="mbFolder" class="tb">フォルダを選ぶ</button>
+  </div>
+
   <main class="workspace" id="workspace">
 
     <!-- メディアビン -->
@@ -151,7 +159,9 @@
 
       <div id="binLib" class="bin-pane hidden">
         <div class="bin-actions">
-          <button class="mini" id="libRefresh" title="一覧を読み直す"><svg class="ic"><use href="#i-redo"/></svg><span>更新</span></button>
+          <button class="mini" id="libExport" title="ライブラリ全体をファイルに書き出す（画像も含む）"><svg class="ic"><use href="#i-save"/></svg><span>書き出し</span></button>
+          <button class="mini" id="libImport" title="書き出したファイルを読み込む"><svg class="ic"><use href="#i-open"/></svg><span>読み込み</span></button>
+          <button class="mini ico" id="libRefresh" title="一覧を読み直す"><svg class="ic"><use href="#i-redo"/></svg></button>
         </div>
         <div id="libList" class="bin-list"></div>
       </div>
@@ -387,6 +397,7 @@
 <input type="file" id="fontInput" accept=".ttf,.otf,.woff,.woff2,.ttc" multiple hidden>
 <input type="file" id="audioInput" accept="audio/*,.mp3,.wav,.m4a,.ogg" multiple hidden>
 <input type="file" id="imageInput" accept="image/*,.png,.jpg,.jpeg,.webp" multiple hidden>
+<input type="file" id="libInput" accept=".kirikolib,application/json,.json" hidden>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

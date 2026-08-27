@@ -30,7 +30,7 @@ body {
 }
 #app {
   display: grid;
-  grid-template-rows: 40px minmax(120px,1fr) 6px var(--tl-h, 330px) 26px;
+  grid-template-rows: 40px auto minmax(120px,1fr) 6px var(--tl-h, 330px) 26px;
   height: 100%;
 }
 
@@ -499,3 +499,13 @@ kbd {
 .bin-item.missing { opacity: .72; }
 .bin-item.missing .n { color: #c9a0a0; }
 .warnline { color: #d09a72 !important; }
+
+/* 素材が見つからない時の案内 */
+.missing-bar {
+  display: flex; align-items: center; gap: 10px; padding: 7px 12px;
+  background: #3a2f1c; border-bottom: 1px solid #5a4a28; color: #e8d3ab; font-size: 12.5px;
+}
+.missing-bar.hidden { display: none; }
+.missing-bar .ic { width: 16px; height: 16px; flex: none; color: #d9b25f; }
+.missing-bar .mb-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.missing-bar .tb { padding: 4px 12px; font-size: 12px; }

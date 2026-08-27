@@ -8,6 +8,7 @@ import { composeFrame, activeBlur, drawOverlaysAt, overlaysAt, blurRectAt, activ
 import { AudioLibrary, AudioPreview, mixInto } from './audio.js';
 import { History } from './history.js';
 import * as Lib from './library.js';
+import * as FS from './filestore.js';
 import { Bridge } from './bridge.js';
 import { createCommands } from './commands.js';
 import { ThumbCache, THUMB_W, THUMB_H } from './thumbs.js';
@@ -236,6 +237,8 @@ async function openFiles() {
         }],
       });
       files = await Promise.all(handles.map((h) => h.getFile()));
+      // 次に開いた時そのまま読み直せるよう、ハンドルを覚えておく
+      for (const h of handles) await FS.rememberFile(h.name, h);
     } catch (e) { if (e.name === 'AbortError') return; throw e; }
   } else {
     $('fileInput').click();
@@ -3289,16 +3292,82 @@ async function loadProject(file) {
     normalizeProject();
     syncProjectUI();
     select(null, null);
-    const need = [...new Set(p.sources.filter((x) => !S.sources.has(x.id)).map((x) => x.name))];
     zoomFit();
     refreshProgram();
     renderAll();
-    status(need.length
-      ? `読み込みました。${need.join('・')} を開くとつながります`
-      : 'プロジェクトを読み込みました');
+    status('プロジェクトを読み込みました。素材を探しています…');
+    await reloadMissingAssets();
   } catch (e) {
     status(`プロジェクトを読み込めませんでした（${file.name}）: ${e.message}`, true);
   }
+}
+
+/** プロジェクトが要求していて、まだ開けていない素材の一覧 */
+function missingAssets() {
+  const out = [];
+  for (const x of S.project.sources) if (!S.sources.has(x.id)) out.push({ kind: 'video', ...x });
+  for (const x of S.project.audioAssets) if (!S.library?.has(x.id)) out.push({ kind: 'audio', ...x });
+  for (const x of S.project.imageAssets) if (!S.imageLib.get(x.id)) out.push({ kind: 'image', ...x });
+  return out;
+}
+
+/**
+ * 覚えているファイル／フォルダから、足りない素材を読み直す。
+ * @param {boolean} ask 許可を尋ねてよいか（ボタンから呼ぶ時だけ true）
+ */
+async function reloadMissingAssets(ask = false) {
+  const want = missingAssets();
+  if (!want.length) { renderMissingBar(); return { loaded: 0, missing: [] }; }
+
+  let loaded = 0;
+  for (const a of want) {
+    const file = await FS.resolveFile(a.name, ask);
+    if (!file) continue;
+    status(`${a.name} を読み込んでいます…`);
+    try {
+      if (a.kind === 'video') {
+        const src = new Mp4Source(file);
+        await src.load(() => {});
+        S.sources.set(a.id, src);
+        Object.assign(a, { size: file.size, duration: src.duration });
+        const slot = S.project.sources.find((x) => x.id === a.id);
+        if (slot) Object.assign(slot, { size: file.size, duration: src.duration });
+        if (!S.currentSourceId) S.currentSourceId = a.id;
+      } else if (a.kind === 'audio') {
+        const meta = await library().add(file, a.id);
+        Object.assign(S.project.audioAssets.find((x) => x.id === a.id) ?? {}, meta);
+      } else {
+        const meta = await S.imageLib.add(file, a.id);
+        Object.assign(S.project.imageAssets.find((x) => x.id === a.id) ?? {}, meta);
+      }
+      loaded++;
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  const missing = missingAssets();
+  refreshProgram();
+  renderAll();
+  renderMissingBar();
+  if (loaded) {
+    status(missing.length
+      ? `素材 ${loaded} 件を読み直しました。${missing.length} 件は見つかりませんでした`
+      : `素材 ${loaded} 件を読み直しました`);
+  } else if (missing.length) {
+    status(`${missing.length} 件の素材が見つかりません。［素材を探す］から選んでください`, true);
+  }
+  return { loaded, missing };
+}
+
+/** 足りない素材があることを知らせる帯 */
+function renderMissingBar() {
+  const bar = $('missingBar');
+  const want = missingAssets();
+  bar.classList.toggle('hidden', !want.length);
+  if (!want.length) return;
+  bar.querySelector('.mb-text').textContent =
+    `${want.length} 件の素材が見つかりません: ${want.map((x) => x.name).join('、')}`;
 }
 
 // ---------------------------------------------------------------- 書き出し
@@ -3384,10 +3453,81 @@ $('binAddVideo').onclick = () => openFiles().catch((e) => status(e.message, true
 $('binAddAudio').onclick = () => $('audioInput').click();
 $('binAddImage').onclick = () => $('imageInput').click();
 $('imageInput').onchange = (e) => { addImageAssets([...e.target.files]); e.target.value = ''; };
+// 足りない素材を探す
+$('mbFind').onclick = async () => {
+  // まず覚えているものから（ここはユーザー操作の直後なので許可を尋ねられる）
+  const r = await reloadMissingAssets(true);
+  if (!r.missing.length) return;
+  // それでも見つからない分は選んでもらう
+  if (!('showOpenFilePicker' in window)) { $('fileInput').click(); return; }
+  try {
+    const handles = await window.showOpenFilePicker({
+      multiple: true,
+      types: [{ description: '素材', accept: {
+        'video/*': ['.mp4', '.mov', '.m4v'],
+        'audio/*': ['.mp3', '.wav', '.m4a', '.ogg'],
+        'image/*': ['.png', '.jpg', '.jpeg', '.webp'],
+      } }],
+    });
+    for (const h of handles) await FS.rememberFile(h.name, h);
+    await addFiles(await Promise.all(handles.map((h) => h.getFile())));
+    await reloadMissingAssets(true);
+  } catch (e) { if (e.name !== 'AbortError') status(e.message, true); }
+};
+
+$('mbFolder').onclick = async () => {
+  if (!('showDirectoryPicker' in window)) return status('このブラウザはフォルダ選択に対応していません', true);
+  try {
+    const dir = await window.showDirectoryPicker({ mode: 'read' });
+    await FS.rememberDir(dir);
+    status(`${dir.name} を覚えました。素材を探しています…`);
+    await reloadMissingAssets(true);
+  } catch (e) { if (e.name !== 'AbortError') status(e.message, true); }
+};
+
 for (const t of document.querySelectorAll('.bintab')) {
   t.onclick = () => { S.binTab = t.dataset.bin; renderBin(); };
 }
 $('libRefresh').onclick = () => reloadLibrary();
+
+$('libExport').onclick = async () => {
+  try {
+    const text = await Lib.exportAll();
+    const n = S.libSets.length;
+    if (!n) return status('ライブラリが空です', true);
+    const name = 'テロップライブラリ.kirikolib';
+    if ('showSaveFilePicker' in window) {
+      try {
+        const h = await window.showSaveFilePicker({
+          suggestedName: name,
+          types: [{ description: 'Kiriko テロップライブラリ', accept: { 'application/json': ['.kirikolib', '.json'] } }],
+        });
+        const w = await h.createWritable();
+        await w.write(text); await w.close();
+        return status(`テロップセット ${n} 件を書き出しました`);
+      } catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+    status(`テロップセット ${n} 件を書き出しました`);
+  } catch (e) { status(`書き出せませんでした: ${e.message}`, true); }
+};
+
+$('libImport').onclick = () => $('libInput').click();
+$('libInput').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const r = await Lib.importAll(await file.text(), false);
+    await reloadLibrary();
+    S.binTab = 'lib'; renderBin();
+    status(r.added
+      ? `テロップセット ${r.added} 件を読み込みました` + (r.skipped ? `（${r.skipped} 件は既にあるので飛ばしました）` : '')
+      : '新しく追加するものはありませんでした');
+  } catch (err) { status(`読み込めませんでした: ${err.message}`, true); }
+};
 for (const t of document.querySelectorAll('.insptab')) {
   t.onclick = () => { S.inspTab = t.dataset.insp; renderInspTabs(); };
 }
@@ -3516,8 +3656,23 @@ if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => {
   e.preventDefault();
+  // dataTransfer はイベントを抜けると無効になるので、await より先に全部取り出す
   const files = [...e.dataTransfer.files];
+  const pending = [...e.dataTransfer.items]
+    .map((it) => { try { return it.getAsFileSystemHandle?.() ?? null; } catch { return null; } })
+    .filter(Boolean);
+
   if (files.length) addFiles(files);
+
+  // ハンドルが取れたものは覚えておく（次に開いた時そのまま読み直せる）
+  (async () => {
+    for (const p of pending) {
+      const h = await p.catch(() => null);
+      if (!h) continue;
+      if (h.kind === 'file') await FS.rememberFile(h.name, h);
+      else if (h.kind === 'directory') await FS.rememberDir(h);
+    }
+  })();
 });
 
 // --- キーボード ---
