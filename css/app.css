@@ -37,11 +37,26 @@ body {
   border-bottom: 1px solid #12141880;
 }
 .brand {
-  font-weight: 700; letter-spacing: .02em; margin-right: 6px; white-space: nowrap; flex: none;
-  display: flex; align-items: center; gap: 7px;
+  margin-right: 6px; white-space: nowrap; flex: none;
+  display: flex; align-items: center; gap: 8px;
+  /* 大文字の帯の中心をツールバーの中心に合わせる。
+     em ボックスはベースラインの下に余白があるぶん、素直に中央寄せすると上に寄って見える */
+  position: relative; top: 1px;
 }
-.brand-icon { width: 20px; height: 20px; border-radius: 5px; display: block; }
-.brand .phase { color: var(--dim); font-weight: 400; font-size: 10.5px; margin-left: 5px; letter-spacing: .04em; }
+/* 名前と副題は同じインライン文脈に入れて、ベースラインを共有させる */
+.brand-text {
+  display: block; font-weight: 700; font-size: 13px; letter-spacing: .02em;
+  line-height: 1; /* 行の高さ＝文字の高さにして、中央合わせが文字の見た目と一致するようにする */
+}
+.brand .phase {
+  color: var(--dim); font-weight: 400; font-size: 10.5px; margin-left: 7px; letter-spacing: .04em;
+}
+.brand-icon {
+  width: 19px; height: 19px; border-radius: 5px; display: block; flex: none;
+  /* 大文字の帯（キャップハイト）の中心に合わせる。line-height:1 だと em ボックス基準に
+     なるため、ベースライン下の余白ぶんだけ持ち上げる */
+  position: relative; top: -0.5px;
+}
 .tb-group { display: flex; gap: 4px; align-items: center; }
 .tb-sep { width: 1px; height: 22px; background: var(--line-hard); flex: none; }
 .spacer { flex: 1; min-width: 8px; }
