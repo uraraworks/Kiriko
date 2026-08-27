@@ -21,6 +21,7 @@ import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageCl
 const S = {
   project: P.createProject(),
   sources: new Map(),      // sourceId -> Mp4Source
+  workDir: null,           // 作業フォルダ（FileSystemDirectoryHandle）
   currentSourceId: null,
   markIn: null,
   markOut: null,
@@ -1496,8 +1497,12 @@ async function placeLibrarySet(entry) {
   const total = P.totalDuration(S.project);
   if (total <= 0) return status('先にクリップを作ってください', true);
 
-  // 同梱画像を（まだ無ければ）読み込んで、新しい assetId に差し替える
+  // 同梱画像を（まだ無ければ）読み込んで、新しい assetId に差し替える。
+  // 素材フォルダに書き込めるなら、そこへ実ファイルとしても残す。
+  // ライブラリのコピーはセットを消すと無くなるので、原本を手元に作っておく。
   const remap = new Map();
+  const dir = await FS.writableDir().catch(() => null);
+  let copied = 0;
   for (const a of entry.assets ?? []) {
     const existing = S.project.imageAssets.find((x) => x.name === a.name);
     if (existing) { remap.set(a.id, existing.id); continue; }
@@ -1506,6 +1511,7 @@ async function placeLibrarySet(entry) {
     const meta = await S.imageLib.add(file, id);
     S.project.imageAssets.push(meta);
     remap.set(a.id, id);
+    if (dir && !(await FS.hasFile(dir, a.name)) && await FS.writeFile(dir, a.name, file)) copied++;
   }
 
   const t0 = Math.min(currentTimelineTime(), Math.max(0, total - 0.5));
@@ -1525,7 +1531,8 @@ async function placeLibrarySet(entry) {
   S.telopRow = 0;
   setMode('program');
   renderAll(); renderTelopForm(true);
-  status(`「${entry.name}」を ${tc(t0, false)} に置きました`);
+  status(`「${entry.name}」を ${tc(t0, false)} に置きました`
+    + (copied ? `（画像 ${copied} 件を ${dir.name} に保存しました）` : ''));
 }
 
 function renderLibraryBin() {
@@ -3242,6 +3249,12 @@ async function saveProject() {
   S.project.title = S.project.title || '無題プロジェクト';
   const text = P.serialize(S.project);
   const name = `${S.project.title || '無題プロジェクト'}.kiriko`;
+  // 作業フォルダを開いていれば、そこへそのまま保存する（毎回選ばなくてよい）
+  const dir = await FS.writableDir().catch(() => null);
+  if (dir && await FS.writeFile(dir, name, new Blob([text], { type: 'application/json' }))) {
+    status(`${dir.name} / ${name} に保存しました`);
+    return;
+  }
   if ('showSaveFilePicker' in window) {
     try {
       const h = await window.showSaveFilePicker({
@@ -3302,6 +3315,86 @@ async function loadProject(file) {
   } catch (e) {
     status(`プロジェクトを読み込めませんでした（${file.name}）: ${e.message}`, true);
   }
+}
+
+// ---------------------------------------------------------------- 作業フォルダ
+//
+// ブラウザはファイルの「パス」を扱えないので、プロジェクトファイルを渡されても
+// 「その隣にある動画」へは辿り着けない。VSCode と同じくフォルダごと開いてもらい、
+// その中でプロジェクトと素材を突き合わせる。
+
+/** 作業フォルダの表示を更新する */
+function renderWorkDir() {
+  const el = $('workDirName');
+  if (!el) return;
+  el.textContent = S.workDir ? S.workDir.name : '';
+  el.classList.toggle('hidden', !S.workDir);
+  el.title = S.workDir ? `作業フォルダ: ${S.workDir.name}` : '';
+}
+
+/** フォルダ直下の .kiriko を新しい順に返す */
+async function listProjectsIn(dir) {
+  const out = [];
+  for await (const [name, entry] of dir.entries()) {
+    if (entry.kind !== 'file' || !/\.kiriko$/i.test(name)) continue;
+    const f = await entry.getFile();
+    out.push({ name, handle: entry, mtime: f.lastModified });
+  }
+  return out.sort((a, b) => b.mtime - a.mtime);
+}
+
+/** 作業フォルダを選んでもらい、中のプロジェクトを開く */
+async function openWorkFolder() {
+  if (!('showDirectoryPicker' in window)) return status('このブラウザはフォルダを開けません', true);
+  let dir;
+  try {
+    dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+  } catch (e) { if (e.name !== 'AbortError') status(e.message, true); return; }
+  await useWorkFolder(dir);
+}
+
+async function useWorkFolder(dir) {
+  S.workDir = dir;
+  await FS.setWorkDir(dir);
+  await FS.rememberDir(dir);
+  renderWorkDir();
+
+  const projs = await listProjectsIn(dir).catch(() => []);
+  if (!projs.length) {
+    status(`${dir.name} を作業フォルダにしました（プロジェクトはまだありません）`);
+    await reloadMissingAssets(true);
+    return;
+  }
+  if (projs.length === 1) { await openFromWorkDir(projs[0]); return; }
+  showProjectPicker(projs);
+}
+
+async function openFromWorkDir(p) {
+  await FS.rememberFile(p.name, p.handle);
+  await loadProject(await p.handle.getFile());
+}
+
+/** フォルダにプロジェクトが複数ある時に選んでもらう */
+function showProjectPicker(projs) {
+  const dlg = $('projPick');
+  const list = $('projPickList');
+  list.innerHTML = '';
+  for (const p of projs) {
+    const b = document.createElement('button');
+    b.className = 'pick-row';
+    b.innerHTML = `<span class="pick-name"></span><span class="pick-time"></span>`;
+    b.querySelector('.pick-name').textContent = p.name;
+    b.querySelector('.pick-time').textContent = new Date(p.mtime).toLocaleString();
+    b.onclick = async () => { dlg.classList.add('hidden'); await openFromWorkDir(p); };
+    list.appendChild(b);
+  }
+  dlg.classList.remove('hidden');
+}
+
+/** 前回の作業フォルダを覚えていれば、名前だけ先に出しておく */
+async function restoreWorkDir() {
+  S.workDir = await FS.getWorkDir().catch(() => null);
+  renderWorkDir();
 }
 
 /** プロジェクトが要求していて、まだ開けていない素材の一覧 */
@@ -3376,7 +3469,8 @@ function renderMissingBar() {
   bar.classList.toggle('hidden', !want.length);
   if (!want.length) return;
   bar.querySelector('.mb-text').textContent =
-    `${want.length} 件の素材が見つかりません: ${want.map((x) => x.name).join('、')}`;
+    `${want.length} 件の素材が見つかりません（${want.map((x) => x.name).join('、')}）`
+    + ' — 素材の入ったフォルダを開くと、次回から自動でつながります';
 }
 
 // ---------------------------------------------------------------- 書き出し
@@ -3455,7 +3549,19 @@ async function doExport() {
 $('btnSaveProj').onclick = saveProject;
 $('btnUndo').onclick = doUndo;
 $('btnRedo').onclick = doRedo;
-$('btnLoadProj').onclick = () => $('projInput').click();
+$('btnWorkDir').onclick = openWorkFolder;
+$('projPickClose').onclick = () => $('projPick').classList.add('hidden');
+$('btnLoadProj').onclick = async () => {
+  if (!('showOpenFilePicker' in window)) return $('projInput').click();
+  try {
+    const [h] = await window.showOpenFilePicker({
+      types: [{ description: 'Kiriko / Kdenlive のプロジェクト',
+        accept: { 'application/json': ['.kiriko', '.json'], 'application/xml': ['.kdenlive'] } }],
+    });
+    await FS.rememberFile(h.name, h);
+    await loadProject(await h.getFile());
+  } catch (e) { if (e.name !== 'AbortError') status(e.message, true); }
+};
 $('btnAddClip').onclick = addClip;
 $('btnDelete').onclick = deleteSelected;
 $('binAddVideo').onclick = () => openFiles().catch((e) => status(e.message, true));
@@ -3487,9 +3593,14 @@ $('mbFind').onclick = async () => {
 $('mbFolder').onclick = async () => {
   if (!('showDirectoryPicker' in window)) return status('このブラウザはフォルダ選択に対応していません', true);
   try {
-    const dir = await window.showDirectoryPicker({ mode: 'read' });
+    // 書き込みも許してもらう。作業フォルダとして保存先にもするため
+    // （断られても読み取りだけで動く）
+    const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    S.workDir = dir;
+    await FS.setWorkDir(dir);
     await FS.rememberDir(dir);
-    status(`${dir.name} を覚えました。素材を探しています…`);
+    renderWorkDir();
+    status(`${dir.name} を作業フォルダにしました。素材を探しています…`);
     await reloadMissingAssets(true);
   } catch (e) { if (e.name !== 'AbortError') status(e.message, true); }
 };
@@ -3784,7 +3895,8 @@ syncProjectUI();
 renderHistoryUI();
 renderAll();
 reloadLibrary();
-status('準備完了 — メディアタブから素材を読み込むか、mp4 をここへドロップしてください');
+restoreWorkDir();
+status('準備完了 — 作業フォルダを開くか、mp4 をここへドロップしてください');
 
 // ---------------------------------------------------------------- MCP 連携
 

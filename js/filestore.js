@@ -33,11 +33,35 @@ export async function rememberDir(handle) {
   db.close();
 }
 
+// 作業フォルダ（VSCode でいう「開いているフォルダ」）。
+// プロジェクトも素材もここに置く前提にすると、許可 1 回で全部つながる。
+const WORK = '__work__';
+
+/** 作業フォルダを覚える */
+export async function setWorkDir(handle) {
+  if (!handle) return;
+  const db = await open();
+  await tx(db, DIRS, 'readwrite', (st) => st.put(handle, WORK));
+  db.close();
+}
+
+/** 覚えている作業フォルダ（無ければ null） */
+export async function getWorkDir() {
+  const db = await open();
+  const h = await tx(db, DIRS, 'readonly', (st) => st.get(WORK));
+  db.close();
+  return h ?? null;
+}
+
+/** 作業フォルダを先頭にした、素材を探すフォルダの一覧 */
 export async function listDirs() {
   const db = await open();
-  const all = await tx(db, DIRS, 'readonly', (st) => st.getAll());
+  const all = (await tx(db, DIRS, 'readonly', (st) => st.getAll())) ?? [];
+  const work = await tx(db, DIRS, 'readonly', (st) => st.get(WORK));
   db.close();
-  return all ?? [];
+  // 作業フォルダを最優先で探す（同じ名前の素材が複数あっても、手元のものが勝つ）
+  if (!work) return all;
+  return [work, ...all.filter((d) => d !== work)];
 }
 
 async function getFileHandle(name) {
@@ -112,3 +136,40 @@ export async function forgetAll() {
 }
 
 export const isSupported = () => 'showOpenFilePicker' in window;
+
+// ---------------------------------------------------------------- 書き込み
+
+/**
+ * 書き込みできるフォルダを返す（覚えているものの中から）。
+ * ライブラリの画像をプロジェクトのフォルダへ置くのに使う。
+ */
+export async function writableDir() {
+  const work = await getWorkDir();
+  if (work && (await work.queryPermission?.({ mode: 'readwrite' })) === 'granted') return work;
+  for (const dir of await listDirs()) {
+    if ((await dir.queryPermission?.({ mode: 'readwrite' })) === 'granted') return dir;
+  }
+  return null;
+}
+
+/** そのフォルダに同じ名前のファイルがあるか */
+export async function hasFile(dir, name) {
+  try { await dir.getFileHandle(name); return true; } catch { return false; }
+}
+
+/**
+ * フォルダにファイルを書く。書けたらハンドルも覚える。
+ * @returns {Promise<boolean>} 書けたか
+ */
+export async function writeFile(dir, name, blob) {
+  try {
+    const h = await dir.getFileHandle(name, { create: true });
+    const w = await h.createWritable();
+    await w.write(blob);
+    await w.close();
+    await rememberFile(name, h);
+    return true;
+  } catch {
+    return false;
+  }
+}

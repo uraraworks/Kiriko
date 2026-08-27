@@ -18,6 +18,9 @@
   <defs>
     <g id="ic-base" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
   </defs>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+  </symbol>
   <symbol id="i-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1"/><path d="M3 9h16.5l-2.2 8.4a2 2 0 0 1-1.9 1.6H5a2 2 0 0 1-2-2z"/>
   </symbol>
@@ -106,7 +109,9 @@
   <header class="toolbar">
     <div class="brand"><img src="assets/icon-64.png" alt="" class="brand-icon"><span class="brand-text">Kiriko<span class="phase">Browser Movie Editor</span></span></div>
     <div class="tb-group">
-      <button id="btnLoadProj" class="tb ico" title="プロジェクトを開く（.kiriko / Kdenlive の .kdenlive）"><svg class="ic"><use href="#i-open"/></svg></button>
+      <button id="btnWorkDir" class="tb ico" title="作業フォルダを開く（動画・音・画像とプロジェクトをまとめて読み込みます）"><svg class="ic"><use href="#i-folder"/></svg></button>
+      <span id="workDirName" class="workdir hidden"></span>
+      <button id="btnLoadProj" class="tb ico" title="プロジェクトファイルを開く（.kiriko / Kdenlive の .kdenlive）"><svg class="ic"><use href="#i-open"/></svg></button>
       <button id="btnSaveProj" class="tb ico" title="プロジェクトを保存　［ ⌘S / Ctrl+S ］"><svg class="ic"><use href="#i-save"/></svg></button>
     </div>
     <div class="tb-sep"></div>
@@ -370,6 +375,15 @@
 
   <!-- 右クリックメニュー -->
   <div id="ctxMenu" class="ctx-menu hidden"></div>
+
+  <!-- 作業フォルダに複数プロジェクトがあった時 -->
+  <div id="projPick" class="floating hidden">
+    <div class="fl-head">
+      <span>どのプロジェクトを開きますか</span>
+      <button class="fl-close" id="projPickClose" title="閉じる">×</button>
+    </div>
+    <div class="fl-body" id="projPickList"></div>
+  </div>
 
   <!-- テロップ編集（フローティング） -->
   <div id="telopDialog" class="floating hidden">
