@@ -105,6 +105,8 @@ python3 -m http.server 8901
 | <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd> | 逆送り／停止／早送り |
 | <kbd>←</kbd> <kbd>→</kbd> | 1 フレーム（<kbd>Shift</kbd> で 1 秒） |
 | <kbd>T</kbd> / <kbd>B</kbd> | テロップ追加／ぼかし区間追加 |
+| <kbd>M</kbd> | 再生位置にマーカーを立てる |
+| <kbd>,</kbd> / <kbd>.</kbd> | 前／次のマーカーへ |
 | <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd> | 元に戻す |
 | <kbd>⇧⌘Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> | やり直す |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | プロジェクト保存 |
@@ -260,6 +262,20 @@ A2 は上段が効果音、下段が BGM の 2 段になっていて重ならな
   - 素材ごとに**最大値で正規化**する。小さい音で録れていると等倍では平らに見えてしまうため
 - どちらもタイムライン右上の **▣**（サムネイル）／**〜**（波形）で切り替えられる
 
+## マーカー（メモ）
+
+タイムライン最上段の **MK** トラック。<kbd>M</kbd> で再生位置に立てる。
+
+- **点マーカー**：位置とメモだけ。<kbd>,</kbd> <kbd>.</kbd> で前後のマーカーへ飛べる
+- **区間マーカー**：長さを付けると「**ここは残す**」の印になる（端をドラッグで伸縮）
+- **［マーカー区間だけ残す］**：区間マーカーの外側をまとめて切り取る
+
+一番手間の掛かる「自分が喋っている所だけ残す」作業を、これで一気に片付けられる。
+AI に「セリフが取れる箇所に、セリフをメモとして区間マーカーを立てて」と頼んで、
+ボタンを 1 回押す、という流れを想定している。
+
+マーカーの位置（区間なら両端）はドラッグの**吸着先**にもなる。
+
 ## 重ね順（Z オーダー）
 
 画像とテロップは同じ重ね順の列に並ぶ。インスペクタ／テロップダイアログの
@@ -318,6 +334,10 @@ bme.project.blurs            // ぼかし区間
 bme.project.audioClips       // SE / BGM の配置
 bme.project.images           // 画像の配置（z で重ね順）
 bme.project.notes            // 作業メモ
+bme.project.markers          // マーカー [{ id, time, duration, text }]
+bme.addMarker(time, text, duration)
+bme.keepMarkedRangesOnly()   // 区間マーカーの外側を全部切り取る
+bme.jumpMarker(+1 | -1)
 bme.telop.createTelop(t0,t1,style,text)
 ```
 

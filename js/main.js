@@ -40,6 +40,7 @@ const S = {
   zoneIn: null,            // タイムラインの範囲選択（Kdenlive のゾーン相当）
   zoneOut: null,
   selectedImageId: null,
+  selectedMarkerId: null,
   imageLib: new ImageLibrary(),
   focusArea: 'timeline',   // 'preview' ならカーソルキーで枠を動かす
   binTab: 'media',
@@ -92,11 +93,13 @@ function select(type, id) {
   S.selectedBlurId = type === 'blur' ? id : null;
   S.selectedAudioId = type === 'audio' ? id : null;
   S.selectedImageId = type === 'image' ? id : null;
+  S.selectedMarkerId = type === 'marker' ? id : null;
 }
 const selectedTelop = () => S.project.telops.find((t) => t.id === S.selectedTelopId) || null;
 const selectedBlur = () => S.project.blurs.find((b) => b.id === S.selectedBlurId) || null;
 const selectedAudio = () => S.project.audioClips.find((a) => a.id === S.selectedAudioId) || null;
 const selectedImage = () => S.project.images.find((i) => i.id === S.selectedImageId) || null;
+const selectedMarker = () => S.project.markers.find((m) => m.id === S.selectedMarkerId) || null;
 const presets = () => S.project.telopPresets ?? T.DEFAULT_PRESETS;
 
 // ---------------------------------------------------------------- 履歴（アンドゥ / リドゥ）
@@ -129,6 +132,7 @@ const history = new History(
     if (!S.project.blurs.some((b) => b.id === S.selectedBlurId)) S.selectedBlurId = null;
     if (!S.project.audioClips.some((a) => a.id === S.selectedAudioId)) S.selectedAudioId = null;
     if (!S.project.images.some((i) => i.id === S.selectedImageId)) S.selectedImageId = null;
+    if (!S.project.markers?.some((m) => m.id === S.selectedMarkerId)) S.selectedMarkerId = null;
     normalizeProject();
     S.programTime = Math.min(S.programTime, P.totalDuration(S.project));
     S.programIndex = -1;
@@ -192,6 +196,7 @@ function normalizeProject() {
   p.telops.forEach((tl, i) => { if (typeof tl.z !== 'number') tl.z = 1000 + i; });
   p.imageAssets = p.imageAssets ?? [];
   p.blurs = p.blurs ?? [];
+  p.markers = (p.markers ?? []).map((m) => ({ duration: 0, text: '', ...m })).sort((a, b) => a.time - b.time);
   p.audioClips = p.audioClips ?? [];
   p.audioAssets = p.audioAssets ?? [];
   p.mix = { se: 1, bgm: 1, ...(p.mix ?? {}) };
@@ -468,9 +473,17 @@ function extractZone() {
   const r = zoneRange();
   if (!r) return status('先に範囲を選択してください（I / O）', true);
   const [a, b] = r;
-  const len = b - a;
-  commit(`${tc(len, false)} をカット`);
+  commit(`${tc(b - a, false)} をカット`);
+  extractRange(a, b);
+  S.selectedClipId = null;
+  clearZone();
+  seekProgram(a, true);
+  renderAll();
+  status(`${tc(b - a, false)} を切り取りました（残り ${tc(P.totalDuration(S.project), false)}）`);
+}
 
+/** [a, b) を切り取って後ろを詰める（履歴は呼び出し側で積む） */
+function extractRange(a, b) {
   const kept = [];
   let t = 0;
   for (const c of S.project.clips) {
@@ -483,12 +496,6 @@ function extractZone() {
   }
   S.project.clips = kept;
   rippleAfter(a, b);
-
-  S.selectedClipId = null;
-  clearZone();
-  seekProgram(a, true);
-  renderAll();
-  status(`${tc(len, false)} を切り取りました（残り ${tc(P.totalDuration(S.project), false)}）`);
 }
 
 /** テロップ・ぼかし・音源を、切り取った分だけ前に詰める */
@@ -506,6 +513,13 @@ function rippleAfter(a, b) {
   S.project.images = S.project.images
     .map((x) => ({ ...x, start: shift(x.start), end: shift(x.end) }))
     .filter((x) => alive(x.start, x.end));
+  // マーカーも同じだけ前に詰める。範囲がまるごと消えたものは落とす
+  S.project.markers = S.project.markers
+    .map((m) => {
+      const s0 = shift(m.time), e0 = shift(m.time + (m.duration ?? 0));
+      return { ...m, time: s0, duration: Math.max(0, e0 - s0) };
+    })
+    .filter((m) => (m.duration ?? 0) > 0.02 || (m.time > a && m.time < b ? false : true));
   S.project.audioClips = S.project.audioClips
     .map((x) => {
       const s0 = shift(x.start), e0 = shift(x.start + x.duration);
@@ -544,6 +558,11 @@ function deleteSelected() {
     commit('ぼかしを削除');
     S.project.blurs = S.project.blurs.filter((b) => b.id !== S.selectedBlurId);
     S.selectedBlurId = null; renderAll(); renderFxForm(true); return;
+  }
+  if (S.selectedMarkerId) {
+    commit('マーカーを削除');
+    S.project.markers = S.project.markers.filter((m) => m.id !== S.selectedMarkerId);
+    S.selectedMarkerId = null; renderAll(); renderFxForm(true); return;
   }
   if (S.selectedImageId) {
     commit('画像を削除');
@@ -604,9 +623,95 @@ function addTelop() {
   setMode('program');
   seekProgram(t0, true);
   renderAll();
-  renderTelopForm(true);
+  openTelopEditor();
   status(`テロップを追加しました（${tc(t0, false)} 〜 ${tc(t1, false)}）`);
-  setTimeout(() => document.getElementById('telText')?.focus(), 0);
+}
+
+// ---------------------------------------------------------------- マーカー
+
+function addMarker(time = null, text = '', duration = 0) {
+  const total = P.totalDuration(S.project);
+  if (total <= 0) return status('先にクリップを作ってください', true);
+  const t = Math.max(0, Math.min(total, time ?? currentTimelineTime()));
+  commit('マーカーを追加');
+  const m = { id: P.newId('mk'), time: t, duration, text, color: '#e0b84c' };
+  S.project.markers.push(m);
+  S.project.markers.sort((a, b) => a.time - b.time);
+  select('marker', m.id);
+  renderAll(); renderFxForm(true);
+  status(`マーカーを ${tc(t, false)} に立てました`);
+  setTimeout(() => $('mkText')?.focus(), 0);
+  return m;
+}
+
+/** 前後のマーカーへ飛ぶ */
+function jumpMarker(dir) {
+  const ms = [...S.project.markers].sort((a, b) => a.time - b.time);
+  if (!ms.length) return status('マーカーがありません');
+  const t = S.programTime;
+  const m = dir > 0 ? ms.find((x) => x.time > t + 0.01) : [...ms].reverse().find((x) => x.time < t - 0.01);
+  if (!m) return status(dir > 0 ? '最後のマーカーです' : '最初のマーカーです');
+  setMode('program');
+  seekProgram(m.time, true);
+  select('marker', m.id);
+  renderAll(); renderFxForm(true);
+  status(`${tc(m.time, false)} ${m.text ? `— ${m.text}` : ''}`);
+}
+
+/** 再生位置を挟むマーカーの間を範囲選択する（その区間を切り取る／残す起点） */
+function selectBetweenMarkers() {
+  const ms = [...S.project.markers].sort((a, b) => a.time - b.time);
+  if (ms.length < 1) return status('マーカーがありません', true);
+  const t = S.programTime;
+  const prev = [...ms].reverse().find((x) => x.time <= t + 0.001);
+  const next = ms.find((x) => x.time > t + 0.001);
+  const a = prev ? prev.time + (prev.duration || 0) : 0;
+  const b = next ? next.time : P.totalDuration(S.project);
+  if (b - a < 0.02) return status('この位置には範囲がありません', true);
+  setMode('program');
+  S.zoneIn = a; S.zoneOut = b;
+  renderZoneUI();
+  status(`マーカー間を選択しました（${tc(a, false)} 〜 ${tc(b, false)}）`);
+}
+
+/**
+ * 区間マーカー（duration > 0）で示した所だけを残し、あとは全部切り取る。
+ * 「セリフのある所に区間マーカーを立てて」→ ここを押す、が本命の使い方。
+ */
+function keepMarkedRangesOnly() {
+  const ranges = S.project.markers
+    .filter((m) => (m.duration ?? 0) > 0.02)
+    .map((m) => [m.time, m.time + m.duration])
+    .sort((a, b) => a[0] - b[0]);
+  if (!ranges.length) return status('区間マーカー（長さのあるマーカー）がありません', true);
+
+  // 重なりをまとめる
+  const merged = [];
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && r[0] <= last[1] + 0.001) last[1] = Math.max(last[1], r[1]);
+    else merged.push([...r]);
+  }
+  const total = P.totalDuration(S.project);
+  // 残す区間の「隙間」＝消す区間。後ろから消すと前の位置がずれない
+  const gaps = [];
+  let prev = 0;
+  for (const [a, b] of merged) {
+    if (a - prev > 0.02) gaps.push([prev, Math.min(a, total)]);
+    prev = Math.max(prev, b);
+  }
+  if (total - prev > 0.02) gaps.push([prev, total]);
+  if (!gaps.length) return status('切り取る所がありません');
+
+  const removed = gaps.reduce((acc, g) => acc + (g[1] - g[0]), 0);
+  if (!confirm(`区間マーカーの外側 ${gaps.length} 箇所（合計 ${tc(removed, false)}）を切り取ります。よろしいですか？`)) return;
+
+  commit('マーカー区間だけ残す');
+  for (const [a, b] of [...gaps].reverse()) extractRange(a, Math.min(b, P.totalDuration(S.project)));
+  clearZone();
+  seekProgram(0, true);
+  renderAll();
+  status(`${tc(removed, false)} を切り取りました（残り ${tc(P.totalDuration(S.project), false)}）`);
 }
 
 // ---------------------------------------------------------------- ぼかし / 音源
@@ -1015,6 +1120,9 @@ overlay.addEventListener('dblclick', (e) => {
       sel.item.box = B.clampBox({ x: tb.x, y: tb.y, w: Math.max(40, tb.w), h: Math.max(40, tb.h) }, W, H);
     }
     status(sel.kind === 'image' ? '枠を画像の大きさに合わせました' : '枠を文字の大きさに合わせました');
+  } else if (sel.kind === 'telop' && B.insideBox(sel.item.box, p.x, p.y)) {
+    openTelopEditor();
+    return;
   } else if (sel.kind === 'image' && B.insideBox(sel.item.box, p.x, p.y)) {
     const asset = S.project.imageAssets.find((a) => a.id === sel.item.assetId);
     if (!asset) return;
@@ -1244,10 +1352,10 @@ function renderEffectBin() {
 
 function renderInspector() {
   const form = $('clipForm');
-  const tel = selectedTelop(), other = selectedBlur() || selectedAudio() || selectedImage();
+  const tel = selectedTelop(), other = selectedBlur() || selectedAudio() || selectedImage() || selectedMarker();
   $('selHead').textContent = tel ? '選択テロップ'
     : selectedBlur() ? '選択ぼかし' : selectedAudio() ? '選択音源'
-    : selectedImage() ? '選択画像' : '選択クリップ';
+    : selectedImage() ? '選択画像' : selectedMarker() ? '選択マーカー' : '選択クリップ';
   // テロップはフローティングダイアログ側、それ以外は fxForm 側に出る
   form.classList.toggle('hidden', !!other || !!tel);
 
@@ -1327,11 +1435,20 @@ function closeTelopDialog() { telDlg.classList.add('hidden'); }
 })();
 $('telopDialogClose').onclick = () => { closeTelopDialog(); };
 
+/** 編集ダイアログを開く（ダブルクリック / 新規追加のときだけ） */
+function openTelopEditor() {
+  if (!selectedTelop()) return;
+  openTelopDialog();
+  renderTelopForm(true);
+  setTimeout(() => $('telText')?.focus(), 0);
+}
+
 function renderTelopForm(force = false) {
   const form = $('telopForm');
   const tel = selectedTelop();
   if (!tel) { telopFormId = null; closeTelopDialog(); return; }
-  openTelopDialog();
+  // 選んだだけでは開かない。開いている時だけ中身を選択に追従させる
+  if (telDlg.classList.contains('hidden')) { telopFormId = null; return; }
   const key = `${tel.id}:${tel.rows.length}:${S.telopRow}`;
   if (!force && telopFormId === key) { syncBoxNumbers(); return; }
   telopFormId = key;
@@ -1598,14 +1715,33 @@ let fxFormKey = null;
 /** ぼかし・音源・画像のプロパティ（インスペクタ側） */
 function renderFxForm(force = false) {
   const form = $('fxForm');
-  const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage();
-  const key = blur ? `b:${blur.id}` : ac ? `a:${ac.id}` : im ? `i:${im.id}` : null;
+  const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage(), mk = selectedMarker();
+  const key = mk ? `m:${mk.id}` : blur ? `b:${blur.id}` : ac ? `a:${ac.id}` : im ? `i:${im.id}` : null;
   form.classList.toggle('hidden', !key);
   if (!key) { fxFormKey = null; return; }
   if (!force && fxFormKey === key) { syncBoxNumbers(); syncFxNumbers(); return; }
   fxFormKey = key;
 
   const live = () => { renderTimeline(); renderOverlay(); };
+
+  if (mk) {
+    form.innerHTML = `
+      <div class="sub-label">タイムラインのメモ。長さを付けると「ここは残す」の印になります</div>
+      <label>メモ<textarea id="mkText" rows="3">${esc(mk.text ?? '')}</textarea></label>
+      <div class="grid2">
+        <label>位置（秒）<input class="num" type="number" id="mkTime" step="0.1" value="${mk.time.toFixed(2)}"></label>
+        <label>長さ（秒）<input class="num" type="number" id="mkDur" step="0.1" min="0" value="${(mk.duration ?? 0).toFixed(2)}"></label>
+      </div>
+      <div class="sub-label">長さ 0 なら点、0 より大きければ区間マーカー。<br>
+        タイムライン上で端をドラッグしても伸ばせます。</div>`;
+    const b = (id, fn) => $(id).addEventListener('input', (e) => {
+      commit('マーカーを編集', `mk:${mk.id}:${id}`); fn(e.target.value); live();
+    });
+    b('mkText', (v) => { mk.text = v; });
+    b('mkTime', (v) => { mk.time = Math.max(0, +v); });
+    b('mkDur', (v) => { mk.duration = Math.max(0, +v); });
+    return;
+  }
 
   if (blur) {
     form.innerHTML = `
@@ -1712,8 +1848,9 @@ function renderFxForm(force = false) {
 
 function syncFxNumbers() {
   const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v; };
-  const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage();
-  if (blur) { set('fxStart', blur.start.toFixed(2)); set('fxEnd', blur.end.toFixed(2)); }
+  const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage(), mk = selectedMarker();
+  if (mk) { set('mkTime', mk.time.toFixed(2)); set('mkDur', (mk.duration ?? 0).toFixed(2)); }
+  else if (blur) { set('fxStart', blur.start.toFixed(2)); set('fxEnd', blur.end.toFixed(2)); }
   else if (ac) { set('fxStart', ac.start.toFixed(2)); set('fxDur', ac.duration.toFixed(2)); }
   else if (im) { set('imStart', im.start.toFixed(2)); set('imEnd', im.end.toFixed(2)); }
 }
@@ -1811,7 +1948,7 @@ $('scrubBar').addEventListener('pointerdown', (e) => {
 // ---------------------------------------------------------------- 描画：タイムライン
 
 const tlCanvas = $('tlCanvas');
-const RULER_H = 26, FX_H = 22, IMG_H = 30, TELOP_H = 30, TRACK_H = 64, AUD_H = 48;
+const RULER_H = 26, MARK_H = 24, FX_H = 22, IMG_H = 30, TELOP_H = 30, TRACK_H = 64, AUD_H = 48;
 
 /** テロップのトラック数。いつでも 1 本空きがあるようにして、そこへドラッグで移せる */
 function telopTrackCount() {
@@ -1827,6 +1964,7 @@ function trackLayout() {
   const rows = [];
   let y = RULER_H;
   const push = (kind, index, label, h) => { rows.push({ kind, index, label, y, h }); y += h; };
+  push('marker', 0, 'MK', MARK_H);
   push('fx', 0, 'FX', FX_H);
   push('image', 0, 'IM', IMG_H);
   for (let i = 0; i < telopTrackCount(); i++) push('telop', i, `T${i + 1}`, TELOP_H);
@@ -1946,7 +2084,7 @@ function renderTimeline() {
   ctx.stroke();
 
   // --- トラック背景 ---
-  const BG = { fx: '#191f22', image: '#241d16', telop: '#1b1d24', video: '#1e2128', audio: '#1c1f26', music: '#1d1b26' };
+  const BG = { marker: '#1f1c26', fx: '#191f22', image: '#241d16', telop: '#1b1d24', video: '#1e2128', audio: '#1c1f26', music: '#1d1b26' };
   const layout = trackLayout();
   for (const r of layout) {
     ctx.fillStyle = BG[r.kind] ?? '#1b1d24';
@@ -1965,6 +2103,45 @@ function renderTimeline() {
     const sel = clip.id === S.selectedClipId;
     drawClip(ctx, x, trackTop('video') + 2, cw, TRACK_H - 6, clip, sel, 'video');
     drawClip(ctx, x, trackTop('audio') + 2, cw, TRACK_H - 6, clip, sel, 'audio');
+  }
+
+  // --- マーカー ---
+  const mkY = trackTop('marker');
+  for (const m of S.project.markers) {
+    const x = secToX(m.time);
+    const mw = (m.duration ?? 0) * S.pxPerSec;
+    if (x + Math.max(mw, 160) < -5 || x > w + 5) continue;
+    const sel = m.id === S.selectedMarkerId;
+    ctx.save();
+    if (mw > 1) {
+      // 区間マーカー（ここは残す、の印）
+      ctx.fillStyle = sel ? '#f0d68a' : (m.color ?? '#e0b84c') + 'cc';
+      ctx.beginPath(); roundRect(ctx, x, mkY + 3, Math.max(3, mw), MARK_H - 7, 3); ctx.fill();
+      ctx.strokeStyle = sel ? '#ffffffdd' : '#00000055'; ctx.lineWidth = sel ? 2 : 1; ctx.stroke();
+    } else {
+      // 点マーカー（旗）
+      ctx.fillStyle = sel ? '#ffe9a8' : (m.color ?? '#e0b84c');
+      ctx.beginPath();
+      ctx.moveTo(x, mkY + 3); ctx.lineTo(x + 11, mkY + 7); ctx.lineTo(x, mkY + 11);
+      ctx.closePath(); ctx.fill();
+      ctx.fillRect(x - 1, mkY + 3, 2, MARK_H - 7);
+    }
+    // 選択中は下のトラックまで線を引く
+    if (sel) {
+      ctx.strokeStyle = '#f0d68a99'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(x + 0.5, mkY); ctx.lineTo(x + 0.5, h); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (m.text) {
+      ctx.fillStyle = mw > 40 ? '#2a1f00' : '#d9c07a';
+      ctx.font = '10.5px -apple-system, sans-serif'; ctx.textBaseline = 'middle';
+      const tx = mw > 40 ? x + 5 : x + 14;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(tx, mkY, w - tx, MARK_H); ctx.clip();
+      ctx.fillText(m.text.replace(/\n/g, ' '), tx, mkY + MARK_H / 2);
+      ctx.restore();
+    }
+    ctx.restore();
   }
 
   // --- ぼかし ---
@@ -2222,10 +2399,15 @@ function niceStep(pxPerSec) {
 // テロップ・画像・SE はカットの切り替わりに合わせて置くことが多いので、
 // クリップの境目（と再生位置）に吸わせる。Alt で解除。
 
+/** 吸着先：カットの境目・マーカー（区間なら両端）・再生位置 */
 function snapTargets() {
   const list = [0];
   let t = 0;
   for (const c of S.project.clips) { t += P.clipDuration(c); list.push(t); }
+  for (const m of S.project.markers) {
+    list.push(m.time);
+    if ((m.duration ?? 0) > 0) list.push(m.time + m.duration);
+  }
   list.push(S.programTime);
   return list;
 }
@@ -2265,6 +2447,17 @@ function snapEdge(value, alt) {
 }
 
 // --- タイムライン操作 ---
+function hitMarker(x, y) {
+  if (trackAt(y)?.kind !== 'marker') return null;
+  for (let i = S.project.markers.length - 1; i >= 0; i--) {
+    const m = S.project.markers[i];
+    const cx = secToX(m.time);
+    const cw = Math.max(10, (m.duration ?? 0) * S.pxPerSec);
+    if (x >= cx - 4 && x <= cx + cw + 4) return { m, cx, cw };
+  }
+  return null;
+}
+
 function hitBlurBlock(x, y) {
   if (trackAt(y)?.kind !== 'fx') return null;
   for (let i = S.project.blurs.length - 1; i >= 0; i--) {
@@ -2322,7 +2515,7 @@ tlCanvas.addEventListener('pointermove', (e) => {
   if (drag) return;
   const r = tlCanvas.getBoundingClientRect();
   const x = e.clientX - r.left, y = e.clientY - r.top;
-  const hit = hitBlurBlock(x, y) || hitImageBlock(x, y) || hitTelopBlock(x, y) || hitAudioClip(x, y) || hitClip(x, y);
+  const hit = hitMarker(x, y) || hitBlurBlock(x, y) || hitImageBlock(x, y) || hitTelopBlock(x, y) || hitAudioClip(x, y) || hitClip(x, y);
   tlCanvas.style.cursor = !hit ? 'default'
     : (Math.abs(x - hit.cx) < 6 || Math.abs(x - (hit.cx + hit.cw)) < 6) ? 'ew-resize' : 'grab';
 });
@@ -2333,6 +2526,19 @@ tlCanvas.addEventListener('pointerdown', (e) => {
   const x = e.clientX - r.left, y = e.clientY - r.top;
   S.focusArea = 'timeline'; // カーソルキーはコマ送りに戻す
   try { tlCanvas.setPointerCapture(e.pointerId); } catch {}
+
+  // マーカートラック
+  const mh = hitMarker(x, y);
+  if (mh) {
+    select('marker', mh.m.id);
+    const eR = (mh.m.duration ?? 0) > 0 && Math.abs(x - (mh.cx + mh.cw)) < 6;
+    drag = eR
+      ? { type: 'markerTrim', m: mh.m, startX: x, orig: { ...mh.m } }
+      : { type: 'markerMove', m: mh.m, startX: x, orig: { ...mh.m } };
+    renderAll(); renderFxForm(true); renderTelopForm(true);
+    return;
+  }
+  if (trackAt(y)?.kind === 'marker') { select('clip', null); renderAll(); renderFxForm(true); renderTelopForm(true); return; }
 
   // ぼかしトラック
   const bh = hitBlurBlock(x, y);
@@ -2431,6 +2637,15 @@ tlCanvas.addEventListener('pointermove', (e) => {
       drag.clip.out = Math.max(drag.orig.in + 0.1, Math.min(src?.duration ?? Infinity, drag.orig.out + d));
     }
     renderTimeline(); renderInspector(); renderTransport();
+  } else if (drag.type === 'markerMove') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    drag.m.time = Math.max(0, snapBlockMove(drag.orig.time + d, drag.orig.duration ?? 0, e.altKey));
+    renderTimeline(); syncFxNumbers();
+  } else if (drag.type === 'markerTrim') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    const end = snapEdge(drag.orig.time + drag.orig.duration + d, e.altKey);
+    drag.m.duration = Math.max(0, end - drag.m.time);
+    renderTimeline(); syncFxNumbers();
   } else if (drag.type === 'blurMove') {
     const d = (x - drag.startX) / S.pxPerSec;
     const len = drag.orig.end - drag.orig.start;
@@ -2522,6 +2737,16 @@ tlCanvas.addEventListener('dblclick', (e) => {
   const r = tlCanvas.getBoundingClientRect();
   const y = e.clientY - r.top;
   const dk = trackAt(y)?.kind;
+  if (dk === 'telop') {
+    const th = hitTelopBlock(e.clientX - r.left, y);
+    if (th) { select('telop', th.tel.id); S.telopRow = 0; renderAll(); openTelopEditor(); }
+    return;
+  }
+  if (dk === 'marker') {
+    const mh = hitMarker(e.clientX - r.left, y);
+    if (mh) { select('marker', mh.m.id); renderAll(); renderFxForm(true); setTimeout(() => $('mkText')?.focus(), 0); }
+    return;
+  }
   if (dk !== 'video' && dk !== 'audio') return;
   const hit = hitClip(e.clientX - r.left, y);
   if (!hit) return;
@@ -2560,12 +2785,17 @@ tlCanvas.addEventListener('contextmenu', (e) => {
   const items = [];
 
   if (hit) {
-    if (hit.blur) { select('blur', hit.blur.id); items.push({ label: 'ぼかしを削除', key: 'Delete' }); }
+    if (hit.m) {
+      select('marker', hit.m.id);
+      items.push({ label: 'マーカーを削除', key: 'Delete' });
+      items.push({ label: 'ここから次のマーカーまでを範囲に', run: () => { seekProgram(hit.m.time, true); selectBetweenMarkers(); } });
+    }
+    else if (hit.blur) { select('blur', hit.blur.id); items.push({ label: 'ぼかしを削除', key: 'Delete' }); }
     else if (hit.im) { select('image', hit.im.id); items.push({ label: '画像を削除', key: 'Delete' }); }
     else if (hit.tel) { select('telop', hit.tel.id); items.push({ label: 'テロップを削除', key: 'Delete' }); }
     else if (hit.ac) { select('audio', hit.ac.id); items.push({ label: '音源を削除', key: 'Delete' }); }
     else if (hit.clip) { select('clip', hit.clip.id); items.push({ label: 'クリップを削除' }); }
-    items[0].run = () => deleteSelected();
+    if (!items[0].run) items[0].run = () => deleteSelected();
     renderAll(); renderTelopForm(true); renderFxForm(true);
   }
   if (zoneRange()) {
@@ -2789,6 +3019,8 @@ $('btnWaves').onclick = () => {
   $('btnWaves').classList.toggle('on', S.showWaves);
   renderTimeline();
 };
+$('btnAddMarker').onclick = () => addMarker();
+$('btnKeepMarked').onclick = keepMarkedRangesOnly;
 $('btnAddTelop').onclick = addTelop;
 $('btnZoneIn').onclick = () => { setMode('program'); zoneIn(); };
 $('btnZoneOut').onclick = () => { setMode('program'); zoneOut(); };
@@ -2891,6 +3123,9 @@ document.addEventListener('keydown', (e) => {
       break;
     case 'enter': addClip(); break;
     case 't': addTelop(); break;
+    case 'm': addMarker(); break;
+    case ',': jumpMarker(-1); break;
+    case '.': jumpMarker(1); break;
     case 'b': addBlur(); break;
     case 'j':
       video.playbackRate = video.paused || video.playbackRate > 0 ? 1 : video.playbackRate;
@@ -2956,6 +3191,9 @@ window.bme = {
   addFiles,
   addTelop,
   addBlur,
+  addMarker,
+  keepMarkedRangesOnly,
+  jumpMarker,
   addImageAssets,
   placeImage,
   addAudioAssets,

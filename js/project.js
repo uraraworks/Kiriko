@@ -21,6 +21,9 @@ export function createProject() {
     audioClips: [], // { id, assetId, kind, start, offset, duration, volume, fadeIn, fadeOut, loop }
     mix: { se: 1, bgm: 1 }, // 効果音 / BGM のマスター音量
     blurs: [],      // { id, start, end, strength } 区間ぼかし（プライバシー保護）
+    // メモ用マーカー。duration > 0 なら「区間マーカー」＝ここは残す、という印になる。
+    // AI に「セリフのある所に区間マーカーを立てて」と頼む使い方を想定している。
+    markers: [],    // { id, time, duration, text, color }
   };
 }
 
