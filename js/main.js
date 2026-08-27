@@ -1463,6 +1463,7 @@ function renderMediaBin() {
       + (loaded
         ? `<div class="m">${tc(s.duration)} ／ ${(s.size / 1e9).toFixed(2)} GB</div>`
         : `<div class="m warnline">未接続 — このファイルをドロップするとつながります</div>`);
+    el.querySelector('.row').appendChild(assetDelButton('video', s.id, s.name));
     if (loaded) {
       el.querySelector('.bin-add').onclick = (ev) => { ev.stopPropagation(); placeWholeSource(s.id); };
       el.onclick = () => selectSource(s.id);
@@ -1480,6 +1481,7 @@ function renderMediaBin() {
       + (ok ? `<button class="bin-add" title="再生位置に配置">＋</button>` : '') + `</div>`
       + (ok ? `<div class="m">${tc(a.duration, false)} ／ ${a.duration > 20 ? 'BGM' : '効果音'}</div>`
             : `<div class="m warnline">未接続 — このファイルをドロップするとつながります</div>`);
+    el.querySelector('.row').appendChild(assetDelButton('audio', a.id, a.name));
     if (ok) {
       el.querySelector('.bin-add').onclick = (e) => { e.stopPropagation(); placeAudio(a.id); };
       el.onclick = () => placeAudio(a.id);
@@ -1495,6 +1497,7 @@ function renderMediaBin() {
       + (ok ? `<div class="m">${a.width}×${a.height}</div>`
             : `<div class="m warnline">未接続 — このファイルをドロップするとつながります</div>`)
       + (ok ? `<div class="place-row">${PLACEMENTS.map((pl) => `<button data-p="${pl.id}">${pl.name}</button>`).join('')}</div>` : '');
+    el.querySelector('.row').appendChild(assetDelButton('image', a.id, a.name));
     const bmp = S.imageLib.get(a.id);
     if (bmp && el.querySelector('.place-row')) {
       const cv = document.createElement('canvas');
@@ -1511,6 +1514,72 @@ function renderMediaBin() {
     if (!ok) el.onclick = () => status(`${a.name} を開くと、この画像がつながります`);
     list.appendChild(el);
   }
+}
+
+/**
+ * 素材をプロジェクトから外す。
+ * 使っている物があれば、何がいくつ消えるかを伝えてから確認する。
+ * 履歴に積むので Cmd+Z で戻せる。
+ */
+function removeAsset(kind, id, name) {
+  const P0 = S.project;
+  const used = [];
+  if (kind === 'video') {
+    const n = P0.clips.filter((c) => c.sourceId === id).length;
+    if (n) used.push(`クリップ ${n} 個`);
+  } else if (kind === 'audio') {
+    const n = P0.audioClips.filter((c) => c.assetId === id).length;
+    if (n) used.push(`音源 ${n} 個`);
+  } else {
+    const n = P0.images.filter((im) => im.assetId === id).length;
+    if (n) used.push(`画像 ${n} 個`);
+    const t = P0.telops.filter((tl) => tl.bgAssetId === id || tl.icon?.assetId === id).length;
+    if (t) used.push(`テロップ ${t} 個`);
+  }
+  const msg = used.length
+    ? `「${name}」はタイムラインで使われています（${used.join('・')}）。\n\n`
+      + '一緒に削除しますか？（⌘Z で戻せます）'
+    : `「${name}」をプロジェクトから外しますか？`;
+  if (!confirm(msg)) return;
+
+  commit('素材を削除');
+  // 読み込み済みの中身（デコーダ・画像・音）は捨てない。
+  // 履歴は project の JSON しか戻さないので、捨てると ⌘Z で戻した時に
+  // 「未接続」になってしまう。次にページを開くまで持っておく
+  if (kind === 'video') {
+    P0.clips = P0.clips.filter((c) => c.sourceId !== id);
+    P0.sources = P0.sources.filter((x) => x.id !== id);
+    if (S.currentSourceId === id) {
+      S.currentSourceId = P0.sources[0]?.id ?? null;
+      if (S.currentSourceId) setVideoSource(S.currentSourceId);
+      $('monName').textContent = curSource()?.name ?? '—';
+    }
+  } else if (kind === 'audio') {
+    P0.audioClips = P0.audioClips.filter((c) => c.assetId !== id);
+    P0.audioAssets = P0.audioAssets.filter((x) => x.id !== id);
+  } else {
+    P0.images = P0.images.filter((im) => im.assetId !== id);
+    for (const tl of P0.telops) {
+      if (tl.bgAssetId === id) tl.bgAssetId = null;
+      if (tl.icon?.assetId === id) tl.icon.assetId = null;
+    }
+    P0.imageAssets = P0.imageAssets.filter((x) => x.id !== id);
+  }
+  select(null, null);
+  refreshProgram();
+  renderAll();
+  renderTelopForm(true);
+  status(`「${name}」を外しました`);
+}
+
+/** 素材の行に付ける × ボタン */
+function assetDelButton(kind, id, name) {
+  const b = document.createElement('button');
+  b.className = 'bin-del';
+  b.title = 'プロジェクトから外す';
+  b.textContent = '×';
+  b.onclick = (ev) => { ev.stopPropagation(); removeAsset(kind, id, name); };
+  return b;
 }
 
 // ---------------------------------------------------------------- テロップセットのライブラリ
