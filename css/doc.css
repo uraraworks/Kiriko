@@ -23,6 +23,7 @@ a:hover { text-decoration: underline; }
   position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px;
   padding: 9px 18px; background: #fffdf7e6; backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
+  box-shadow: 0 2px 10px #2b29250f;   /* 本文の上に乗っているのが分かるように */
 }
 .topbar img { width: 22px; height: 22px; border-radius: 6px; display: block; }
 .topbar .name { font-weight: 700; letter-spacing: .02em; }
