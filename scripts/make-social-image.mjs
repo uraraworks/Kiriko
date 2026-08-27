@@ -15,6 +15,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = process.env.CHROME_PATH
   ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const OUT = join(ROOT, 'public/social.png');
+const OUT_JPG = join(ROOT, 'public/social.jpg');
 const W = 1280, H = 640;
 
 const icon = readFileSync(join(ROOT, 'assets/icon-512.png')).toString('base64');
@@ -78,5 +79,7 @@ await page.setContent(html, { waitUntil: 'load' });
 await page.evaluate(() => document.fonts.ready);
 mkdirSync(dirname(OUT), { recursive: true });
 await page.screenshot({ path: OUT });
+// 共有カード用は軽い方が取り込まれやすいので jpeg も出す（og:image はこちらを指す）
+await page.screenshot({ path: OUT_JPG, type: 'jpeg', quality: 92 });
 await browser.close();
-console.error(`作りました: ${OUT}`);
+console.error(`作りました:\n  ${OUT}（GitHub の Social preview 用）\n  ${OUT_JPG}（OGP 用）`);

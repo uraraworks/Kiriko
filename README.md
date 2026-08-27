@@ -148,13 +148,19 @@ npm run test:e2e  # 実 Chrome での結合テスト（1 分ほど。ffmpeg が�
 
 ## 共有した時に出る画像
 
-`public/social.png`（1280×640）。作り直すには:
+`public/social.jpg`（1280×640、約 100KB）。作り直すには:
 
 ```bash
 npm run social
 ```
 
-各ページの `og:image` はこれを指しているので、**Pages の URL を貼れば**この画像が出る。
+各ページの `og:image` / `twitter:image` はこれを指しているので、
+**Pages の URL を貼れば**この画像が出る。
+同じ絵の PNG（`public/social.png`）も出るので、GitHub の Social preview に上げたい時はそちらを使う。
+
+> 共有カードは軽い方が取り込まれやすいので、OGP には jpeg を使っている。
+> X は一度読んだページを覚えているので、貼り直しても古いカードが出ることがある。
+> その時は URL に `?v=2` のような目印を付けると読み直してくれる。
 
 `github.com/uraraworks/Kiriko` の方を貼った時は、GitHub が自動生成した画像
 （リポジトリ名・説明・アバター）になる。他のリポジトリ（FMSound / Sprout68k）も同じ扱いで、
