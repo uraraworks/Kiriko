@@ -11,6 +11,9 @@ export const DEFAULT_STYLE = {
   font: 'Hiragino Maru Gothic ProN',
   size: 96,
   bold: true,
+  italic: false,
+  underline: false,
+  strike: false,          // 取り消し線
   fill: '#f5e04b',
   stroke: '#4a3b00',      // 内側の濃い縁
   strokeOn: true,         // 内縁を描くか（白フチは outerScale 0 で消せる）
@@ -65,6 +68,10 @@ export function createTelop(t0, t1, style = {}, text = 'テロップ') {
     vAlign: s.vAlign ?? 'bottom',
     wrap: s.wrap ?? true,
     rowGap: 0,
+    // 文字の置き場所。free にすると枠の左上からの相対（textX, textY）でずらせる
+    textFree: false,
+    textX: 0,
+    textY: 0,
     bgAssetId: null,      // 背景画像（枠に合わせて敷く）
     bgFree: false,        // true なら bgBox で自由配置（枠の左上からの相対）
     bgBox: { x: 0, y: 0, w: 0, h: 0 },
@@ -98,6 +105,7 @@ export function migrateTelop(t) {
       vAlign: vAlign ?? 'middle',
       wrap: wrap ?? true,
       rowGap: 0,
+      textFree: false, textX: 0, textY: 0,
       bgAssetId: null, bgFree: false, bgBox: { x: 0, y: 0, w: 0, h: 0 },
       bgFillOn: false, bgFill: '#000000', bgOpacity: 1, bgFit: 'contain',
       rows: [createRow(text ?? '', style)],
@@ -110,6 +118,9 @@ export function migrateTelop(t) {
   out.bgFill = out.bgFill ?? '#000000';
   out.bgOpacity = out.bgOpacity ?? 1;
   out.bgFit = out.bgFit ?? 'contain';
+  out.textFree = out.textFree ?? false;
+  out.textX = out.textX ?? 0;
+  out.textY = out.textY ?? 0;
   out.bgFree = out.bgFree ?? false;
   out.bgBox = out.bgBox ?? { x: 0, y: 0, w: 0, h: 0 };   // 枠の左上からの相対
   out.rowGap = out.rowGap ?? 0;
@@ -152,7 +163,7 @@ export const DEFAULT_PRESETS = [
 
 function fontSpec(r) {
   const fam = /^[\w-]+$/.test(r.font) ? r.font : `"${r.font}"`;
-  return `${r.bold ? 'bold ' : ''}${r.size}px ${fam}, "Hiragino Maru Gothic ProN", sans-serif`;
+  return `${r.italic ? 'italic ' : ''}${r.bold ? 'bold ' : ''}${r.size}px ${fam}, "Hiragino Maru Gothic ProN", sans-serif`;
 }
 
 /** 文字送り（px）。行ごとの設定 */
@@ -236,6 +247,8 @@ export function layoutTelop(ctx, t, imageLib = null) {
 
   // 文字を流し込む領域（アイコンのぶんを除いたところ）
   const tb = { ...b };
+  // 自由指定。文字の置き場所ごと動かす（寄せ方はそのまま効く）
+  if (t.textFree) { tb.x += t.textX ?? 0; tb.y += t.textY ?? 0; }
   if (isz && !ic.free) {
     if (ic.side === 'left') { tb.x += isz.w + ic.gap; tb.w -= isz.w + ic.gap; }
     else if (ic.side === 'right') { tb.w -= isz.w + ic.gap; }
@@ -307,6 +320,40 @@ function drawRowLine(ctx, row, text, x, y) {
   }
   ctx.fillStyle = row.fill;
   ctx.fillText(text, x, y);
+  drawDecoration(ctx, row, text, x, y);
+}
+
+/**
+ * 下線と取り消し線。canvas には無いので自分で引く。
+ * 文字と同じ二重の縁取りを掛けて、映像の上でも読めるようにする。
+ */
+function drawDecoration(ctx, row, text, x, y) {
+  if (!row.underline && !row.strike) return;
+  const w = inkWidth(ctx, row, text);
+  if (w <= 0) return;
+
+  // drawRowLine に渡ってくる x は寄せの補正済みなので、そのぶんを戻して左端を出す
+  const sp = spacingOf(row);
+  const align = row.hAlign || 'center';
+  const left = align === 'left' ? x : align === 'right' ? x - sp - w : x - sp / 2 - w / 2;
+
+  const th = Math.max(2, row.size * 0.055);
+  // フチは文字と同じ太さにすると線が帯になってしまうので、線の太さに見合わせる
+  const hasEdge = (row.strokeWidth || 0) > 0;
+  const outer = hasEdge && (row.outerScale ?? 0) > 0 ? th * 0.55 : 0;
+  const inner = hasEdge && row.strokeOn !== false ? th * 0.3 : 0;
+  const line = (cy) => {
+    // 外フチ → 内縁 → 本体 の順。文字と同じ重ね方にする
+    const bar = (g, color) => {
+      ctx.fillStyle = color;
+      ctx.fillRect(left - g, cy - th / 2 - g, w + g * 2, th + g * 2);
+    };
+    if (outer) bar(outer, row.outerStroke);
+    if (inner) bar(inner, row.stroke);
+    bar(0, row.fill);
+  };
+  if (row.underline) line(y + row.size * 0.42);
+  if (row.strike) line(y - row.size * 0.02);
 }
 
 /** 背景色を枠に敷く（画像より下） */

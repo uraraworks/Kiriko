@@ -671,3 +671,10 @@ body.exporting .statusbar > .progress { display: block; }
 .font-en { grid-column: 1 / -1; font-size: 10.5px; color: var(--dim); }
 .fl-foot.font-foot { display: flex; gap: 6px; }
 .fl-foot.font-foot .mini { flex: 1; justify-content: center; }
+
+/* 書体の飾り（太字・斜体・下線・取り消し線） */
+.align-grid.deco button { font-size: 14px; }
+.align-grid .d-bold { font-weight: 800; }
+.align-grid .d-italic { font-style: italic; }
+.align-grid .d-underline { text-decoration: underline; }
+.align-grid .d-strike { text-decoration: line-through; }

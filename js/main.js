@@ -2093,6 +2093,13 @@ function renderTelopForm(force = false) {
         style="font-family:'${esc(row.font)}',sans-serif">${esc(fontLabel(row.font))}</button></label>
 
 
+    <label>書体の飾り（組み合わせられます）
+      <div class="align-grid four deco">${[
+        ['bold', 'B', '太字'], ['italic', 'I', '斜体'],
+        ['underline', 'U', '下線'], ['strike', 'S', '取り消し線'],
+      ].map(([k, n, title]) =>
+        `<button data-deco="${k}" class="d-${k}${row[k] ? ' on' : ''}" title="${title}">${n}</button>`).join('')}</div></label>
+
     <div class="grid2">
       <label>サイズ <input class="num" type="number" id="telSize" min="16" max="400" value="${row.size}"></label>
       <label>縁の太さ <input class="num" type="number" id="telSW" min="0" max="60" value="${row.strokeWidth}"></label>
@@ -2177,6 +2184,14 @@ function renderTelopForm(force = false) {
     <label>縦の寄せ
       <div class="align-grid">${['top', 'middle', 'bottom'].map((a) =>
         `<button data-v="${a}" class="${tel.vAlign === a ? 'on' : ''}" title="${a}">${VA[a]}</button>`).join('')}</div></label>
+    <label class="chk"><input type="checkbox" id="telTextFree" ${tel.textFree ? 'checked' : ''}> 文字の位置を自由に決める</label>
+    ${tel.textFree ? `
+    <div class="grid2">
+      <label title="テロップの枠の左上からのずれ">右へ
+        <input class="num" type="number" id="telTextX" step="4" value="${Math.round(tel.textX ?? 0)}"></label>
+      <label title="テロップの枠の左上からのずれ">下へ
+        <input class="num" type="number" id="telTextY" step="4" value="${Math.round(tel.textY ?? 0)}"></label>
+    </div>` : ''}
     <label class="chk"><input type="checkbox" id="telWrap" ${tel.wrap ? 'checked' : ''}> 枠の幅で折り返す</label>
 
     <div class="z-row">
@@ -2279,7 +2294,24 @@ function renderTelopForm(force = false) {
   $('telBgStretch')?.addEventListener('change', (e) => {
     commit('背景の伸縮を切り替え'); tel.bgFit = e.target.checked ? 'stretch' : 'contain'; live();
   });
+  for (const b of form.querySelectorAll('[data-deco]')) {
+    b.onclick = () => {
+      commit('書体の飾りを変更');
+      const k = b.dataset.deco;
+      row[k] = !row[k];
+      S.telopStyle[k] = row[k];       // 次に追加するテロップにも引き継ぐ
+      b.classList.toggle('on', row[k]);
+      live();
+    };
+  }
   bind('telRowGap', (v) => { tel.rowGap = +v; });
+  bind('telTextX', (v) => { tel.textX = +v || 0; });
+  bind('telTextY', (v) => { tel.textY = +v || 0; });
+  $('telTextFree')?.addEventListener('change', (e) => {
+    commit('文字の配置を切り替え');
+    tel.textFree = e.target.checked;
+    renderTelopForm(true); live();
+  });
   bind('telLetterSp', (v) => { row.letterSpacing = +v || 0; });
   bind('telIcon', (v) => { tel.icon = { ...tel.icon, assetId: v || null }; renderTelopForm(true); });
   bind('telIconSize', (v) => { tel.icon.size = Math.max(8, +v); });

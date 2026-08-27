@@ -175,6 +175,56 @@ describe('ブラウザが要るモジュール', { skip: haveChrome() ? false : 
     assert.equal(r.free, r.box, '自由配置なのに文字の領域が狭められている');
   });
 
+  test('テロップ: 文字の位置も枠の左上からずらせる', async () => {
+    const r = await ev(`(async () => {
+      const T = await import('/js/telop.js');
+      const ctx = new OffscreenCanvas(1920, 1080).getContext('2d');
+      const t = T.createTelop(0, 3, { wrap: false, box: { x: 200, y: 700, w: 1000, h: 300 } }, 'あいう');
+      const a = T.textBounds(ctx, t);
+      t.textFree = true; t.textX = 120; t.textY = -40;
+      const b = T.textBounds(ctx, t);
+      // 枠ごと動かせば文字も付いてくる
+      t.box = { ...t.box, x: 400 };
+      const c = T.textBounds(ctx, t);
+      return { dx: Math.round(b.x - a.x), dy: Math.round(b.y - a.y), dx2: Math.round(c.x - b.x) };
+    })()`);
+    assert.equal(r.dx, 120, '右へずれていない');
+    assert.equal(r.dy, -40, '上へずれていない');
+    assert.equal(r.dx2, 200, '枠を動かしても文字が付いてこない');
+  });
+
+  test('テロップ: 太字・斜体・下線・取り消し線は組み合わせられる', async () => {
+    const r = await ev(`(async () => {
+      const T = await import('/js/telop.js');
+      // 縁取りと影は外して測る。付けたままだと下線がフチの中に隠れて画素数が変わらない
+      const px = (style) => {
+        const cv = new OffscreenCanvas(600, 200);
+        const ctx = cv.getContext('2d');
+        const t = T.createTelop(0, 3, { ...style, size: 60, wrap: false, hAlign: 'center',
+          strokeWidth: 0, outerScale: 0, shadow: 0,
+          box: { x: 0, y: 0, w: 600, h: 200 }, vAlign: 'middle' }, 'あいう');
+        T.drawTelop(ctx, t);
+        const d = ctx.getImageData(0, 0, 600, 200).data;
+        let n = 0;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 10) n++;
+        return n;
+      };
+      return {
+        plain: px({}),
+        underline: px({ underline: true }),
+        strike: px({ strike: true }),
+        both: px({ underline: true, strike: true }),
+        italic: px({ italic: true }),
+        light: px({ bold: false }),
+      };
+    })()`);
+    assert.ok(r.underline > r.plain, '下線が描かれていない');
+    assert.ok(r.strike > r.plain, '取り消し線が描かれていない');
+    assert.ok(r.both > r.underline && r.both > r.strike, '両方は重ねられるはず');
+    assert.notEqual(r.italic, r.plain, '斜体が効いていない');
+    assert.ok(r.light < r.plain, '太字を外しても細くならない');
+  });
+
   test('テロップ: 文字の外形が枠の中に収まる', async () => {
     const r = await ev(`(async () => {
       const T = await import('/js/telop.js');

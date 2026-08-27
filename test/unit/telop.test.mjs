@@ -91,6 +91,28 @@ test('migrateTelop: 古いテロップにも内縁 ON と背景色の欄が入�
   assert.equal(t.bgFill, '#000000');
 });
 
+test('書体の飾りは独立して組み合わせられる（既定は太字のみ）', () => {
+  assert.equal(T.DEFAULT_STYLE.bold, true);
+  assert.equal(T.DEFAULT_STYLE.italic, false);
+  assert.equal(T.DEFAULT_STYLE.underline, false);
+  assert.equal(T.DEFAULT_STYLE.strike, false);
+  const r = T.createRow('あ', { bold: true, italic: true, underline: true, strike: true });
+  assert.deepEqual(
+    { bold: r.bold, italic: r.italic, underline: r.underline, strike: r.strike },
+    { bold: true, italic: true, underline: true, strike: true },
+    '排他になってしまっている');
+});
+
+test('migrateTelop: 古い行にも飾りの欄が入る（見た目は変わらない）', () => {
+  const t = T.migrateTelop({ id: 'a', start: 0, end: 1, box: { x: 0, y: 0, w: 10, h: 10 },
+    rows: [{ text: 'あ', bold: false }] });
+  assert.equal(t.rows[0].bold, false, '元の設定を上書きしてはいけない');
+  assert.equal(t.rows[0].italic, false);
+  assert.equal(t.rows[0].underline, false);
+  assert.equal(t.rows[0].strike, false);
+  assert.equal(t.textFree, false);
+});
+
 test('画像の自由配置は既定で無効', () => {
   const t = T.createTelop(0, 1);
   assert.equal(t.bgFree, false);
