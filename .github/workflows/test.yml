@@ -28,11 +28,8 @@ jobs:
       - run: npm ci
       # 素材はその場で ffmpeg で作る（実素材は要らない）
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - name: Chrome を用意する
-        uses: browser-actions/setup-chrome@v1
-        id: chrome
-        with:
-          chrome-version: stable
+      # ランナーに入っている Google Chrome を使う。
+      # Chromium 版は H.264 / AAC を持たないので書き出しが試せない
       - run: npm run test:e2e
         env:
-          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          CHROME_PATH: /usr/bin/google-chrome

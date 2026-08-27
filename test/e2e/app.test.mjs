@@ -196,7 +196,20 @@ describe('ブラウザ結合', { skip }, () => {
     assert.ok(m);
   });
 
-  test('mp4 を書き出せて、moov が先頭にある', async () => {
+  test('mp4 を書き出せて、moov が先頭にある', async (t) => {
+    // Chromium の素のビルドには H.264 / AAC が無い。
+    // 環境の都合で赤くしても仕方ないので、その時は正直に飛ばす
+    const canEncode = await ev(`(async () => {
+      try {
+        const v = await VideoEncoder.isConfigSupported(
+          { codec: 'avc1.640028', width: 1280, height: 720, bitrate: 4e6, framerate: 30 });
+        const a = await AudioEncoder.isConfigSupported(
+          { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 128000 });
+        return !!(v?.supported && a?.supported);
+      } catch { return false; }
+    })()`);
+    if (!canEncode) return t.skip('このブラウザは H.264 / AAC を書き出せない');
+
     const r = await ev(`(async () => {
       const root = await navigator.storage.getDirectory();
       try { await root.removeEntry('out.mp4'); } catch {}
