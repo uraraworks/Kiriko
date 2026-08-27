@@ -17,15 +17,15 @@ window.bme.state                   // 内部状態（選択・再生位置など
 window.bme.render()                // 直接いじった後の再描画
 ```
 
-`call()` は MCP 経由とまったく同じ処理を通るので、**ペインから叩いても
-Claude Code から叩いても挙動がずれません**。
+`call()` は MCP 経由とまったく同じ処理を通るので、**ページ内から叩いても
+MCP から叩いても挙動がずれません**。
 
 ## 2 つの経路
 
 | 経路 | 使う場面 | 必要なもの |
 |---|---|---|
 | `window.bme.call()` | ブラウザペイン内、DevTools、テストスクリプト | なし |
-| MCP（WebSocket） | 別プロセスの Claude Code から | `mcp/server.js` の起動 ＋ 接続 |
+| MCP（WebSocket） | 別プロセスの生成 AI から | `mcp/server.js` の起動 ＋ 接続 |
 
 MCP は `ws://127.0.0.1:8910` を使う。**https のページ（GitHub Pages 等）からでも繋がる**
 （localhost は安全なオリジンとして扱われるため）。ただし **Safari は塞いでいる**ので

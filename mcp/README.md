@@ -1,14 +1,16 @@
 # Kiriko MCP サーバー
 
-Claude Code から Kiriko（ブラウザの動画編集ツール）を操作するための橋渡し。
+生成 AI から Kiriko（ブラウザの動画編集ツール）を操作するための橋渡し。
+MCP（Model Context Protocol）に対応したツールなら、どれでも同じように繋がる。
 
 ```
-Claude Code ──stdio── mcp/server.js ──WebSocket(127.0.0.1:8910)── ブラウザの Kiriko
+MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1:8910)── ブラウザの Kiriko
 ```
 
 ## 使い方
 
-1. Claude Code に登録する
+1. MCP クライアントに登録する（例は Claude Code。他のツールでも
+   `node .../mcp/server.js` を stdio の MCP サーバーとして登録すればよい）
 
 ```bash
 claude mcp add kiriko -- node /Users/haruurara/MyProject/_WebService/BrowserMovieEditor/mcp/server.js
@@ -17,7 +19,7 @@ claude mcp add kiriko -- node /Users/haruurara/MyProject/_WebService/BrowserMovi
 2. Kiriko を開き、ツールバー右の**丸いランプ**をクリックして接続する
    （灰色＝未接続 / 黄色点滅＝サーバー待ち / 緑＝接続中）
 
-3. Claude Code から話しかける
+3. AI に話しかける
 
 ```
 セリフが取れそうな所を調べて、区間マーカーを立てて

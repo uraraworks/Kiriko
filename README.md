@@ -19,7 +19,7 @@
 - **動画はどこにも送らない。** 読み込みも書き出しも、すべてブラウザの中で完結する
 - **長い素材でも動く。** 1.5 時間・14GB でもまるごとメモリに載せない
 - **書き出しが速い。** 15 分の動画でおよそ 2〜3 分（WebCodecs によるハードウェア処理）
-- **Claude Code から操作できる**（MCP）。セリフの書き起こしや無音の検出を任せられる
+- **生成 AI から操作できる**（MCP 対応）。セリフの書き起こしや無音の検出を任せられる
 
 Chrome / Edge 向け。Safari と Firefox は書き出しに必要な WebCodecs が未対応。
 
@@ -183,7 +183,7 @@ MIT（[LICENSE](LICENSE)）。同梱ライブラリは [THIRD-PARTY.md](THIRD-PA
 | `js/library.js` | テロップセットのライブラリ（IndexedDB。プロジェクトをまたいで使い回す） |
 | `js/bridge.js` | MCP サーバーとの WebSocket 橋渡し |
 | `js/commands.js` | MCP から呼ばれるコマンドの実装 |
-| `mcp/server.js` | MCP サーバー（Node。Claude Code から使う） |
+| `mcp/server.js` | MCP サーバー（Node。生成 AI から使う） |
 | `js/history.js` | アンドゥ / リドゥ（プロジェクト JSON のスナップショット） |
 | `js/kdenlive.js` | Kdenlive (MLT XML) からカット列を取り込む |
 | `js/main.js` | NLE 風 UI（ビン／モニター／タイムライン） |
@@ -404,15 +404,20 @@ AI に「セリフが取れる箇所に、セリフをメモとして区間マ�
 インスペクタの「メモ」タブ。進捗ややり残しを書いておくとプロジェクト JSON に
 一緒に保存される（`notes`）。動画には出ない。
 
-## MCP 連携（Claude Code から操作する）
+## MCP 連携（生成 AI から操作する）
 
 ```
-Claude Code ──stdio── mcp/server.js ──WebSocket(127.0.0.1:8910)── ブラウザの Kiriko
+MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1:8910)── ブラウザの Kiriko
 ```
+
+MCP に対応したツールなら同じように繋がる。Claude Code の場合:
 
 ```bash
 claude mcp add kiriko -- node <このリポジトリ>/mcp/server.js
 ```
+
+他のクライアントでは、`node <このリポジトリ>/mcp/server.js` を stdio の MCP サーバーとして
+登録する（設定ファイルの書き方は各ツールの説明に従う）。
 
 登録したら Kiriko を開き、ツールバー右の**丸いランプ**をクリックして接続する
 （灰＝未接続／黄点滅＝サーバー待ち／緑＝接続中）。`?bridge=1` を付けて開けば最初から繋ぎに行く。
