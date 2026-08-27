@@ -4,7 +4,7 @@ import * as P from './project.js';
 import { exportProject } from './exporter.js';
 import { parseKdenlive, basename } from './kdenlive.js';
 import * as T from './telop.js';
-import { composeFrame, activeBlur, drawOverlaysAt, overlaysAt } from './compose.js';
+import { composeFrame, activeBlur, drawOverlaysAt, overlaysAt, blurRectAt, activeRectBlurs } from './compose.js';
 import { AudioLibrary, AudioPreview, mixInto } from './audio.js';
 import { History } from './history.js';
 import * as Lib from './library.js';
@@ -195,7 +195,9 @@ function normalizeProject() {
   p.images.forEach((im, i) => { if (typeof im.z !== 'number') im.z = i; });
   p.telops.forEach((tl, i) => { if (typeof tl.z !== 'number') tl.z = 1000 + i; });
   p.imageAssets = p.imageAssets ?? [];
-  p.blurs = p.blurs ?? [];
+  p.blurs = (p.blurs ?? []).map((b) => ({
+    shape: 'full', feather: 0.25, round: true, keys: [], ...b,
+  }));
   p.markers = (p.markers ?? []).map((m) => ({ duration: 0, text: '', ...m })).sort((a, b) => a.time - b.time);
   p.audioClips = p.audioClips ?? [];
   p.audioClips.forEach((a) => { if (typeof a.track !== 'number') a.track = a.kind === 'bgm' ? 1 : 0; });
@@ -922,11 +924,34 @@ function fitStage() {
 const stageScale = () => (S.project.output.width || 1920) / Math.max(1, stage.clientWidth);
 
 /** いま編集できる枠（テロップ or 画像）。プレビュー上で選択されているもの */
+/**
+ * 矩形ぼかしを枠として扱うための包み。
+ * 位置はキーフレームで持つので、box への書き込みは「今の時刻のキー」に反映する。
+ */
+function blurBoxProxy(b, t) {
+  return {
+    id: b.id, start: b.start, end: b.end, _blur: b,
+    get box() { return blurRectAt(b, t); },
+    set box(v) { setBlurRectAt(b, t, v); },
+  };
+}
+
+/** 時刻 t のキーを更新（無ければ作る）。キーが無い状態なら rect を直接書き換える */
+function setBlurRectAt(b, t, rect) {
+  const r = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+  if (!b.keys?.length) { b.rect = r; return; }
+  const i = b.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
+  if (i >= 0) Object.assign(b.keys[i], r);
+  else { b.keys.push({ t, ...r }); b.keys.sort((x, y) => x.t - y.t); }
+}
+
 function activeBox() {
   const tel = selectedTelop();
   if (tel) return { kind: 'telop', item: tel };
   const im = selectedImage();
   if (im) return { kind: 'image', item: im };
+  const bl = selectedBlur();
+  if (bl?.shape === 'rect') return { kind: 'blur', item: blurBoxProxy(bl, currentTimelineTime()) };
   return null;
 }
 
@@ -955,7 +980,7 @@ function renderOverlay() {
   // 選択枠とハンドル
   if (sel && (S.mode !== 'program' || (t >= sel.item.start && t < sel.item.end))) {
     const sc = stageScale();
-    B.drawBoxChrome(ctx, sel.item.box, sc, { color: sel.kind === 'image' ? '#e0ab74' : '#4c9aff' });
+    B.drawBoxChrome(ctx, sel.item.box, sc, { color: sel.kind === 'image' ? '#e0ab74' : sel.kind === 'blur' ? '#7fd8c4' : '#4c9aff' });
     if (boxDrag?.guides?.length) B.drawGuides(ctx, boxDrag.guides, W, H, sc);
   }
 }
@@ -974,7 +999,7 @@ function pickBox(p, t) {
   const ctx = overlay.getContext('2d');
   const sel = activeBox();
   const list = S.mode === 'program'
-    ? overlaysAt(S.project, t)
+    ? [...(sel?.kind === 'blur' ? [{ kind: 'blur', item: sel.item }] : []), ...overlaysAt(S.project, t)]
     : (sel ? [{ kind: sel.kind, item: sel.item }] : []);
   // 手前（z が大きい方）から拾う
   for (let i = list.length - 1; i >= 0; i--) {
@@ -1002,7 +1027,7 @@ overlay.addEventListener('pointerdown', (e) => {
       boxDrag = {
         ...sel, mode: 'resize', handle: h, startX: p.x, startY: p.y,
         orig: { ...sel.item.box }, guides: [], committed: false,
-        label: sel.kind === 'image' ? '画像の大きさを変更' : 'テロップの枠を変更',
+        label: sel.kind === 'image' ? '画像の大きさを変更' : sel.kind === 'blur' ? 'ぼかし範囲を変更' : 'テロップの枠を変更',
       };
       renderOverlay();
       return;
@@ -1017,7 +1042,7 @@ overlay.addEventListener('pointerdown', (e) => {
   boxDrag = {
     ...hit, mode: 'move', startX: p.x, startY: p.y,
     orig: { ...hit.item.box }, guides: [], committed: false,
-    label: hit.kind === 'image' ? '画像の位置を変更' : 'テロップの位置を変更',
+    label: hit.kind === 'image' ? '画像の位置を変更' : hit.kind === 'blur' ? 'ぼかし範囲を移動' : 'テロップの位置を変更',
   };
   overlay.classList.add('grabbing');
   renderAll();
@@ -1118,6 +1143,61 @@ $('helpDialogClose').onclick = () => toggleHelp(false);
   head.addEventListener('pointerup', () => { d = null; head.classList.remove('dragging'); });
 })();
 
+// --- ツールチップ ---
+// ブラウザ標準の title は出るまでが 1〜2 秒あり、その時間は変えられない。
+// 出てほしいのは 0.5 秒くらいなので、title を横取りして自前で出す。
+const TIP_DELAY = 500;
+(() => {
+  const tip = $('tip');
+  let timer = null, current = null;
+
+  const hide = () => {
+    clearTimeout(timer);
+    current = null;
+    tip.classList.remove('show');
+    tip.classList.add('hidden');
+  };
+
+  const show = (el, text) => {
+    tip.textContent = text;
+    tip.classList.remove('hidden');
+    const r = el.getBoundingClientRect();
+    const t = tip.getBoundingClientRect();
+    let x = r.left + r.width / 2 - t.width / 2;
+    let y = r.bottom + 7;
+    if (y + t.height > innerHeight - 4) y = r.top - t.height - 7;  // 下に入らなければ上へ
+    tip.style.left = `${Math.max(4, Math.min(innerWidth - t.width - 4, x))}px`;
+    tip.style.top = `${Math.max(4, y)}px`;
+    requestAnimationFrame(() => tip.classList.add('show'));
+  };
+
+  document.addEventListener('pointerover', (e) => {
+    if (!(e.target instanceof Element)) return;
+    const el = e.target.closest('[title], [data-tip]');
+    if (!el) { if (current) hide(); return; }
+    if (el === current) return;
+    hide();
+    // 標準のツールチップが出ないよう title は退避する（読み上げ用に aria-label を残す）
+    if (el.hasAttribute('title')) {
+      const t = el.getAttribute('title');
+      el.setAttribute('data-tip', t);
+      if (!el.hasAttribute('aria-label')) el.setAttribute('aria-label', t);
+      el.removeAttribute('title');
+    }
+    const text = el.getAttribute('data-tip');
+    if (!text) return;
+    current = el;
+    timer = setTimeout(() => show(el, text), TIP_DELAY);
+  });
+
+  document.addEventListener('pointerout', (e) => {
+    if (current && e.target instanceof Element && e.target.closest('[data-tip]') === current) hide();
+  });
+  document.addEventListener('pointerdown', hide, true);
+  window.addEventListener('wheel', hide, true);
+  window.addEventListener('blur', hide);
+})();
+
 // --- 右クリックメニュー ---
 // canvas の上ではブラウザ標準のメニュー（「全て選択」など）が出て邪魔なので、
 // 抑止して必要な項目だけ自前で出す。
@@ -1214,7 +1294,7 @@ overlay.addEventListener('dblclick', (e) => {
 function nudgeBox(dx, dy) {
   const sel = activeBox();
   if (!sel) return false;
-  commit(sel.kind === 'image' ? '画像を移動' : 'テロップを移動', `nudge:${sel.item.id}`);
+  commit(sel.kind === 'image' ? '画像を移動' : sel.kind === 'blur' ? 'ぼかし範囲を移動' : 'テロップを移動', `nudge:${sel.item.id}`);
   const b = sel.item.box;
   sel.item.box = B.clampBox({ ...b, x: b.x + dx, y: b.y + dy }, overlay.width, overlay.height);
   renderOverlay();
@@ -1811,21 +1891,101 @@ function renderFxForm(force = false) {
   }
 
   if (blur) {
+    const isRect = blur.shape === 'rect';
+    const r = isRect ? blurRectAt(blur, currentTimelineTime()) : null;
+    const keys = blur.keys ?? [];
     form.innerHTML = `
-      <div class="sub-label">全画面ぼかし（プライバシー保護用）</div>
+      <label>かける範囲
+        <div class="align-grid">
+          <button data-shape="full" class="${!isRect ? 'on' : ''}">全画面</button>
+          <button data-shape="rect" class="${isRect ? 'on' : ''}">部分（顔など）</button>
+        </div></label>
       <label>強さ <span id="fxStrLbl">${blur.strength}</span>
         <input type="range" id="fxStr" min="4" max="120" value="${blur.strength}"></label>
+      ${isRect ? `
+      <label>縁のぼかし <span id="fxFeaLbl">${Math.round((blur.feather ?? 0.25) * 100)}%</span>
+        <input type="range" id="fxFea" min="0" max="90" value="${Math.round((blur.feather ?? 0.25) * 100)}"></label>
+      <label class="chk"><input type="checkbox" id="fxRound" ${blur.round !== false ? 'checked' : ''}> 楕円にする（顔向き）</label>
+      <div class="grid2">
+        <label>X <input class="num" type="number" id="boxX" value="${Math.round(r.x)}"></label>
+        <label>Y <input class="num" type="number" id="boxY" value="${Math.round(r.y)}"></label>
+        <label>幅 <input class="num" type="number" id="boxW" value="${Math.round(r.w)}"></label>
+        <label>高さ <input class="num" type="number" id="boxH" value="${Math.round(r.h)}"></label>
+      </div>
+
+      <div class="panel-head sub inline">追従（キーフレーム）</div>
+      <div class="sub-label">動く顔に合わせるには、要所で位置を打つと間を自動で補間します。</div>
+      <div class="z-row">
+        <button class="mini" id="fxKeyAdd">＋ ここに打つ</button>
+        <button class="mini" id="fxKeyDel" ${keys.length ? '' : 'disabled'}>この位置を削除</button>
+      </div>
+      ${keys.length ? `<div class="key-list">${keys.map((k, i) =>
+        `<button class="key-chip" data-key="${i}" title="${tc(k.t, false)} へ移動">${tc(k.t, false)}</button>`).join('')}</div>`
+        : '<div class="sub-label">キーなし（位置は固定）</div>'}
+      ` : ''}
       <div class="grid2">
         <label>開始（秒）<input class="num" type="number" id="fxStart" step="0.1" value="${blur.start.toFixed(2)}"></label>
         <label>終了（秒）<input class="num" type="number" id="fxEnd" step="0.1" value="${blur.end.toFixed(2)}"></label>
       </div>
-      <div class="sub-label">長さ ${tc(blur.end - blur.start, false)}</div>`;
-    const b = (id, fn) => $(id).addEventListener('input', (e) => {
+      <div class="sub-label">長さ ${tc(blur.end - blur.start, false)}${isRect ? '<br>プレビュー上で枠をドラッグして位置と大きさを決められます。' : ''}</div>`;
+
+    const b = (id, fn) => $(id)?.addEventListener('input', (e) => {
       commit('ぼかしを編集', `blurF:${blur.id}:${id}`); fn(e.target.value); live();
     });
     b('fxStr', (v) => { blur.strength = +v; $('fxStrLbl').textContent = v; });
+    b('fxFea', (v) => { blur.feather = +v / 100; $('fxFeaLbl').textContent = `${v}%`; });
     b('fxStart', (v) => { blur.start = Math.max(0, +v); });
     b('fxEnd', (v) => { blur.end = Math.max(blur.start + 0.1, +v); });
+    const setRect = (fn) => {
+      const cur = blurRectAt(blur, currentTimelineTime());
+      fn(cur);
+      setBlurRectAt(blur, currentTimelineTime(), cur);
+    };
+    b('boxX', (v) => setRect((c) => { c.x = +v; }));
+    b('boxY', (v) => setRect((c) => { c.y = +v; }));
+    b('boxW', (v) => setRect((c) => { c.w = Math.max(20, +v); }));
+    b('boxH', (v) => setRect((c) => { c.h = Math.max(20, +v); }));
+    $('fxRound')?.addEventListener('change', (e) => {
+      commit('ぼかしの形を変更'); blur.round = e.target.checked; live();
+    });
+    for (const btn of form.querySelectorAll('[data-shape]')) {
+      btn.onclick = () => {
+        commit('ぼかしの範囲を変更');
+        blur.shape = btn.dataset.shape;
+        if (blur.shape === 'rect' && !blur.rect && !blur.keys?.length) {
+          const W = S.project.output.width, H = S.project.output.height;
+          blur.rect = { x: W / 2 - 200, y: H / 2 - 160, w: 400, h: 320 };
+        }
+        renderFxForm(true); live();
+      };
+    }
+    $('fxKeyAdd')?.addEventListener('click', () => {
+      commit('キーを打つ');
+      const t = currentTimelineTime();
+      const cur = blurRectAt(blur, t);
+      blur.keys = blur.keys ?? [];
+      const i = blur.keys.findIndex((k) => Math.abs(k.t - t) < 0.02);
+      if (i >= 0) Object.assign(blur.keys[i], cur);
+      else blur.keys.push({ t, ...cur });
+      blur.keys.sort((a2, b2) => a2.t - b2.t);
+      renderFxForm(true); live();
+      status(`${tc(t, false)} にキーを打ちました（${blur.keys.length} 個）`);
+    });
+    $('fxKeyDel')?.addEventListener('click', () => {
+      const t = currentTimelineTime();
+      const i = (blur.keys ?? []).findIndex((k) => Math.abs(k.t - t) < 0.05);
+      if (i < 0) return status('この位置にキーがありません', true);
+      commit('キーを削除');
+      blur.keys.splice(i, 1);
+      renderFxForm(true); live();
+    });
+    for (const chip of form.querySelectorAll('[data-key]')) {
+      chip.onclick = () => {
+        setMode('program');
+        seekProgram(blur.keys[+chip.dataset.key].t, true);
+        renderAll(); renderFxForm(true);
+      };
+    }
     return;
   }
 
@@ -2507,7 +2667,7 @@ function niceStep(pxPerSec) {
 // クリップの境目（と再生位置）に吸わせる。Alt で解除。
 
 /** 吸着先：カットの境目・マーカー（区間なら両端）・再生位置 */
-function snapTargets() {
+function snapTargets(includePlayhead = true) {
   const list = [0];
   let t = 0;
   for (const c of S.project.clips) { t += P.clipDuration(c); list.push(t); }
@@ -2515,8 +2675,24 @@ function snapTargets() {
     list.push(m.time);
     if ((m.duration ?? 0) > 0) list.push(m.time + m.duration);
   }
-  list.push(S.programTime);
+  if (includePlayhead) list.push(S.programTime);
   return list;
+}
+
+/**
+ * 再生位置のドラッグも区切りに吸着させる。
+ * 画像やテロップをカットの頭に合わせたい時、まずカーソルをそこへ置くので効いてくる。
+ */
+function snapPlayhead(sec, alt) {
+  S.snapLine = null;
+  if (alt) return sec;
+  const targets = snapTargets(false);
+  if (S.zoneIn !== null) targets.push(S.zoneIn);
+  if (S.zoneOut !== null) targets.push(S.zoneOut);
+  const hit = snapOne(sec, targets);
+  if (hit === null) return sec;
+  S.snapLine = hit;
+  return hit;
 }
 
 /** 1 点を吸着させる。tol は画面上の距離なので、拡大率に関わらず同じ感覚になる */
@@ -2712,7 +2888,7 @@ tlCanvas.addEventListener('pointerdown', (e) => {
   const hit = hitClip(x, y);
   if (!hit || y < RULER_H) {
     setMode('program');
-    seekProgram(Math.max(0, xToSec(x)), true);
+    seekProgram(Math.max(0, snapPlayhead(xToSec(x), e.altKey)), true);
     renderAll();
     drag = { type: 'scrub' };
     return;
@@ -2736,7 +2912,7 @@ tlCanvas.addEventListener('pointermove', (e) => {
   const r = tlCanvas.getBoundingClientRect();
   const x = e.clientX - r.left;
   if (drag.type === 'scrub') {
-    seekProgram(Math.max(0, xToSec(x)), false);
+    seekProgram(Math.max(0, snapPlayhead(xToSec(x), e.altKey)), false);
     renderTimeline(); renderTransport(); renderScrub(); renderOverlay();
   } else if (drag.type === 'trim') {
     const d = (x - drag.startX) / S.pxPerSec;
