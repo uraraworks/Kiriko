@@ -110,6 +110,15 @@ test('ttc: テーブルの位置に、フォントの開始位置を足さない
   assert.equal(t.length, 33);
 });
 
+// OTF（CFF ベース）はタグが 'OTTO'。テーブル一覧の読み方は TrueType と同じ
+test('otf（OTTO）のヘッダも読める', () => {
+  const buf = new ArrayBuffer(12);
+  const v = new DataView(buf);
+  v.setUint32(0, 0x4f54544f);   // 'OTTO'
+  v.setUint16(4, 9);
+  assert.deepEqual(headerPlan(buf), { start: 0, need: 12 + 9 * 16 });
+});
+
 test('ヘッダの読み方: 普通のフォントと ttc', () => {
   const one = new ArrayBuffer(12);
   const v = new DataView(one);
