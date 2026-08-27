@@ -1063,7 +1063,7 @@ function renderMediaBin() {
     const el = document.createElement('div');
     el.className = 'bin-item' + (s.id === S.currentSourceId ? ' active' : '');
     el.innerHTML = `<div class="row"><div class="n">${esc(s.name)}</div>`
-      + `<button class="bin-add" title="素材まるごとをタイムラインに置く（範囲を消していく編集の起点）">全体</button></div>`
+      + `<button class="bin-add" title="この素材をまるごとタイムラインに置く。ここから要らない範囲を切り取っていく">全体を置く</button></div>`
       + `<div class="m">${tc(s.duration)} ／ ${(s.size / 1e9).toFixed(2)} GB</div>`;
     el.querySelector('.bin-add').onclick = (ev) => { ev.stopPropagation(); placeWholeSource(s.id); };
     el.onclick = () => selectSource(s.id);
@@ -2598,7 +2598,7 @@ normalizeProject();
 syncProjectUI();
 renderHistoryUI();
 renderAll();
-status('準備完了 — メディアタブの ＋ ボタン、または mp4 をドロップして読み込みます');
+status('準備完了 — メディアタブから素材を読み込むか、mp4 をここへドロップしてください');
 
 // Phase 4（AI 連携 / MCP）に向けた操作フック。
 // プロジェクト JSON をそのまま差し替えられるようにしておく。
