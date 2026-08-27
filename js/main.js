@@ -22,6 +22,7 @@ const S = {
   project: P.createProject(),
   sources: new Map(),      // sourceId -> Mp4Source
   mediaFilter: 'all',      // メディア一覧の絞り込み（all / video / audio / image）
+  clipboard: null,         // コピーしたテロップ / 音源 / 画像 / ぼかし
   workDir: null,           // 作業フォルダ（FileSystemDirectoryHandle）
   workDirReady: false,     // その許可が生きているか
   libDir: null,            // テロップ用画像の置き場所（FileSystemDirectoryHandle）
@@ -576,6 +577,39 @@ function rippleAfter(a, b) {
     .filter((x) => x.duration > 0.05);
 }
 
+/**
+ * 時刻 t に len 秒の隙間を空けて、後ろのものをまとめて後ろへずらす。
+ * クリップを伸ばした時に、テロップなどが元の映像と合わなくなるのを防ぐ。
+ * t をまたいでいるものは、終わりだけ伸ばして掛かり続けるようにする。
+ */
+function insertGapAt(t, len) {
+  if (len <= 0.0001) return;
+  const P0 = S.project;
+  const push = (v) => (v >= t ? v + len : v);
+  const shiftBlock = (x) => ({ ...x, start: push(x.start), end: push(x.end) });
+  P0.telops = P0.telops.map(shiftBlock);
+  P0.blurs = P0.blurs.map(shiftBlock);
+  P0.images = P0.images.map(shiftBlock);
+  P0.markers = P0.markers.map((m) => {
+    const s0 = push(m.time), e0 = push(m.time + (m.duration ?? 0));
+    return { ...m, time: s0, duration: Math.max(0, e0 - s0) };
+  });
+  P0.audioClips = P0.audioClips.map((x) => {
+    const s0 = push(x.start), e0 = push(x.start + x.duration);
+    return { ...x, start: s0, duration: e0 - s0 };
+  });
+}
+
+/** クリップの開始時刻（タイムライン上）。クリップは隙間なく並ぶ */
+function clipStartSec(clip) {
+  let t = 0;
+  for (const c of S.project.clips) {
+    if (c === clip) return t;
+    t += P.clipDuration(c);
+  }
+  return t;
+}
+
 /** 素材まるごとをタイムラインの末尾に置く（範囲を消していく編集の起点） */
 function placeWholeSource(sourceId) {
   const src = S.sources.get(sourceId);
@@ -640,9 +674,78 @@ function deleteSelected() {
   const i = S.project.clips.findIndex((c) => c.id === S.selectedClipId);
   if (i < 0) return;
   commit('クリップを削除');
+  // 消した分だけ、テロップ・画像・音源・マーカーも前に詰める
+  const a = clipStartSec(S.project.clips[i]);
+  const b = a + P.clipDuration(S.project.clips[i]);
   S.project.clips.splice(i, 1);
+  rippleAfter(a, b);
   select('clip', S.project.clips[Math.min(i, S.project.clips.length - 1)]?.id ?? null);
   renderAll();
+}
+
+// ---------------------------------------------------------------- コピー / 貼り付け
+//
+// 「1 件目 配達完了」のテロップと効果音を 2 件目の所へ持っていって、
+// 数字だけ書き換える——という使い方を想定している。
+// 中身は JSON なので、丸ごと複製して時刻だけ差し替えればよい。
+
+/** 選択中のものをコピーする */
+function copySelected() {
+  const pick = [
+    ['telop', selectedTelop()],
+    ['audio', selectedAudio()],
+    ['image', selectedImage()],
+    ['blur', selectedBlur()],
+  ].find(([, v]) => v);
+  if (!pick) return status('コピーするものが選ばれていません', true);
+  const [kind, item] = pick;
+  S.clipboard = { kind, data: JSON.parse(JSON.stringify(item)) };
+  status(`${KIND_NAME[kind]}をコピーしました（⌘V で再生位置に貼り付け）`);
+}
+
+const KIND_NAME = { telop: 'テロップ', audio: '音源', image: '画像', blur: 'ぼかし' };
+
+/** コピーしたものを再生位置に貼り付ける。長さ・書式はそのまま */
+function pasteClipboard() {
+  const cb = S.clipboard;
+  if (!cb) return status('コピーされていません', true);
+  const total = P.totalDuration(S.project);
+  if (total <= 0) return status('先にクリップを作ってください', true);
+
+  const t0 = Math.min(currentTimelineTime(), Math.max(0, total - 0.2));
+  const src = cb.data;
+  commit(`${KIND_NAME[cb.kind]}を貼り付け`);
+
+  if (cb.kind === 'audio') {
+    const ac = { ...src, id: P.newId('ac'), start: t0 };
+    // 同じ時間に既に何か置いてあるトラックは避ける
+    ac.track = 0;
+    while (S.project.audioClips.some((o) => (o.track ?? 0) === ac.track
+      && t0 < o.start + o.duration && t0 + ac.duration > o.start)) ac.track++;
+    S.project.audioClips.push(ac);
+    select('audio', ac.id);
+  } else {
+    const len = src.end - src.start;
+    const prefix = { telop: 'tel', image: 'img', blur: 'blur' }[cb.kind];
+    const item = { ...src, id: P.newId(prefix), start: t0, end: Math.min(total, t0 + len) };
+    if (cb.kind !== 'blur') item.z = zRange()[1] + 1;
+    if (cb.kind === 'telop') {
+      // 同じ時間に既にテロップがあるトラックは避ける
+      item.track = 0;
+      while (S.project.telops.some((o) =>
+        (o.track ?? 0) === item.track && item.start < o.end && item.end > o.start)) item.track++;
+    }
+    const bucket = { telop: S.project.telops, image: S.project.images, blur: S.project.blurs }[cb.kind];
+    bucket.push(item);
+    select(cb.kind, item.id);
+  }
+  setMode('program');
+  seekProgram(t0, true);
+  renderAll();
+  renderTelopForm(true);
+  renderFxForm(true);
+  if (cb.kind === 'telop') openTelopEditor();   // すぐ文字を直せるように
+  status(`${KIND_NAME[cb.kind]}を ${tc(t0, false)} に貼り付けました`);
 }
 
 // ---------------------------------------------------------------- テロップ
@@ -1357,6 +1460,7 @@ overlay.addEventListener('contextmenu', (e) => {
   const items = [
     { label: hit.kind === 'image' ? '画像を削除' : 'テロップを削除', key: 'Delete', run: () => deleteSelected() },
   ];
+  items.push({ label: 'コピー', key: '⌘C', run: () => copySelected() });
   if (hit.kind === 'telop') {
     items.push({ label: 'テロップを編集…', run: () => openTelopDialog() });
     items.push({ label: '★ ライブラリに保存…', run: () => saveTelopToLibrary() });
@@ -2380,7 +2484,7 @@ function renderTransport() {
   $('lblIn').textContent = inV === null ? '--:--' : tc(inV, false);
   $('lblOut').textContent = outV === null ? '--:--' : tc(outV, false);
   $('lblLen').textContent = (inV !== null && outV !== null) ? tc(outV - inV, false) : '--:--';
-  $('totalDur').textContent = tc(P.totalDuration(S.project), false);
+  $('totalDur').textContent = tc(P.totalDuration(S.project));   // 1 時間超えがあるので時間から出す
   $('clipCount').textContent = S.project.clips.length;
 }
 
@@ -3219,7 +3323,11 @@ tlCanvas.addEventListener('pointerdown', (e) => {
   if (rebuildFx) renderFxForm(true);
   const edgeL = Math.abs(x - hit.cx) < 6, edgeR = Math.abs(x - (hit.cx + hit.cw)) < 6;
   if (edgeL || edgeR) {
-    drag = { type: 'trim', clip: hit.clip, side: edgeL ? 'in' : 'out', startX: x, orig: { in: hit.clip.in, out: hit.clip.out } };
+    drag = {
+      type: 'trim', clip: hit.clip, side: edgeL ? 'in' : 'out', startX: x,
+      orig: { in: hit.clip.in, out: hit.clip.out },
+      startSec: clipStartSec(hit.clip),   // 詰める／空ける位置の基準
+    };
   } else {
     drag = { type: 'move', clip: hit.clip, startX: x, moved: false };
   }
@@ -3345,6 +3453,18 @@ document.addEventListener('focusin', () => history.endGroup());
 
 tlCanvas.addEventListener('pointerup', () => {
   S.snapLine = null;
+  // 端をドラッグして長さが変わった分、後ろのものをまとめて動かす
+  if (drag?.type === 'trim') {
+    const before = drag.orig.out - drag.orig.in;
+    const after = P.clipDuration(drag.clip);
+    const d = after - before;
+    if (Math.abs(d) > 0.0005) {
+      // 頭を削った時はクリップの先頭、後ろを削った時はクリップの終わりが境目
+      const edge = drag.side === 'in' ? drag.startSec : drag.startSec + Math.min(before, after);
+      if (d < 0) rippleAfter(edge, edge - d);
+      else insertGapAt(edge, d);
+    }
+  }
   if (drag && drag.type === 'move' && !drag.moved) {
     // クリック扱い：選択のみ
   }
@@ -3415,20 +3535,33 @@ tlCanvas.addEventListener('contextmenu', (e) => {
       items.push({ label: '区間マーカーの外を全部切り取る…', run: () => keepMarkedRangesOnly() });
     }
     else if (hit.blur) { select('blur', hit.blur.id); items.push({ label: 'ぼかしを削除', key: 'Delete' }); }
-    else if (hit.im) { select('image', hit.im.id); items.push({ label: '画像を削除', key: 'Delete' }); }
+    else if (hit.im) {
+      select('image', hit.im.id);
+      items.push({ label: '画像を削除', key: 'Delete' });
+      items.push({ label: 'コピー', key: '⌘C', run: () => copySelected() });
+    }
     else if (hit.tel) {
       select('telop', hit.tel.id);
       items.push({ label: 'テロップを削除', key: 'Delete' });
+      items.push({ label: 'コピー', key: '⌘C', run: () => copySelected() });
       items.push({ label: 'テロップを編集…', run: () => openTelopDialog() });
       items.push({ label: '★ ライブラリに保存…', run: () => saveTelopToLibrary() });
     }
-    else if (hit.ac) { select('audio', hit.ac.id); items.push({ label: '音源を削除', key: 'Delete' }); }
+    else if (hit.ac) {
+      select('audio', hit.ac.id);
+      items.push({ label: '音源を削除', key: 'Delete' });
+      items.push({ label: 'コピー', key: '⌘C', run: () => copySelected() });
+    }
     else if (hit.clip) { select('clip', hit.clip.id); items.push({ label: 'クリップを削除' }); }
     if (!items[0].run) items[0].run = () => deleteSelected();
     renderAll(); renderTelopForm(true); renderFxForm(true);
   }
   if (zoneRange()) {
     items.push({ label: '範囲を切り取って詰める', key: 'Delete', run: () => extractZone() });
+  }
+  if (S.clipboard) {
+    items.push({ label: `ここに${KIND_NAME[S.clipboard.kind]}を貼り付け`, key: '⌘V',
+      run: () => { seekProgram(xToSec(x), true); pasteClipboard(); } });
   }
   if (!hit && trackAt(y)?.kind === 'marker') {
     items.push({ label: 'ここにマーカーを立てる', key: 'M', run: () => addMarker(xToSec(x)) });
@@ -4147,6 +4280,8 @@ document.addEventListener('keydown', (e) => {
     if (k === 's') { e.preventDefault(); saveProject(); return; }
     if (k === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
     if (k === 'y') { e.preventDefault(); doRedo(); return; }   // Windows 流
+    if (k === 'c') { e.preventDefault(); copySelected(); return; }
+    if (k === 'v') { e.preventDefault(); pasteClipboard(); return; }
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   switch (k) {
