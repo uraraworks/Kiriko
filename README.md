@@ -107,7 +107,7 @@ python3 -m http.server 8901
 | <kbd>T</kbd> / <kbd>B</kbd> | テロップ追加／ぼかし区間追加 |
 | <kbd>M</kbd> | 再生位置にマーカーを立てる |
 | <kbd>,</kbd> / <kbd>.</kbd> | 前／次のマーカーへ |
-| <kbd>G</kbd> | 次の「区間マーカーの外」を範囲選択 |
+| <kbd>G</kbd> / <kbd>F</kbd> | 次／前の「区間マーカーの外」を範囲選択 |
 | <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd> | 元に戻す |
 | <kbd>⇧⌘Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> | やり直す |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | プロジェクト保存 |
@@ -286,12 +286,12 @@ V1（映像）／A1（素材音）／A2・A3…（効果音・BGM）。
 
 - **点マーカー**：位置とメモだけ。<kbd>,</kbd> <kbd>.</kbd> で前後のマーカーへ飛べる
 - **区間マーカー**：長さを付けると「**ここは残す**」の印になる。左右どちらの端もドラッグで詰められる
-- **［次の区間外へ］**（<kbd>G</kbd>）：区間マーカーの**外側**（＝消す候補）を 1 つずつ範囲選択して、そこへ移動する
+- **［区間外］**（<kbd>G</kbd> 次へ／<kbd>F</kbd> 前へ）：区間マーカーの**外側**（＝消す候補）を 1 つずつ範囲選択して、そこへ移動する
 
 一番手間の掛かる「自分が喋っている所だけ残す」作業を狙った機能。
 AI に「セリフが取れる箇所に、セリフをメモとして区間マーカーを立てて」と頼んでおき、
 
-1. <kbd>G</kbd> で次の「区間外」へ飛ぶ
+1. <kbd>G</kbd> で次の「区間外」へ飛ぶ（<kbd>F</kbd> で前に戻れる）
 2. 中身を見て、必要なら範囲の端を詰める
 3. <kbd>Delete</kbd> で切り取る
 
@@ -362,7 +362,7 @@ bme.project.markers          // マーカー [{ id, time, duration, text }]
 bme.addMarker(time, text, duration)
 bme.keepMarkedRangesOnly()   // 区間マーカーの外側を全部切り取る
 bme.jumpMarker(+1 | -1)
-bme.selectNextGap()          // 次の「区間外」を範囲選択
+bme.selectNextGap() / bme.selectPrevGap()
 bme.gapRanges()              // 区間マーカーの外側（消す候補）の一覧
 bme.telop.createTelop(t0,t1,style,text)
 ```

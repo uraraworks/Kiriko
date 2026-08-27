@@ -87,6 +87,9 @@
   <symbol id="i-whole" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <path d="M4 6v12M20 6v12"/><rect x="7.5" y="8.5" width="9" height="7" rx="1.5"/>
   </symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 6l-6 6 6 6"/><path d="M18 5v14"/>
+  </symbol>
   <symbol id="i-marker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <path d="M6 21V4h11l-2.5 3.5L17 11H6"/>
   </symbol>
@@ -265,7 +268,8 @@
       タイムライン
       <span class="tl-edit">
         <button id="btnAddMarker" class="mini ico" title="再生位置にマーカーを立てる　［ M ］"><svg class="ic"><use href="#i-marker"/></svg></button>
-        <button id="btnNextGap" class="mini" title="区間マーカーの外側（＝消す候補）を 1 つずつ範囲選択して確認する　［ G ］"><svg class="ic"><use href="#i-keep"/></svg><span>次の区間外へ</span></button>
+        <button id="btnPrevGap" class="mini ico" title="前の区間外を範囲選択　［ F ］"><svg class="ic"><use href="#i-prev"/></svg></button>
+        <button id="btnNextGap" class="mini" title="次の区間外を範囲選択（区間マーカーの外＝消す候補）　［ G ］"><svg class="ic"><use href="#i-keep"/></svg><span>区間外</span></button>
         <span class="tl-sep"></span>
         <button id="btnAddTelop" class="mini ico" title="再生位置にテロップを追加　［ T ］"><svg class="ic"><use href="#i-telop"/></svg></button>
         <span class="tl-sep"></span>
@@ -327,7 +331,7 @@
         <tr><th colspan="2">マーカー</th></tr>
         <tr><td><kbd>M</kbd></td><td>再生位置にマーカーを立てる</td></tr>
         <tr><td><kbd>,</kbd> / <kbd>.</kbd></td><td>前／次のマーカーへ</td></tr>
-        <tr><td><kbd>G</kbd></td><td>次の「区間マーカーの外」を範囲選択</td></tr>
+        <tr><td><kbd>G</kbd> / <kbd>F</kbd></td><td>次／前の「区間マーカーの外」を範囲選択</td></tr>
 
         <tr><th colspan="2">重ね物</th></tr>
         <tr><td><kbd>T</kbd> / <kbd>B</kbd></td><td>テロップ／ぼかしを追加</td></tr>

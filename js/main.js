@@ -712,23 +712,40 @@ function gapRanges() {
 }
 
 /**
- * 再生位置より後ろにある「区間マーカーの外側」を 1 つ範囲選択して、そこへ移動する。
+ * 「区間マーカーの外側」を 1 つ範囲選択して、そこへ移動する。
  * 中身を見て、必要なら範囲を詰めてから Delete、を繰り返す使い方を想定している。
  * （まとめて消すより、こちらの方が取りこぼしに気付ける）
+ * @param {number} dir +1 で次、-1 で前
  */
-function selectNextGap() {
+function selectGap(dir = 1) {
   const gaps = gapRanges();
   if (!gaps.length) return status('区間マーカーの外側がありません（先に区間マーカーを立ててください）', true);
-  // 再生位置より後ろで「終わり」が来る最初の区間外。先頭（0 秒始まり）も拾える
+  // いま同じ範囲を選んでいるなら、そこから 1 つ進める（選択後はカーソルが区間の頭に来るので、
+  // 再生位置だけを見ると同じ区間を選び続けてしまう）
   const t = S.programTime;
-  const g = gaps.find(([, b]) => b > t + 0.05) ?? gaps[0];
+  const cur = gaps.findIndex(([a, b]) =>
+    S.zoneIn !== null && S.zoneOut !== null
+    && Math.abs(a - S.zoneIn) < 0.02 && Math.abs(b - S.zoneOut) < 0.02);
+  let idx;
+  if (cur >= 0) {
+    idx = Math.max(0, Math.min(gaps.length - 1, cur + dir));
+    if (idx === cur) return status(dir > 0 ? '最後の区間外です' : '最初の区間外です');
+  } else {
+    idx = dir > 0
+      ? gaps.findIndex(([, b]) => b > t + 0.05)
+      : gaps.map(([a]) => a).reduce((acc, a, i) => (a < t - 0.05 ? i : acc), -1);
+    if (idx < 0) idx = dir > 0 ? gaps.length - 1 : 0;
+  }
+  const g = gaps[idx];
   setMode('program');
   S.zoneIn = g[0]; S.zoneOut = g[1];
   seekProgram(g[0], true);
   renderZoneUI(); renderAll();
-  const i = gaps.indexOf(g) + 1;
+  const i = idx + 1;
   status(`区間外 ${i}/${gaps.length} を選択（${tc(g[0], false)} 〜 ${tc(g[1], false)} ／ ${tc(g[1] - g[0], false)}）— 確認して Delete`);
 }
+const selectNextGap = () => selectGap(1);
+const selectPrevGap = () => selectGap(-1);
 
 /** 選択中のマーカーの区間をそのまま範囲選択にする */
 function selectMarkerRange() {
@@ -2894,6 +2911,7 @@ tlCanvas.addEventListener('contextmenu', (e) => {
         items.push({ label: 'この区間を範囲選択', run: () => { select('marker', hit.m.id); selectMarkerRange(); } });
       }
       items.push({ label: '次の区間外を範囲選択', key: 'G', run: () => { seekProgram(hit.m.time, true); selectNextGap(); } });
+      items.push({ label: '前の区間外を範囲選択', key: 'F', run: () => { seekProgram(hit.m.time, true); selectPrevGap(); } });
       items.push({ label: '区間マーカーの外を全部切り取る…', run: () => keepMarkedRangesOnly() });
     }
     else if (hit.blur) { select('blur', hit.blur.id); items.push({ label: 'ぼかしを削除', key: 'Delete' }); }
@@ -3149,6 +3167,7 @@ $('btnWaves').onclick = () => {
   renderTimeline();
 };
 $('btnAddMarker').onclick = () => addMarker();
+$('btnPrevGap').onclick = selectPrevGap;
 $('btnNextGap').onclick = selectNextGap;
 $('btnAddTelop').onclick = addTelop;
 $('btnZoneIn').onclick = () => { setMode('program'); zoneIn(); };
@@ -3256,6 +3275,7 @@ document.addEventListener('keydown', (e) => {
     case ',': jumpMarker(-1); break;
     case '.': jumpMarker(1); break;
     case 'g': selectNextGap(); break;
+    case 'f': selectPrevGap(); break;
     case 'b': addBlur(); break;
     case 'j':
       video.playbackRate = video.paused || video.playbackRate > 0 ? 1 : video.playbackRate;
@@ -3325,6 +3345,7 @@ window.bme = {
   keepMarkedRangesOnly,
   jumpMarker,
   selectNextGap,
+  selectPrevGap,
   selectMarkerRange,
   gapRanges,
   addImageAssets,
