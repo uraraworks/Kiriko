@@ -33,6 +33,15 @@ body {
   grid-template-rows: 40px auto minmax(120px,1fr) 6px var(--tl-h, 330px) 26px;
   height: 100%;
 }
+/* 行は必ず固定で割り当てる。
+   素材の警告帯は非表示になるとグリッド項目から消えるので、
+   自動配置に任せると以降の行が 1 つずつ繰り上がってしまう */
+#app > .toolbar     { grid-row: 1; }
+#app > .missing-bar { grid-row: 2; }
+#app > .workspace   { grid-row: 3; }
+#app > .tl-split    { grid-row: 4; }
+#app > .timeline    { grid-row: 5; }
+#app > .statusbar   { grid-row: 6; }
 
 /* ---------- ツールバー ---------- */
 .toolbar {
@@ -528,3 +537,28 @@ kbd {
 .pick-row:hover { background: var(--head); }
 .pick-name { font-size: 13px; }
 .pick-time { font-size: 11px; color: var(--dim); }
+
+/* ---- 作業フォルダを開くまでの案内 ---- */
+.welcome {
+  position: fixed; left: 0; right: 0; top: 40px; bottom: 0; z-index: 30;
+  background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 24px; text-align: center;
+}
+.welcome.hidden { display: none; }
+.wc-icon { width: 96px; height: 96px; image-rendering: auto; }
+.welcome h1 { margin: 0; font-size: 24px; letter-spacing: .08em; color: var(--text); }
+.wc-lead { margin: 0; font-size: 14px; line-height: 1.9; color: var(--text); }
+.wc-btns { display: flex; gap: 10px; margin-top: 4px; }
+.welcome .tb.export { padding: 9px 20px; font-size: 14px; }
+.welcome .tb.hidden { display: none; }
+.wc-note { margin: 0; max-width: 560px; font-size: 12px; line-height: 1.9; color: var(--dim); }
+.wc-note a { color: var(--accent); }
+
+/* 作業フォルダが無い間は、フォルダとヘルプ以外は押せない */
+body.no-workdir .toolbar .tb:not(#btnWorkDir):not(#btnHelp) { opacity: .35; pointer-events: none; }
+.welcome .tb.wc-alt {
+  padding: 9px 20px; font-size: 14px;
+  background: var(--panel2); border: 1px solid var(--line-hard); color: var(--text);
+}
+.welcome .tb.wc-alt:hover { background: var(--head); }

@@ -376,6 +376,22 @@
   <!-- 右クリックメニュー -->
   <div id="ctxMenu" class="ctx-menu hidden"></div>
 
+  <!-- 作業フォルダを開くまでの案内 -->
+  <div id="welcome" class="welcome hidden">
+    <img src="assets/icon-512.png" alt="" class="wc-icon">
+    <h1>Kiriko</h1>
+    <p class="wc-lead">編集する動画が入っている<b>フォルダ</b>を開いてください。<br>
+      プロジェクトも素材も、そのフォルダの中でまとめて扱います。</p>
+    <div class="wc-btns">
+      <button id="wcReopen" class="tb export hidden"></button>
+      <button id="wcOpen" class="tb export">作業フォルダを開く</button>
+    </div>
+    <p class="wc-note">ブラウザはファイルの場所（パス）を扱えないため、
+      プロジェクトファイルだけを開いても、その隣にある動画には手が届きません。<br>
+      フォルダごと開いておくと、次からは開くだけで続きから作業できます。</p>
+    <p class="wc-note"><a href="help.html" target="_blank" rel="noopener">使い方をみる</a></p>
+  </div>
+
   <!-- 作業フォルダに複数プロジェクトがあった時 -->
   <div id="projPick" class="floating hidden">
     <div class="fl-head">

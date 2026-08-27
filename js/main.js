@@ -22,6 +22,7 @@ const S = {
   project: P.createProject(),
   sources: new Map(),      // sourceId -> Mp4Source
   workDir: null,           // 作業フォルダ（FileSystemDirectoryHandle）
+  workDirReady: false,     // その許可が生きているか
   currentSourceId: null,
   markIn: null,
   markOut: null,
@@ -3323,13 +3324,32 @@ async function loadProject(file) {
 // 「その隣にある動画」へは辿り着けない。VSCode と同じくフォルダごと開いてもらい、
 // その中でプロジェクトと素材を突き合わせる。
 
-/** 作業フォルダの表示を更新する */
+/** フォルダを開く仕組みが使えるブラウザか */
+const canUseWorkDir = () => 'showDirectoryPicker' in window;
+
+/** 作業フォルダの表示と、ボタンの有効・無効を更新する */
 function renderWorkDir() {
   const el = $('workDirName');
-  if (!el) return;
-  el.textContent = S.workDir ? S.workDir.name : '';
-  el.classList.toggle('hidden', !S.workDir);
-  el.title = S.workDir ? `作業フォルダ: ${S.workDir.name}` : '';
+  const ready = !canUseWorkDir() || !!(S.workDir && S.workDirReady);
+  if (el) {
+    el.textContent = S.workDir && S.workDirReady ? S.workDir.name : '';
+    el.classList.toggle('hidden', !(S.workDir && S.workDirReady));
+    el.title = S.workDir ? `作業フォルダ: ${S.workDir.name}` : '';
+  }
+  // フォルダが無いうちは、保存先も素材の在り処も決まらない。
+  // 中途半端に触れるより、開いてもらうまで止めておく（VSCode と同じ考え方）
+  document.body.classList.toggle('no-workdir', !ready);
+  const wc = $('welcome');
+  if (wc) wc.classList.toggle('hidden', ready);
+  // 前回のフォルダがあれば、開き直すボタンを出す
+  const re = $('wcReopen');
+  if (re) {
+    const show = !ready && !!S.workDir;
+    re.classList.toggle('hidden', !show);
+    if (show) re.textContent = `「${S.workDir.name}」を開き直す`;
+    const op = $('wcOpen');
+    if (op) op.className = show ? 'tb wc-alt' : 'tb export';
+  }
 }
 
 /** フォルダ直下の .kiriko を新しい順に返す */
@@ -3355,6 +3375,7 @@ async function openWorkFolder() {
 
 async function useWorkFolder(dir) {
   S.workDir = dir;
+  S.workDirReady = true;
   await FS.setWorkDir(dir);
   await FS.rememberDir(dir);
   renderWorkDir();
@@ -3391,10 +3412,27 @@ function showProjectPicker(projs) {
   dlg.classList.remove('hidden');
 }
 
-/** 前回の作業フォルダを覚えていれば、名前だけ先に出しておく */
+/** 前回の作業フォルダを覚えていれば、使える状態か確かめる */
 async function restoreWorkDir() {
   S.workDir = await FS.getWorkDir().catch(() => null);
+  // 許可はブラウザ再起動などで切れる。尋ね直すにはユーザーの操作が要るので、
+  // ここでは確かめるだけにして、案内画面のボタンから requestPermission する
+  S.workDirReady = S.workDir
+    ? (await S.workDir.queryPermission?.({ mode: 'readwrite' })) === 'granted'
+    : false;
   renderWorkDir();
+  if (S.workDirReady) await useWorkFolder(S.workDir);
+}
+
+/** 前回のフォルダを開き直す（ボタンから＝ユーザー操作の直後） */
+async function reopenWorkDir() {
+  if (!S.workDir) return openWorkFolder();
+  let ok = false;
+  try {
+    ok = (await S.workDir.requestPermission({ mode: 'readwrite' })) === 'granted';
+  } catch { ok = false; }
+  if (!ok) return openWorkFolder();   // 断られた・もう無い時は選び直してもらう
+  await useWorkFolder(S.workDir);
 }
 
 /** プロジェクトが要求していて、まだ開けていない素材の一覧 */
@@ -3550,6 +3588,8 @@ $('btnSaveProj').onclick = saveProject;
 $('btnUndo').onclick = doUndo;
 $('btnRedo').onclick = doRedo;
 $('btnWorkDir').onclick = openWorkFolder;
+$('wcOpen').onclick = openWorkFolder;
+$('wcReopen').onclick = reopenWorkDir;
 $('projPickClose').onclick = () => $('projPick').classList.add('hidden');
 $('btnLoadProj').onclick = async () => {
   if (!('showOpenFilePicker' in window)) return $('projInput').click();
@@ -3597,6 +3637,7 @@ $('mbFolder').onclick = async () => {
     // （断られても読み取りだけで動く）
     const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
     S.workDir = dir;
+    S.workDirReady = true;
     await FS.setWorkDir(dir);
     await FS.rememberDir(dir);
     renderWorkDir();
@@ -3799,6 +3840,8 @@ document.addEventListener('drop', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.target instanceof Element && e.target.matches('input, select, textarea')) return;
   const k = e.key.toLowerCase();
+  // 作業フォルダを開くまでは編集操作を受け付けない（ヘルプだけ通す）
+  if (document.body.classList.contains('no-workdir') && k !== '?' && k !== 'escape') return;
   if (e.ctrlKey || e.metaKey) {
     if (k === 's') { e.preventDefault(); saveProject(); return; }
     if (k === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
