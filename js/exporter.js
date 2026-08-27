@@ -15,6 +15,39 @@ async function drain(obj, limit) {
   while (obj.encodeQueueSize > limit || obj.decodeQueueSize > limit) await sleep(2);
 }
 
+// H.264 のレベルは解像度とフレームレートで決まる。
+// 1080p30 までなら 4.0 で足りるが、1440p や 4K では収まらず configure が失敗する
+// （YouTube 向けに元より大きく出す使い方があるため、ここで選び直す）。
+//
+//        レベル  1フレームのマクロブロック数  毎秒のマクロブロック数
+const AVC_LEVELS = [
+  { level: 0x28, mbFrame: 8192, mbRate: 245_760 },     // 4.0  1080p30
+  { level: 0x2a, mbFrame: 8704, mbRate: 522_240 },     // 4.2  1080p60
+  { level: 0x32, mbFrame: 22_080, mbRate: 589_824 },   // 5.0  1440p30
+  { level: 0x33, mbFrame: 36_864, mbRate: 983_040 },   // 5.1  4K30
+  { level: 0x34, mbFrame: 36_864, mbRate: 2_073_600 }, // 5.2  4K60
+];
+
+/**
+ * その大きさ・フレームレートで通る codec 文字列を選ぶ。
+ * 足りるレベルから順に isConfigSupported で確かめる（環境によって上限が違うため）。
+ */
+async function pickAvcCodec(width, height, fps, cfg) {
+  const mbFrame = Math.ceil(width / 16) * Math.ceil(height / 16);
+  const mbRate = mbFrame * fps;
+  const fits = AVC_LEVELS.filter((l) => l.mbFrame >= mbFrame && l.mbRate >= mbRate);
+  const cands = (fits.length ? fits : [AVC_LEVELS[AVC_LEVELS.length - 1]])
+    .map((l) => `avc1.6400${l.level.toString(16)}`);
+  for (const codec of cands) {
+    try {
+      const r = await VideoEncoder.isConfigSupported({ codec, ...cfg });
+      if (r?.supported) return codec;
+    } catch { /* 次の候補へ */ }
+  }
+  // 判定できない環境では、いちばん高いレベルで試す
+  return cands[cands.length - 1];
+}
+
 /**
  * @param {object} project
  * @param {Map<string, Mp4Source>} sourceMap
@@ -63,14 +96,14 @@ export async function exportProject(project, sourceMap, opts = {}) {
     output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
     error: (e) => { encError = e; },
   });
-  videoEncoder.configure({
-    codec: 'avc1.640028', // High Profile Level 4.0 (1080p30)
+  const vcfg = {
     width, height,
     bitrate: project.output.videoBitrate || 12_000_000,
     framerate: fps,
     latencyMode: 'quality',
     avc: { format: 'avc' },
-  });
+  };
+  videoEncoder.configure({ codec: await pickAvcCodec(width, height, fps, vcfg), ...vcfg });
 
   let audioEncoder = null;
   {

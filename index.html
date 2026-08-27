@@ -149,12 +149,16 @@
 
       <div id="binMedia" class="bin-pane">
         <div class="bin-actions">
-          <button class="mini" id="binAddVideo" title="動画ファイルを読み込む（ビンに入るだけで、タイムラインには置かれません）"><svg class="ic"><use href="#i-video"/></svg><span>動画</span></button>
-          <button class="mini" id="binAddAudio" title="効果音 / BGM のファイルを読み込む（ビンに入るだけ）"><svg class="ic"><use href="#i-audio"/></svg><span>音源</span></button>
-          <button class="mini" id="binAddImage" title="画像ファイルを読み込む（ビンに入るだけ）"><svg class="ic"><use href="#i-image"/></svg><span>画像</span></button>
+          <button class="mini wide" id="binAdd" title="動画 / 音源 / 画像を読み込む（種類はファイルの拡張子で判別します。ビンに入るだけで、タイムラインには置かれません）"><svg class="ic"><use href="#i-plus"/></svg><span>素材を追加</span></button>
+        </div>
+        <div class="bin-filter" id="binFilter">
+          <button data-f="all" class="on">すべて</button>
+          <button data-f="video"><svg class="ic"><use href="#i-video"/></svg>動画</button>
+          <button data-f="audio"><svg class="ic"><use href="#i-audio"/></svg>音源</button>
+          <button data-f="image"><svg class="ic"><use href="#i-image"/></svg>画像</button>
         </div>
         <div id="binList" class="bin-list">
-          <div class="empty">上の ＋ ボタン、または mp4 / mp3 / png をここにドロップして読み込みます</div>
+          <div class="empty">上の［素材を追加］、または mp4 / mp3 / png をここにドロップして読み込みます</div>
         </div>
       </div>
 
@@ -236,7 +240,9 @@
         <div class="panel-head sub">書き出し設定</div>
         <div class="form">
           <label>解像度
-            <select id="optRes">
+            <select id="optRes" title="YouTube は 1440p 以上で高画質なコーデック(VP9/AV1)になるため、元より大きくして出す使い方があります">
+              <option value="3840x2160">3840 × 2160 (4K)</option>
+              <option value="2560x1440">2560 × 1440 (WQHD)</option>
               <option value="1920x1080" selected>1920 × 1080 (FHD)</option>
               <option value="1280x720">1280 × 720 (HD)</option>
             </select>
@@ -254,6 +260,8 @@
               <option value="12000000" selected>12 Mbps</option>
               <option value="16000000">16 Mbps</option>
               <option value="20000000">20 Mbps</option>
+              <option value="35000000">35 Mbps</option>
+              <option value="50000000">50 Mbps</option>
             </select>
           </label>
           <label>音声ビットレート
@@ -431,7 +439,7 @@
   </div>
 </div>
 
-<input type="file" id="fileInput" accept="video/mp4,video/*" multiple hidden>
+<input type="file" id="fileInput" accept="video/*,audio/*,image/*,.mp4,.mov,.m4v,.mp3,.wav,.m4a,.ogg,.png,.jpg,.jpeg,.webp" multiple hidden>
 <input type="file" id="projInput" accept=".kiriko,.kdenlive,application/json,.json,application/xml" hidden>
 <input type="file" id="fontInput" accept=".ttf,.otf,.woff,.woff2,.ttc" multiple hidden>
 <input type="file" id="audioInput" accept="audio/*,.mp3,.wav,.m4a,.ogg" multiple hidden>

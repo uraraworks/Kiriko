@@ -21,6 +21,7 @@ import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageCl
 const S = {
   project: P.createProject(),
   sources: new Map(),      // sourceId -> Mp4Source
+  mediaFilter: 'all',      // メディア一覧の絞り込み（all / video / audio / image）
   workDir: null,           // 作業フォルダ（FileSystemDirectoryHandle）
   workDirReady: false,     // その許可が生きているか
   libDir: null,            // テロップ用画像の置き場所（FileSystemDirectoryHandle）
@@ -1449,11 +1450,22 @@ function renderBin() {
 
 function renderMediaBin() {
   const list = $('binList');
-  const empty = !S.project.sources.length && !S.project.audioAssets.length && !S.project.imageAssets.length;
-  list.innerHTML = empty ? '<div class="empty">mp4 / mp3 / png をここにドロップしても読み込めます</div>' : '';
-  if (empty) return;
+  const f = S.mediaFilter ?? 'all';
+  const show = (kind) => f === 'all' || f === kind;
+  const nAll = S.project.sources.length + S.project.audioAssets.length + S.project.imageAssets.length;
+  const n = (show('video') ? S.project.sources.length : 0)
+    + (show('audio') ? S.project.audioAssets.length : 0)
+    + (show('image') ? S.project.imageAssets.length : 0);
 
-  for (const s of S.project.sources) {
+  list.innerHTML = '';
+  if (!n) {
+    list.innerHTML = nAll
+      ? '<div class="empty">この種類の素材はまだありません</div>'
+      : '<div class="empty">mp4 / mp3 / png をここにドロップしても読み込めます</div>';
+    return;
+  }
+
+  for (const s of show('video') ? S.project.sources : []) {
     const loaded = S.sources.has(s.id);
     const el = document.createElement('div');
     el.className = 'bin-item' + (s.id === S.currentSourceId ? ' active' : '') + (loaded ? '' : ' missing');
@@ -1473,7 +1485,7 @@ function renderMediaBin() {
     list.appendChild(el);
   }
 
-  for (const a of S.project.audioAssets) {
+  for (const a of show('audio') ? S.project.audioAssets : []) {
     const ok = !!S.library?.has(a.id);
     const el = document.createElement('div');
     el.className = 'bin-item audio' + (ok ? '' : ' missing');
@@ -1489,7 +1501,7 @@ function renderMediaBin() {
     list.appendChild(el);
   }
 
-  for (const a of S.project.imageAssets) {
+  for (const a of show('image') ? S.project.imageAssets : []) {
     const ok = !!S.imageLib.get(a.id);
     const el = document.createElement('div');
     el.className = 'bin-item image' + (ok ? '' : ' missing');
@@ -2466,10 +2478,25 @@ function audioTrackCount() {
  * トラックの並びと高さ。テロップは可変本数なのでここで組み立てる。
  * @returns {Array<{kind,index,label,y,h}>}
  */
+// トラックの見出しは 2 文字なので、何の行なのか説明を添える（初見で分からないため）
+const TRACK_TIPS = {
+  marker: 'MK … マーカー。目印や覚え書きを置く行です。区間マーカーは「ここは残す／消す」の印になります　［ M で追加 ］',
+  fx: 'FX … エフェクト。ぼかしを掛ける区間を置く行です',
+  image: 'IM … 画像。差し込んだ画像を置く行です',
+  telop: (i) => `T${i + 1} … テロップ ${i + 1}。文字を置く行です（重ねたい時は別の行へ）`,
+  video: 'V1 … 映像。カットしたクリップが並ぶ行です',
+  audio: 'A1 … 元の音。動画にもともと入っている音です（クリップと一緒に動きます）',
+  music: (i) => `A${i + 2} … 効果音 / BGM ${i + 1}。追加した音源を置く行です`,
+};
+
 function trackLayout() {
   const rows = [];
   let y = RULER_H;
-  const push = (kind, index, label, h) => { rows.push({ kind, index, label, y, h }); y += h; };
+  const push = (kind, index, label, h) => {
+    const t = TRACK_TIPS[kind];
+    rows.push({ kind, index, label, y, h, tip: typeof t === 'function' ? t(index) : t });
+    y += h;
+  };
   push('marker', 0, 'MK', MARK_H);
   push('fx', 0, 'FX', FX_H);
   push('image', 0, 'IM', IMG_H);
@@ -2591,7 +2618,8 @@ function renderTrackHeads() {
   if (el.dataset.sig === sig) return;
   el.dataset.sig = sig;
   el.innerHTML = `<div class="tl-head ruler-head" style="height:${RULER_H}px"></div>`
-    + layout.map((r) => `<div class="tl-head ${r.kind}" style="height:${r.h}px">${r.label}</div>`).join('');
+    + layout.map((r) =>
+      `<div class="tl-head ${r.kind}" style="height:${r.h}px" title="${esc(r.tip ?? r.label)}">${r.label}</div>`).join('');
   // トラックが増えても収まるよう、タイムラインの高さを中身に合わせる
   $('tlWrap').style.height = `${tracksBottom()}px`;
 }
@@ -3274,16 +3302,21 @@ tlCanvas.addEventListener('pointermove', (e) => {
   } else if (drag.type === 'move') {
     if (Math.abs(x - drag.startX) > 4) drag.moved = true;
     const clips = S.project.clips;
-    const from = clips.indexOf(drag.clip);
     const t = xToSec(x);
-    let acc = 0, to = clips.length - 1;
-    for (let i = 0; i < clips.length; i++) {
-      const d = P.clipDuration(clips[i]);
+    // 差し込み位置は「掴んでいるクリップを抜いた並び」で決める。
+    // 掴んだままの並びで計算すると、入れ替わるたびに長さの配置が変わって
+    // 答えが変わり、同じ位置で行ったり来たりする（終端側で顕著だった）
+    const others = clips.filter((c) => c !== drag.clip);
+    let acc = 0, to = others.length;
+    for (let i = 0; i < others.length; i++) {
+      const d = P.clipDuration(others[i]);
       if (t < acc + d / 2) { to = i; break; }
       acc += d;
     }
-    if (to !== from && to >= 0) {
-      clips.splice(to, 0, clips.splice(from, 1)[0]);
+    others.splice(to, 0, drag.clip);
+    if (others.some((c, i) => c !== clips[i])) {
+      if (!drag.reordered) { commit('クリップを並べ替え'); drag.reordered = true; }
+      S.project.clips = others;
       renderTimeline();
     }
   }
@@ -3794,9 +3827,15 @@ $('btnLoadProj').onclick = async () => {
 };
 $('btnAddClip').onclick = addClip;
 $('btnDelete').onclick = deleteSelected;
-$('binAddVideo').onclick = () => openFiles().catch((e) => status(e.message, true));
-$('binAddAudio').onclick = () => $('audioInput').click();
-$('binAddImage').onclick = () => $('imageInput').click();
+// 素材の追加は 1 つにまとめている（種類は拡張子で判別する）
+$('binAdd').onclick = () => openFiles().catch((e) => status(e.message, true));
+for (const b of document.querySelectorAll('#binFilter button')) {
+  b.onclick = () => {
+    S.mediaFilter = b.dataset.f;
+    for (const x of document.querySelectorAll('#binFilter button')) x.classList.toggle('on', x === b);
+    renderMediaBin();
+  };
+}
 $('imageInput').onchange = (e) => { addImageAssets([...e.target.files]); e.target.value = ''; };
 // 足りない素材を探す
 $('mbFind').onclick = async () => {
