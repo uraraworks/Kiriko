@@ -133,11 +133,13 @@ kbd {
 
 /* ---------- タイムライン ---------- */
 .timeline { border-top: 1px solid #101216; }
-.tl-tools { margin-left: auto; display: flex; align-items: center; gap: 5px; font-weight: 400; }
+.timeline > .panel-head { overflow-x: auto; overflow-y: hidden; }
+.tl-tools { margin-left: auto; display: flex; align-items: center; gap: 5px; font-weight: 400; flex: none; }
 .tl-tools .hint { color: #6f7684; font-size: 10.5px; margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mini {
   background: #30353f; border: 1px solid #3c424e; color: var(--text);
-  border-radius: 4px; padding: 1px 8px; font-size: 11px; cursor: pointer;
+  border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+  white-space: nowrap; flex: none;
 }
 .mini:hover { background: #3a404b; }
 .tl-body { flex: 1; display: grid; grid-template-columns: 56px minmax(0,1fr); min-height: 0; }
@@ -231,7 +233,7 @@ kbd {
 #fxForm .num, #fxForm input[type=number] { width: 100%; }
 
 /* ---------- タイムラインの範囲選択（カット作業） ---------- */
-.tl-edit { display: flex; align-items: center; gap: 4px; margin-left: 14px; font-weight: 400; }
+.tl-edit { display: flex; align-items: center; gap: 4px; margin-left: 14px; font-weight: 400; flex: none; }
 .mini.zone { background: #4a4020; border-color: #6d5c28; color: #f0d98c; }
 .mini.zone:hover { background: #5c4f26; }
 .mini.danger { background: #5a2a26; border-color: #8a3f38; color: #ffc9c2; font-weight: 700; }

@@ -2367,18 +2367,13 @@ async function doExport() {
 
 // ---------------------------------------------------------------- イベント配線
 
-$('btnOpen').onclick = () => openFiles().catch((e) => status(e.message, true));
 $('btnSaveProj').onclick = saveProject;
 $('btnUndo').onclick = doUndo;
 $('btnRedo').onclick = doRedo;
 $('btnLoadProj').onclick = () => $('projInput').click();
-$('btnMarkIn').onclick = markIn;
-$('btnMarkOut').onclick = markOut;
 $('btnAddClip').onclick = addClip;
 $('btnDelete').onclick = deleteSelected;
 $('btnAddTelop').onclick = addTelop;
-$('btnAddBlur').onclick = addBlur;
-$('btnAddAudio').onclick = () => $('audioInput').click();
 $('binAddVideo').onclick = () => openFiles().catch((e) => status(e.message, true));
 $('binAddAudio').onclick = () => $('audioInput').click();
 $('binAddImage').onclick = () => $('imageInput').click();
@@ -2595,7 +2590,7 @@ normalizeProject();
 syncProjectUI();
 renderHistoryUI();
 renderAll();
-status('準備完了 — 「素材を開く」または mp4 をドロップしてください');
+status('準備完了 — メディアタブの ＋ ボタン、または mp4 をドロップして読み込みます');
 
 // Phase 4（AI 連携 / MCP）に向けた操作フック。
 // プロジェクト JSON をそのまま差し替えられるようにしておく。
