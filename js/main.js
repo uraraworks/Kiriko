@@ -273,9 +273,9 @@ async function addFiles(files) {
   renderAll();
 }
 
-async function importKdenlive(file) {
+async function importKdenlive(file, text = null) {
   try {
-    const info = parseKdenlive(await file.text());
+    const info = parseKdenlive(text ?? await file.text());
     S.pendingKdenlive = info;
     const total = info.cuts.reduce((a, c) => a + (c.out - c.in), 0);
     const tracks = info.trackCounts.length > 1 ? `（映像 ${info.trackCounts.length} トラックを統合）` : '';
@@ -283,7 +283,7 @@ async function importKdenlive(file) {
       + `該当の mp4（${info.files.map(basename).join(', ')}）を読み込むと反映されます`);
     bindPendingKdenlive();
   } catch (e) {
-    status(`Kdenlive 読み込み失敗: ${e.message}`, true);
+    status(`Kdenlive ファイルを読み込めませんでした（${file.name}）: ${e.message}`, true);
   }
 }
 
@@ -3223,8 +3223,15 @@ async function saveProject() {
 }
 
 async function loadProject(file) {
+  const text = await file.text();
+  // 「開く」から .kdenlive を選んだ時は、そのまま取り込みに回す
+  // （JSON として読もうとして落ちていた）
+  if (/\.kdenlive$/i.test(file.name) || text.trimStart().startsWith('<')) {
+    await importKdenlive(file, text);
+    return;
+  }
   try {
-    const p = P.deserialize(await file.text());
+    const p = P.deserialize(text);
     // 素材は名前で突き合わせる（ファイル参照はブラウザ側に保持できないため）
     const byName = new Map();
     for (const [id, src] of S.sources) byName.set(src.name, id);
@@ -3245,7 +3252,7 @@ async function loadProject(file) {
     renderAll();
     status(missing ? `読み込みました（素材未接続のクリップ ${missing} 件。該当 mp4 を開いてください）` : 'プロジェクトを読み込みました');
   } catch (e) {
-    status(`プロジェクト読み込み失敗: ${e.message}`, true);
+    status(`プロジェクトを読み込めませんでした（${file.name}）: ${e.message}`, true);
   }
 }
 
