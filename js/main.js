@@ -1161,7 +1161,7 @@ function toggleHelp(show) {
     helpDlg.style.top = '58px';
   }
 }
-$('btnHelp').onclick = () => toggleHelp();
+$('btnHelp').onclick = () => window.open('help.html', '_blank', 'noopener');
 $('helpDialogClose').onclick = () => toggleHelp(false);
 (() => {
   const head = $('helpDialogHead');
@@ -3553,6 +3553,18 @@ if (!('VideoEncoder' in window)) {
 }
 normalizeProject();
 syncProjectUI();
+// 版の表示。js/version.js は scripts/gen-version.mjs が作る（git 管理外）ので、
+// 生成されていない時は「開発中」と出す。
+(async () => {
+  const el = $('version');
+  try {
+    const m = await import('./version.js');
+    el.textContent = m.VERSION_FOOTER;
+  } catch {
+    el.textContent = 'Kiriko（開発中）';
+  }
+})();
+
 renderHistoryUI();
 renderAll();
 reloadLibrary();

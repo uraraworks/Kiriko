@@ -1,0 +1,15 @@
+{
+  "name": "kiriko",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ブラウザだけで完結する動画編集ツール",
+  "scripts": {
+    "version:gen": "node scripts/gen-version.mjs",
+    "serve": "python3 -m http.server 8901",
+    "capture-help": "node scripts/capture-help-shots.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.4.0"
+  }
+}

@@ -116,9 +116,9 @@
     </div>
     <div class="spacer"></div>
     <div class="tb-group">
-      <span class="totalinfo">尺 <b id="totalDur">00:00.00</b> / <b id="clipCount">0</b> クリップ</span>
+      <span class="totalinfo" title="タイムライン全体の長さとクリップ数">全体 <b id="totalDur">00:00.00</b> / <b id="clipCount">0</b> クリップ</span>
       <button id="mcpDot" class="mcp-dot off" title="MCP 未接続（クリックで接続）"></button>
-      <button id="btnHelp" class="tb ico" title="ショートカット一覧　［ ? ］"><svg class="ic"><use href="#i-help"/></svg></button>
+      <button id="btnHelp" class="tb ico" title="使い方を別タブで開く（ショートカット一覧は ? キー）"><svg class="ic"><use href="#i-help"/></svg></button>
       <button id="btnExport" class="tb export" title="mp4 で書き出す"><svg class="ic"><use href="#i-export"/></svg><span>書き出し</span></button>
     </div>
   </header>
@@ -306,6 +306,7 @@
   <footer class="statusbar">
     <div class="progress"><div id="progBar"></div></div>
     <div id="status" class="status">準備完了</div>
+    <div id="version" class="version" title="このビルドの識別子（git の commit 時刻とハッシュ）"></div>
   </footer>
 
   <!-- ショートカット一覧 -->

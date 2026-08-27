@@ -1,24 +1,47 @@
 # Kiriko
 
-**Browser Movie Editor** — ブラウザだけで完結する動画編集ツール（自分用）。
+**ブラウザだけで完結する動画編集ツール。**
+インストールもアップロードも要りません。
+
+<https://uraraworks.github.io/Kiriko/>
+
+- [紹介ページ](https://uraraworks.github.io/Kiriko/about.html)
+- [使い方](https://uraraworks.github.io/Kiriko/help.html)
 
 名前は江戸切子から。「切」の字がそのままカット編集を表していて、
 細かく切り込みを入れて形にしていく感じが編集作業に重なる。
-企画書: `_claude_work/hisho-san/docs/ブラウザ動画編集ツール/企画書_20260827.md`
 
-## 現状：Phase 0 〜 3（＋ 画像・アンドゥ）
+## できること
 
-- **Phase 0**：実素材の読み込み → シーク再生 → in/out でカット → 連結して mp4 書き出し
-- **Phase 2**：テロップのテキスト直接編集（二重縁取り・フォント・サイズ・位置・プリセット）
-- **Phase 3**：効果音 / BGM の配置、音量・フェード（クロスフェード）・ループ、区間ぼかし
-- 画像の重ね合わせ、アンドゥ / リドゥ、作業メモ
+カット／テロップ（背景画像・アイコン・複数行のセット）／画像／効果音・BGM／
+全画面と部分のぼかし／マーカー／アンドゥ／mp4 書き出し。
 
-企画書で挙がっていた実使用機能 6 つ（カット・テロップ・SE・BGM・ぼかし・音量）は
-ひととおり通っている。
+- **動画はどこにも送らない。** 読み込みも書き出しも、すべてブラウザの中で完結する
+- **長い素材でも動く。** 1.5 時間・14GB でもまるごとメモリに載せない
+- **書き出しが速い。** 15 分の動画でおよそ 2〜3 分（WebCodecs によるハードウェア処理）
+- **Claude Code から操作できる**（MCP）。セリフの書き起こしや無音の検出を任せられる
 
-- **処理は 100% クライアント完結**。動画はアップロードせず、ローカルファイルを直接読む
-- 14GB の素材でもメモリに載せない（moov だけ解析し、実データは `File.slice()` で都度読む）
-- 書き出しは「デコード → Canvas 合成 → エンコード」の流水処理
+Chrome / Edge 向け。Safari と Firefox は書き出しに必要な WebCodecs が未対応。
+
+## 動かす
+
+素の静的ファイルなので、ビルドは要らない。
+
+```bash
+python3 -m http.server 8901
+```
+
+`http://localhost:8901/` を開く（`file://` だと WebCodecs 系 API が見えない）。
+
+フッターの版表示だけは git から作るので、必要なら:
+
+```bash
+node scripts/gen-version.mjs
+```
+
+## 開発メモ
+
+以下は実装の記録。使うだけなら[使い方](https://uraraworks.github.io/Kiriko/help.html)を参照。
 
 ## 検証結果（2026-08-27 / M2 Mac・Chromium系）
 
@@ -139,6 +162,10 @@ Mac のトラックパッドはピンチがそのまま拡大縮小になる。
 右クリックは文字入力欄以外ではブラウザ標準のメニューを出さず、
 プレビューとタイムラインでは削除などの項目を出す。
 
+## ライセンス
+
+MIT（[LICENSE](LICENSE)）。同梱ライブラリは [THIRD-PARTY.md](THIRD-PARTY.md) を参照。
+
 ## ファイル構成
 
 | ファイル | 役割 |
@@ -162,6 +189,9 @@ Mac のトラックパッドはピンチがそのまま拡大縮小になる。
 | `js/main.js` | NLE 風 UI（ビン／モニター／タイムライン） |
 | `vendor/` | mp4box.js, mp4-muxer |
 | `test.html` | パイプライン単体の検証ページ（`testdata/` に素材を置いて開く） |
+| `help.html` / `about.html` | 使い方ページ・紹介ページ |
+| `scripts/gen-version.mjs` | フッターの版表示（git の commit 時刻＋ハッシュ）を作る |
+| `scripts/capture-help-shots.mjs` | 使い方ページのスクリーンショットを撮り直す |
 
 ## プロジェクト JSON
 
@@ -450,6 +480,16 @@ bme.jumpMarker(+1 | -1)
 bme.selectNextGap() / bme.selectPrevGap()
 bme.gapRanges()              // 区間マーカーの外側（消す候補）の一覧
 bme.telop.createTelop(t0,t1,style,text)
+```
+
+## 使い方ページのスクリーンショット更新
+
+`public/help/*.png` は使い方ページの説明用画像。UI を変えたら撮り直す。
+撮影用のサンプル素材（動画・音源・画像）はスクリプトが ffmpeg で生成するので、実素材は要らない。
+
+```bash
+python3 -m http.server 8901   # 別ターミナルで起動しておく
+npm run capture-help
 ```
 
 ## 次のフェーズ

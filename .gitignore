@@ -1,3 +1,6 @@
 testdata/
 export*.mp4
 mcp/node_modules/
+node_modules/
+js/version.js
+public/help/_sample/

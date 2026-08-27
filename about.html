@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiriko — ブラウザだけで完結する動画編集ツール</title>
+<link rel="icon" type="image/png" sizes="64x64" href="assets/icon-64.png">
+<link rel="stylesheet" href="css/doc.css">
+</head>
+<body>
+
+<div class="topbar">
+  <img src="assets/icon-64.png" alt="">
+  <span class="name">Kiriko</span>
+  <span class="sub">Browser Movie Editor</span>
+  <nav>
+    <a href="about.html" class="on">紹介</a>
+    <a href="help.html">使い方</a>
+    <a href="index.html">編集をはじめる</a>
+  </nav>
+</div>
+
+<div class="wrap">
+
+<div class="hero">
+  <img class="icon" src="assets/icon-180.png" alt="">
+  <h1>Kiriko</h1>
+  <p class="lead">ブラウザを開くだけで使える動画編集ツール。<br>
+  インストールも、アップロードも要りません。</p>
+  <p style="margin-top:24px">
+    <a class="cta" href="index.html">編集をはじめる</a>
+    <a class="cta ghost" href="help.html">使い方を見る</a>
+  </p>
+</div>
+
+<figure>
+  <img src="public/help/07-marker.png" alt="Kiriko の編集画面">
+</figure>
+
+<h2>どういうものか</h2>
+
+<p>スマホで撮った長い動画から、使う所だけを切り出して、テロップを入れて、
+効果音や BGM を重ねて、mp4 に書き出す。ひととおりの編集がブラウザの中だけで完結します。</p>
+
+<p>名前は<b>江戸切子</b>から取りました。「切」の字がそのままカット編集を表していて、
+細かく切り込みを入れて形にしていく感じが編集作業に重なるためです。</p>
+
+<div class="cards">
+  <div class="card">
+    <h3>アップロードしない</h3>
+    <p>動画はどこにも送られません。読み込みも書き出しも、すべてお使いのパソコンの中で完結します。</p>
+  </div>
+  <div class="card">
+    <h3>インストール不要</h3>
+    <p>URL を開くだけです。ページを保存しておけば、次からもすぐ使えます。</p>
+  </div>
+  <div class="card">
+    <h3>長い動画でも平気</h3>
+    <p>1.5 時間・14GB の素材でも、まるごとメモリに載せずに必要な所だけ読みにいきます。</p>
+  </div>
+  <div class="card">
+    <h3>速い書き出し</h3>
+    <p>ハードウェア支援（WebCodecs）を使うので、15 分の動画がおよそ 2〜3 分で書き出せます。</p>
+  </div>
+</div>
+
+<h2>できること</h2>
+
+<table>
+  <tr><th>カット</th><td>範囲を選んで切り、後ろを自動で詰める。キーボードだけで進められます</td></tr>
+  <tr><th>テロップ</th><td>画面上で直接編集。二重の縁取り、複数行、背景画像とアイコンを 1 組にして扱えます</td></tr>
+  <tr><th>画像</th><td>全画面・中央・画面下などに配置。枠のドラッグで位置と大きさを調整</td></tr>
+  <tr><th>効果音・BGM</th><td>複数トラックに重ねられます。音量、フェード、繰り返しに対応</td></tr>
+  <tr><th>ぼかし</th><td>全画面と部分（顔など）。動くものにはキーフレームで追従できます</td></tr>
+  <tr><th>マーカー</th><td>タイムラインにメモを残し、「ここは残す／消す」の印として使えます</td></tr>
+  <tr><th>取り消し</th><td>何段でも戻せます。連続した操作は 1 回でまとめて戻ります</td></tr>
+</table>
+
+<h2>テロップを作り直さなくてよくなる</h2>
+
+<p>画像編集ソフトでテロップを作って動画に貼る方法だと、
+文字をひとつ直すたびに書き出しからやり直しになります。</p>
+
+<p>Kiriko はテロップを<b>文字のまま</b>持ちます。打ち直せばその場で変わります。
+書体・大きさ・色・縁取り・位置をあとからいくらでも調整できて、
+よく使う組み合わせは<b>ライブラリに保存して別の動画でも呼び出せます</b>。</p>
+
+<figure>
+  <img src="public/help/05-telop.png" alt="テロップの編集画面">
+  <figcaption>行ごとに書式を変えられます。背景やロゴも 1 つのテロップとして扱えます。</figcaption>
+</figure>
+
+<h2 id="mcp">AI に下ごしらえを任せる</h2>
+
+<p>編集で一番時間が掛かるのは「喋っている所を探して、それ以外を消す」作業です。
+Kiriko は <b>MCP</b> という仕組みで Claude Code と繋げられるので、ここを任せられます。</p>
+
+<pre><code>「セリフを書き起こして、マーカーにして」</code></pre>
+
+<p>音声認識はお使いのパソコンの中で動きます（whisper.cpp）。
+音が鳴っている所だけを渡すので、無音に対して文章が捏造されることもありません。</p>
+
+<p>あとは <kbd>G</kbd> で候補を 1 つずつ確認しながら <kbd>Delete</kbd> するだけです。
+<b>AI がやるのは下ごしらえまで</b>で、最後に決めるのは人です。
+AI の書き込みも <kbd>⌘Z</kbd> で戻せます。</p>
+
+<div class="note">
+  <p>この機能を使わなくても、Kiriko は単体で動きます。使いたい時だけ繋げば十分です。</p>
+</div>
+
+<h2>使えるブラウザ</h2>
+
+<table>
+  <tr><th>Chrome / Edge</th><td>すべての機能が使えます（推奨）</td></tr>
+  <tr><th>Safari / Firefox</th><td>動画の書き出しに必要な機能が未対応のため、現状は使えません</td></tr>
+</table>
+
+<p>パソコン向けです。スマートフォンやタブレットには対応していません。</p>
+
+<h2>作りについて</h2>
+
+<p>サーバーを持たない静的なページとして動きます。
+動画の読み書きは <code>File System Access API</code>、
+デコードとエンコードは <code>WebCodecs</code>、
+mp4 の組み立ては <code>mp4box.js</code> と <code>mp4-muxer</code>、
+テロップやぼかしの合成は Canvas、音のミックスは Web Audio で行っています。</p>
+
+<p>編集内容は 1 つの JSON ファイル（<code>.kiriko</code>）に収まります。
+人にも AI にも読める形にしてあるので、外から書き換えて読み込ませることもできます。</p>
+
+<p>ソースは <a href="https://github.com/uraraworks/Kiriko">GitHub</a> にあります。</p>
+
+<p style="margin-top:34px">
+  <a class="cta" href="index.html">編集をはじめる</a>
+  <a class="cta ghost" href="help.html">使い方を見る</a>
+</p>
+
+<footer class="foot">
+  <span>Kiriko — ブラウザだけで完結する動画編集ツール</span>
+  <span class="ver" id="ver"></span>
+</footer>
+
+</div>
+
+<script type="module">
+  try {
+    const m = await import('./js/version.js');
+    document.getElementById('ver').textContent = m.VERSION_FOOTER;
+  } catch { /* 版が未生成のときは何も出さない */ }
+</script>
+</body>
+</html>

@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiriko の使い方</title>
+<link rel="icon" type="image/png" sizes="64x64" href="assets/icon-64.png">
+<link rel="stylesheet" href="css/doc.css">
+</head>
+<body>
+
+<div class="topbar">
+  <img src="assets/icon-64.png" alt="">
+  <span class="name">Kiriko</span>
+  <span class="sub">Browser Movie Editor</span>
+  <nav>
+    <a href="about.html">紹介</a>
+    <a href="help.html" class="on">使い方</a>
+    <a href="index.html">編集をはじめる</a>
+  </nav>
+</div>
+
+<div class="wrap">
+
+<div class="hero">
+  <img class="icon" src="assets/icon-180.png" alt="">
+  <h1>Kiriko の使い方</h1>
+  <p class="lead">はじめて触る方向けに、動画を 1 本仕上げるまでの流れをひととおり説明します。</p>
+</div>
+
+<div class="note">
+  <p><strong>準備するものはブラウザだけです。</strong>
+  動画はどこにもアップロードされません。読み込みも書き出しも、すべてお使いのパソコンの中で行われます。</p>
+  <p>Chrome または Edge をお使いください（Safari と Firefox は動画の書き出しに必要な機能が未対応です）。</p>
+</div>
+
+<div class="toc">
+  <strong>この先の流れ</strong>
+  <ol>
+    <li><a href="#load">動画を読み込む</a></li>
+    <li><a href="#cut">いらない所を切る</a></li>
+    <li><a href="#telop">テロップを入れる</a></li>
+    <li><a href="#deco">画像・効果音・BGM・ぼかし</a></li>
+    <li><a href="#marker">マーカーで下ごしらえ</a></li>
+    <li><a href="#export">書き出す</a></li>
+    <li><a href="#save">続きからやる（保存と読み込み）</a></li>
+    <li><a href="#keys">ショートカット一覧</a></li>
+  </ol>
+</div>
+
+<h2 id="screen">画面の見かた</h2>
+
+<figure>
+  <img src="public/help/03-timeline.png" alt="Kiriko の画面全体">
+  <figcaption>左が素材置き場、まん中が再生画面、右が設定、下がタイムラインです。</figcaption>
+</figure>
+
+<table>
+  <tr><th>左パネル</th><td>読み込んだ動画・音源・画像が並びます。エフェクトとテロップのタブもここです</td></tr>
+  <tr><th>まん中</th><td>再生画面。<b>ソース</b>は読み込んだ動画そのもの、<b>プログラム</b>は編集後の仕上がりです</td></tr>
+  <tr><th>右パネル</th><td>選んだものの設定。書き出し設定と作業メモもここに入っています</td></tr>
+  <tr><th>タイムライン</th><td>下半分。動画を並べて、テロップや音を重ねる場所です</td></tr>
+</table>
+
+<p>タイムラインは上から
+<b>MK</b>（メモ）・<b>FX</b>（ぼかし）・<b>IM</b>（画像）・<b>T1 T2</b>（テロップ）・
+<b>V1</b>（映像）・<b>A1</b>（元の音）・<b>A2 A3</b>（効果音や BGM）の順に並んでいます。
+上と下の境目をドラッグすると高さを変えられます。</p>
+
+<h2 id="load">1. 動画を読み込む</h2>
+
+<ol class="steps">
+  <li>
+    <h3>動画をウィンドウにドロップする</h3>
+    <p>左パネルの <b>＋ 動画</b> ボタンからでも選べます。<b>ここではまだ何も編集されません。</b>
+    読み込んだ素材が左側に並ぶだけです。</p>
+    <p>1.5 時間・14GB といった長い動画でも大丈夫です。
+    Kiriko は動画をまるごとメモリに読み込まず、必要な所だけを読みにいく作りになっています。</p>
+  </li>
+  <li>
+    <h3>「全体を置く」を押す</h3>
+    <p>素材の行にある <b>全体を置く</b> を押すと、その動画がまるごとタイムラインに乗ります。
+    ここから、いらない所を切っていきます。</p>
+  </li>
+</ol>
+
+<figure>
+  <img src="public/help/02-media.png" alt="素材を読み込んだところ">
+  <figcaption>読み込んだ直後。まだタイムラインは空です。</figcaption>
+</figure>
+
+<div class="note">
+  <p>タイムラインに乗せると、映像に <b>サムネイル</b>、音に <b>波形</b> が表示されます。
+  波形の平らな所は音が鳴っていない所なので、切る場所を探す目印になります。</p>
+</div>
+
+<h2 id="cut">2. いらない所を切る</h2>
+
+<p>Kiriko のカットは <b>「消したい範囲を選んで消す」</b> という進めかたです。
+キーボードだけで完結するので、慣れると速く進みます。</p>
+
+<ol class="steps">
+  <li>
+    <h3>消したい所の先頭で <kbd>I</kbd></h3>
+    <p>ここが範囲の開始になります。まだ範囲の長さは 0 です。</p>
+  </li>
+  <li>
+    <h3>終わりまで進んで <kbd>O</kbd></h3>
+    <p><kbd>←</kbd> <kbd>→</kbd> で 1 コマずつ、<kbd>Shift</kbd> を足すと 1 秒ずつ動きます。
+    <kbd>Space</kbd> で再生しながら探しても構いません。</p>
+  </li>
+  <li>
+    <h3><kbd>Delete</kbd> で切り取る</h3>
+    <p>選んだ範囲が消えて、後ろが自動的に詰まります。
+    カーソルは切った場所に残るので、そのまま次の範囲を選べます。</p>
+  </li>
+</ol>
+
+<figure>
+  <img src="public/help/04-cut.png" alt="範囲を選んだところ">
+  <figcaption>黄色い帯が「これから消す範囲」です。<kbd>Delete</kbd> で切り取られます。</figcaption>
+</figure>
+
+<div class="note">
+  <p><strong>間違えても <kbd>⌘Z</kbd>（Windows は <kbd>Ctrl</kbd>+<kbd>Z</kbd>）で戻せます。</strong>
+  何段でも戻せるので、思い切って進めて大丈夫です。</p>
+</div>
+
+<h3>使いたい所だけを拾っていく方法</h3>
+<p>長い素材から短い場面をたくさん集めたい時は、逆のやり方もできます。
+再生画面の <b>ソース</b> タブに切り替えて <kbd>I</kbd> <kbd>O</kbd> で範囲を決め、
+<kbd>Enter</kbd> を押すとその区間だけがタイムラインの最後に足されます。
+アウト点がそのまま次のイン点になるので、続けて拾っていけます。</p>
+
+<h2 id="telop">3. テロップを入れる</h2>
+
+<ol class="steps">
+  <li>
+    <h3>入れたい所にカーソルを置いて <kbd>T</kbd></h3>
+    <p>テロップが追加され、編集画面が開きます。文字を打つとすぐ反映されます。</p>
+  </li>
+  <li>
+    <h3>枠をドラッグして位置を決める</h3>
+    <p>再生画面に出ている枠をドラッグすると動きます。四隅をつまむと大きさが変わります。
+    画面の端や中央では自動で吸い付きます（<kbd>Alt</kbd> を押している間は吸着しません）。</p>
+    <p>枠の中での寄せかた（左・中央・右／上・中央・下）も選べます。</p>
+  </li>
+  <li>
+    <h3>表示する長さを決める</h3>
+    <p>タイムラインの <b>T1</b> にできた帯を左右にドラッグすると位置、端をドラッグすると長さが変わります。
+    カットの切れ目に吸い付くので、場面が切り替わる瞬間に合わせやすくなっています。</p>
+  </li>
+</ol>
+
+<figure>
+  <img src="public/help/05-telop.png" alt="テロップの編集">
+  <figcaption>編集画面は好きな位置に動かせます。上のタブで行を切り替えます。</figcaption>
+</figure>
+
+<h3>1 つのテロップに複数行と画像を入れる</h3>
+<p>テロップは「行の集まり」として作れます。<b>＋</b> で行を足すと、
+行ごとに文字の大きさ・色・書体を変えられます。見出しと日付を組みにする、といった作りかたです。</p>
+<p>さらに <b>背景画像</b>（帯やフレーム）と <b>アイコン画像</b>（ロゴなど）も一緒に持てます。
+画像の余白は自動で切り詰めるので、大きな透明画像の中にロゴが小さく置いてあっても、
+ちょうどよい大きさで表示されます。</p>
+
+<div class="note">
+  <p>よく使う組み合わせは <b>★ ライブラリに保存</b> しておくと、
+  <b>次に別の動画を編集する時もそのまま呼び出せます</b>。画像も一緒に保存されます。</p>
+</div>
+
+<h2 id="deco">4. 画像・効果音・BGM・ぼかし</h2>
+
+<figure>
+  <img src="public/help/06-image-audio.png" alt="画像と音源を置いたところ">
+  <figcaption>画像は IM、効果音や BGM は A2 から下に並びます。</figcaption>
+</figure>
+
+<div class="cards">
+  <div class="card">
+    <h3>画像</h3>
+    <p>ドロップして読み込み、<b>全画面 / 中央 / 画面下</b> などから置き場所を選びます。
+    枠のドラッグで位置と大きさを調整できます。</p>
+  </div>
+  <div class="card">
+    <h3>効果音・BGM</h3>
+    <p>mp3 を読み込んで ＋ で配置します。BGM は音量やフェードの初期値が自動で入ります。
+    重ねたい時は別のトラック（A3、A4…）に置けます。</p>
+  </div>
+  <div class="card">
+    <h3>ぼかし</h3>
+    <p>エフェクトタブから追加します。<b>全画面</b>と<b>部分</b>（顔など）を選べます。
+    部分ぼかしは楕円で、縁が自然に馴染みます。</p>
+  </div>
+  <div class="card">
+    <h3>音量</h3>
+    <p>クリップごと・音源ごとに調整できるほか、
+    「出力」タブに効果音と BGM の全体音量があります。</p>
+  </div>
+</div>
+
+<div class="warn">
+  <p><strong>顔などを隠す目的でぼかす場合は、書き出したあと必ず通しで確認してください。</strong>
+  被写体が動くと枠から外れることがあります。動きに合わせるには、
+  要所で <b>＋ ここに打つ</b>（キーフレーム）を押すと間が自動で補間されます。
+  範囲は少し大きめに取っておくと安全です。</p>
+</div>
+
+<h2 id="marker">5. マーカーで下ごしらえ</h2>
+
+<p>「自分が喋っている所だけ残す」ような編集は、先に印をつけておくと迷いません。
+<kbd>M</kbd> でカーソル位置にマーカーが立ちます。長さを付けると区間になります。</p>
+
+<figure>
+  <img src="public/help/07-marker.png" alt="マーカー">
+  <figcaption>緑が「残す」、赤が「消す」。メモも一緒に残せます。</figcaption>
+</figure>
+
+<p>区間マーカーを立てておくと、<kbd>G</kbd>（次へ）と <kbd>F</kbd>（前へ）で
+<b>消す候補が 1 つずつ選ばれて、その場所に移動します</b>。
+中身を見て、必要なら範囲を詰めてから <kbd>Delete</kbd>。これを繰り返すだけで進みます。</p>
+
+<ul>
+  <li><b>残す</b> を立てた場合 … その<b>外側</b>が消す候補になります</li>
+  <li><b>消す</b> を立てた場合 … <b>そこ自体</b>が候補になります</li>
+</ul>
+
+<div class="note">
+  <p>AI（Claude Code）と繋いで、セリフの書き起こしや無音の検出を任せることもできます。
+  詳しくは <a href="about.html#mcp">紹介ページ</a> をご覧ください。</p>
+</div>
+
+<h2 id="export">6. 書き出す</h2>
+
+<figure>
+  <img src="public/help/08-export.png" alt="書き出し設定">
+  <figcaption>右パネルの「出力」タブ。ふつうは初期設定のままで大丈夫です。</figcaption>
+</figure>
+
+<p>右上の <b>書き出し</b> を押すと保存先を聞かれ、そのまま mp4 が作られます。
+YouTube にそのまま上げられる形式（H.264 + AAC）です。</p>
+
+<table>
+  <tr><th>解像度</th><td>1920×1080 が既定。撮影が 4K でも 1080p で出せば十分きれいです</td></tr>
+  <tr><th>フレームレート</th><td>30fps 固定。スマホ撮影のブレを整えて一定にします</td></tr>
+  <tr><th>ビットレート</th><td>12 Mbps が既定。上げるほど高画質でファイルも大きくなります</td></tr>
+</table>
+
+<p>目安として、15 分の動画で 2〜3 分ほどで書き出せます。
+処理中は進み具合と残り時間が表示されます。</p>
+
+<h2 id="save">7. 続きからやる</h2>
+
+<p>ツールバーの <b>保存</b> で、編集内容を <code>.kiriko</code> ファイルに残せます
+（中身はテキストです）。次に <b>開く</b> で読み込めば続きから作業できます。</p>
+
+<div class="warn">
+  <p><strong>動画そのものはファイルに含まれません。</strong>
+  ブラウザは動画の置き場所を覚えておけないためです。
+  読み込んだあとに<b>同じ名前の動画をもう一度ドロップ</b>すると、自動でつながります。</p>
+</div>
+
+<p>Kdenlive で途中まで編集したものがあれば、<code>.kdenlive</code> ファイルを開くと
+カットの情報を引き継げます。こちらも同じ動画をあとから読み込めばつながります。</p>
+
+<h2 id="keys">8. ショートカット一覧</h2>
+
+<p>アプリの中で <kbd>?</kbd> を押すと、いつでもこの一覧を開けます。</p>
+
+<table>
+  <tr><th colspan="2">再生・移動</th></tr>
+  <tr><td><kbd>Space</kbd></td><td>再生／停止</td></tr>
+  <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>1 コマ進む／戻る（<kbd>Shift</kbd> で 1 秒）</td></tr>
+  <tr><td><kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>逆送り／停止／早送り</td></tr>
+
+  <tr><th colspan="2">カット</th></tr>
+  <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>範囲の開始／終了</td></tr>
+  <tr><td><kbd>Delete</kbd></td><td>範囲を切り取る（範囲が無い時は選択中のものを削除）</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>範囲の選択をやめる</td></tr>
+  <tr><td><kbd>Enter</kbd></td><td>ソースの範囲をクリップとして追加</td></tr>
+
+  <tr><th colspan="2">重ねるもの</th></tr>
+  <tr><td><kbd>T</kbd> / <kbd>B</kbd></td><td>テロップ／ぼかしを追加</td></tr>
+  <tr><td><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></td><td>選んだ枠を 1px 動かす（再生画面をクリックしたあと）</td></tr>
+
+  <tr><th colspan="2">マーカー</th></tr>
+  <tr><td><kbd>M</kbd></td><td>マーカーを立てる</td></tr>
+  <tr><td><kbd>,</kbd> / <kbd>.</kbd></td><td>前／次のマーカーへ</td></tr>
+  <tr><td><kbd>G</kbd> / <kbd>F</kbd></td><td>次／前の「消す候補」を選ぶ</td></tr>
+
+  <tr><th colspan="2">その他</th></tr>
+  <tr><td><kbd>⌘Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>元に戻す</td></tr>
+  <tr><td><kbd>⌘S</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>プロジェクトを保存</td></tr>
+  <tr><td><kbd>?</kbd></td><td>ショートカット一覧</td></tr>
+</table>
+
+<h2 id="trouble">困ったときは</h2>
+
+<table>
+  <tr><th>読み込めない</th><td>Chrome か Edge をお使いください。Safari・Firefox は書き出しに必要な機能が未対応です</td></tr>
+  <tr><th>プロジェクトを開いたのに映像が出ない</th><td>同じ名前の動画ファイルをもう一度ドロップしてください</td></tr>
+  <tr><th>動作が重い</th><td>タイムライン右上の <b>▣</b>（サムネイル）と <b>〜</b>（波形）を切ると軽くなります</td></tr>
+  <tr><th>やり直したい</th><td><kbd>⌘Z</kbd> で何段でも戻せます</td></tr>
+</table>
+
+<p style="margin-top:34px">
+  <a class="cta" href="index.html">編集をはじめる</a>
+  <a class="cta ghost" href="about.html">Kiriko について</a>
+</p>
+
+<footer class="foot">
+  <span>Kiriko — ブラウザだけで完結する動画編集ツール</span>
+  <span class="ver" id="ver"></span>
+</footer>
+
+</div>
+
+<script type="module">
+  try {
+    const m = await import('./js/version.js');
+    document.getElementById('ver').textContent = m.VERSION_FOOTER;
+  } catch { /* 版が未生成のときは何も出さない */ }
+</script>
+</body>
+</html>
