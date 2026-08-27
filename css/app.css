@@ -542,7 +542,8 @@ kbd {
 
 /* ---- 作業フォルダを開くまでの案内 ---- */
 .welcome {
-  position: fixed; left: 0; right: 0; top: 40px; bottom: 0; z-index: 30;
+  /* 下 26px はステータスバー。フッターの表記は最初の画面でも見えるように残す */
+  position: fixed; left: 0; right: 0; top: 40px; bottom: 26px; z-index: 30;
   background: var(--bg);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 14px; padding: 24px; text-align: center;
@@ -613,3 +614,8 @@ body.no-workdir .toolbar .tb:not(#btnWorkDir):not(#btnHelp) { opacity: .35; poin
 /* 書き出し中 */
 .tb.export.busy, .tb.export:disabled { opacity: .5; cursor: progress; }
 body.exporting .status { color: var(--accent); font-weight: 700; }
+
+/* フッターのリンク */
+.foot-links { display: flex; gap: 10px; flex: none; font-size: 11.5px; }
+.foot-links a { color: var(--dim); text-decoration: none; white-space: nowrap; }
+.foot-links a:hover { color: var(--accent); text-decoration: underline; }
