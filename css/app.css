@@ -349,7 +349,9 @@ kbd {
   font-size: 17px; line-height: 1; cursor: pointer; padding: 0 3px;
 }
 .fl-close:hover { color: #fff; }
-.fl-body { overflow: auto; padding: 10px; }
+/* min-height:0 が要る。これが無いと中身の高さが下限になって縮まず、
+   max-height を超えた分がダイアログの外へはみ出して見えなくなる */
+.fl-body { overflow: auto; padding: 10px; flex: 1 1 auto; min-height: 0; }
 
 /* テロップの寄せ指定 */
 .align-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
@@ -562,3 +564,9 @@ body.no-workdir .toolbar .tb:not(#btnWorkDir):not(#btnHelp) { opacity: .35; poin
   background: var(--panel2); border: 1px solid var(--line-hard); color: var(--text);
 }
 .welcome .tb.wc-alt:hover { background: var(--head); }
+
+/* フローティングダイアログの下部に常に見えている操作 */
+.fl-foot {
+  flex: none; padding: 8px 10px; border-top: 1px solid var(--line-hard);
+  background: var(--panel2); border-radius: 0 0 8px 8px;
+}

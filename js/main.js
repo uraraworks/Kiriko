@@ -1787,8 +1787,6 @@ function renderTelopForm(force = false) {
       <button class="mini" id="telZFront" title="他の画像・テロップより手前に出す">最前面へ</button>
       <button class="mini" id="telZBack" title="他の画像・テロップより奥に送る">最背面へ</button>
     </div>
-    <button class="mini wide" id="telSaveLib" title="画像ごと保存して、別のプロジェクトでも使えるようにする">★ ライブラリに保存</button>
-
     <div class="grid2">
       <label>開始（秒）<input class="num" type="number" id="telStart" step="0.1" value="${tel.start.toFixed(2)}"></label>
       <label>終了（秒）<input class="num" type="number" id="telEnd" step="0.1" value="${tel.end.toFixed(2)}"></label>
@@ -1903,7 +1901,6 @@ function renderTelopForm(force = false) {
   bind('boxW', (v) => { tel.box.w = Math.max(40, +v); });
   bind('boxH', (v) => { tel.box.h = Math.max(40, +v); });
 
-  $('telSaveLib').onclick = () => saveTelopToLibrary();
   $('telZFront').onclick = () => { commit('最前面へ'); bringToFront(tel); renderAll(); };
   $('telZBack').onclick = () => { commit('最背面へ'); sendToBack(tel); renderAll(); };
 
@@ -3763,6 +3760,7 @@ $('btnAddMarker').onclick = () => addMarker();
 $('btnPrevGap').onclick = selectPrevGap;
 $('btnNextGap').onclick = selectNextGap;
 $('btnAddTelop').onclick = addTelop;
+$('telSaveLib').onclick = () => saveTelopToLibrary();
 $('btnZoneIn').onclick = () => { setMode('program'); zoneIn(); };
 $('btnZoneOut').onclick = () => { setMode('program'); zoneOut(); };
 $('btnExtract').onclick = extractZone;
