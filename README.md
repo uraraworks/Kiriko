@@ -198,7 +198,6 @@ MIT（[LICENSE](LICENSE)）。同梱ライブラリは [THIRD-PARTY.md](THIRD-PA
 | `js/kdenlive.js` | Kdenlive (MLT XML) からカット列を取り込む |
 | `js/main.js` | NLE 風 UI（ビン／モニター／タイムライン） |
 | `vendor/` | mp4box.js, mp4-muxer |
-| `test.html` | パイプライン単体の検証ページ（`testdata/` に素材を置いて開く） |
 | `help.html` / `about.html` | 使い方ページ・紹介ページ |
 | `scripts/gen-version.mjs` | フッターの版表示（git の commit 時刻＋ハッシュ）を作る |
 | `scripts/capture-help-shots.mjs` | 使い方ページのスクリーンショットを撮り直す |
