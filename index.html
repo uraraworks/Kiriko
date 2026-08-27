@@ -14,34 +14,102 @@
 <script src="vendor/mp4box.all.min.js"></script>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="ic-base" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  </defs>
+  <symbol id="i-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1"/><path d="M3 9h16.5l-2.2 8.4a2 2 0 0 1-1.9 1.6H5a2 2 0 0 1-2-2z"/>
+  </symbol>
+  <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 4v10"/><path d="M8 11l4 4 4-4"/><path d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/>
+  </symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 9h9a5 5 0 0 1 0 10h-3"/><path d="M7.5 5.5 4 9l3.5 3.5"/>
+  </symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 9h-9a5 5 0 0 0 0 10h3"/><path d="M16.5 5.5 20 9l-3.5 3.5"/>
+  </symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="5.5" width="13" height="13" rx="2"/><path d="M2.5 9.5h13M2.5 14.5h13M6.5 5.5v13M11.5 5.5v13"/>
+    <path d="M19 13v6M16 16h6"/>
+  </symbol>
+  <symbol id="i-telop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="4.5" width="14" height="14" rx="2"/><path d="M6 8.5h7M9.5 8.5v6"/>
+    <path d="M20 13v6M17 16h6"/>
+  </symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+    <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M10 11v6M14 11v6"/>
+  </symbol>
+  <symbol id="i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .9-1 1.6v.3"/><path d="M12 17.2h.01"/>
+  </symbol>
+  <symbol id="i-export" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
+  </symbol>
+  <symbol id="i-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 4H5v16h3"/><path d="M13 12h7"/><path d="M17 9l3 3-3 3"/>
+  </symbol>
+  <symbol id="i-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 4h3v16h-3"/><path d="M11 12H4"/><path d="M7 9l-3 3 3 3"/>
+  </symbol>
+  <symbol id="i-cut" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M7.7 16.3 18 4M16.3 16.3 6 4"/>
+  </symbol>
+  <symbol id="i-clear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 6l12 12M18 6 6 18"/>
+  </symbol>
+  <symbol id="i-thumbs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3 15l4.5-4 3.5 3 3.5-4L21 15"/>
+  </symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11h2"/>
+  </symbol>
+  <symbol id="i-zoomin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 21 21"/><path d="M8.5 11h5M11 8.5v5"/>
+  </symbol>
+  <symbol id="i-zoomout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 21 21"/><path d="M8.5 11h5"/>
+  </symbol>
+  <symbol id="i-zoomfit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/><path d="M8.5 12h7"/>
+  </symbol>
+  <symbol id="i-video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="6" width="12" height="12" rx="2"/><path d="M14.5 10.5 21 7v10l-6.5-3.5z"/>
+  </symbol>
+  <symbol id="i-audio" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>
+  </symbol>
+  <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M3.5 17l5-4.5 3.5 3 3.5-4 5 5.5"/>
+  </symbol>
+  <symbol id="i-whole" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 6v12M20 6v12"/><rect x="7.5" y="8.5" width="9" height="7" rx="1.5"/>
+  </symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 6v12M6 12h12"/>
+  </symbol>
+</svg>
 <div id="app">
 
   <!-- ============ ツールバー ============ -->
   <header class="toolbar">
     <div class="brand"><img src="assets/icon-64.png" alt="" class="brand-icon">Kiriko <span class="phase">Browser Movie Editor</span></div>
     <div class="tb-group">
-      <button id="btnLoadProj" class="tb" title="プロジェクトJSONを読み込む">開く…</button>
-      <button id="btnSaveProj" class="tb" title="プロジェクトJSONを保存　［ Ctrl+S ］">保存</button>
+      <button id="btnLoadProj" class="tb ico" title="プロジェクトを開く"><svg class="ic"><use href="#i-open"/></svg></button>
+      <button id="btnSaveProj" class="tb ico" title="プロジェクトを保存　［ ⌘S / Ctrl+S ］"><svg class="ic"><use href="#i-save"/></svg></button>
     </div>
     <div class="tb-sep"></div>
     <div class="tb-group">
-      <button id="btnUndo" class="tb" title="元に戻す　［ ⌘Z / Ctrl+Z ］">↶ 戻す</button>
-      <button id="btnRedo" class="tb" title="やり直す　［ ⇧⌘Z / Ctrl+Y ］">↷ 進む</button>
-    </div>
-    <div class="tb-sep"></div>
-    <div class="tb-group">
-      <button id="btnAddClip" class="tb accent" title="ソースの区間をクリップとして追加　［ Enter ］">＋ クリップ追加</button>
-      <button id="btnAddTelop" class="tb" title="再生位置にテロップを追加　［ T ］">＋ テロップ</button>
-    </div>
-    <div class="tb-sep"></div>
-    <div class="tb-group">
-      <button id="btnDelete" class="tb" title="範囲を切り取り／選択中の要素を削除　［ Delete ］">削除</button>
+      <button id="btnUndo" class="tb ico" title="元に戻す　［ ⌘Z / Ctrl+Z ］"><svg class="ic"><use href="#i-undo"/></svg></button>
+      <button id="btnRedo" class="tb ico" title="やり直す　［ ⇧⌘Z / Ctrl+Y ］"><svg class="ic"><use href="#i-redo"/></svg></button>
     </div>
     <div class="spacer"></div>
     <div class="tb-group">
       <span class="totalinfo">尺 <b id="totalDur">00:00.00</b> / <b id="clipCount">0</b> クリップ</span>
-      <button id="btnHelp" class="tb" title="ショートカット一覧　［ ? ］">?</button>
-      <button id="btnExport" class="tb export" title="mp4 で書き出す">▶ 書き出し</button>
+      <button id="btnHelp" class="tb ico" title="ショートカット一覧　［ ? ］"><svg class="ic"><use href="#i-help"/></svg></button>
+      <button id="btnExport" class="tb export" title="mp4 で書き出す"><svg class="ic"><use href="#i-export"/></svg><span>書き出し</span></button>
     </div>
   </header>
 
@@ -57,9 +125,9 @@
 
       <div id="binMedia" class="bin-pane">
         <div class="bin-actions">
-          <button class="mini" id="binAddVideo" title="動画素材を読み込む">＋ 動画</button>
-          <button class="mini" id="binAddAudio" title="効果音 / BGM を読み込む">＋ 音源</button>
-          <button class="mini" id="binAddImage" title="画像を読み込む">＋ 画像</button>
+          <button class="mini" id="binAddVideo" title="動画素材を読み込む"><svg class="ic"><use href="#i-video"/></svg><span>動画</span></button>
+          <button class="mini" id="binAddAudio" title="効果音 / BGM を読み込む"><svg class="ic"><use href="#i-audio"/></svg><span>音源</span></button>
+          <button class="mini" id="binAddImage" title="画像を読み込む"><svg class="ic"><use href="#i-image"/></svg><span>画像</span></button>
         </div>
         <div id="binList" class="bin-list">
           <div class="empty">上の ＋ ボタン、または mp4 / mp3 / png をここにドロップして読み込みます</div>
@@ -105,6 +173,7 @@
         <span class="tc dim" id="tcDur">00:00:00.00</span>
         <span class="rate" id="rateLabel">×1</span>
         <span class="inout">IN <b id="lblIn">--:--</b> / OUT <b id="lblOut">--:--</b> / <b id="lblLen">--:--</b></span>
+        <button id="btnAddClip" class="mini accent" title="ソースの IN〜OUT をクリップとして追加　［ Enter ］"><svg class="ic"><use href="#i-plus"/></svg><span>クリップ追加</span></button>
       </div>
     </section>
 
@@ -180,18 +249,21 @@
     <div class="panel-head">
       タイムライン
       <span class="tl-edit">
-        <button id="btnZoneIn" class="mini zone" title="範囲の開始をカーソル位置に　［ I ］">[ 開始</button>
-        <button id="btnZoneOut" class="mini zone" title="範囲の終了をカーソル位置に　［ O ］">終了 ]</button>
-        <button id="btnExtract" class="mini danger" title="範囲を切り取って後ろを詰める　［ Delete ］">切り取り</button>
-        <button id="btnZoneClear" class="mini" title="範囲選択を解除　［ Esc ］">解除</button>
+        <button id="btnZoneIn" class="mini zone ico" title="範囲の開始をカーソル位置に　［ I ］"><svg class="ic"><use href="#i-in"/></svg></button>
+        <button id="btnZoneOut" class="mini zone ico" title="範囲の終了をカーソル位置に　［ O ］"><svg class="ic"><use href="#i-out"/></svg></button>
+        <button id="btnExtract" class="mini danger" title="範囲を切り取って後ろを詰める　［ Delete ］"><svg class="ic"><use href="#i-cut"/></svg><span>切り取り</span></button>
+        <button id="btnZoneClear" class="mini ico" title="範囲選択を解除　［ Esc ］"><svg class="ic"><use href="#i-clear"/></svg></button>
         <span class="zone-info" id="zoneInfo">範囲 未選択</span>
+        <span class="tl-sep"></span>
+        <button id="btnDelete" class="mini ico" title="選択中のクリップ・テロップ・画像などを削除　［ Delete ］"><svg class="ic"><use href="#i-trash"/></svg></button>
       </span>
       <span class="tl-tools">
-        <button id="btnThumbs" class="mini on" title="サムネイル表示の切り替え">▣</button>
-        <button id="btnWaves" class="mini on" title="波形表示の切り替え">〜</button>
-        <button id="btnZoomOut" class="mini">－</button>
-        <button id="btnZoomIn" class="mini">＋</button>
-        <button id="btnZoomFit" class="mini">全体</button>
+        <button id="btnThumbs" class="mini ico on" title="サムネイル表示の切り替え"><svg class="ic"><use href="#i-thumbs"/></svg></button>
+        <button id="btnWaves" class="mini ico on" title="波形表示の切り替え"><svg class="ic"><use href="#i-wave"/></svg></button>
+        <span class="tl-sep"></span>
+        <button id="btnZoomOut" class="mini ico" title="縮小　［ ⌘/Ctrl + ホイール ］"><svg class="ic"><use href="#i-zoomout"/></svg></button>
+        <button id="btnZoomIn" class="mini ico" title="拡大　［ ⌘/Ctrl + ホイール ］"><svg class="ic"><use href="#i-zoomin"/></svg></button>
+        <button id="btnZoomFit" class="mini ico" title="全体を表示"><svg class="ic"><use href="#i-zoomfit"/></svg></button>
         <span class="hint">ドラッグ＝移動（カット位置に吸着・Alt で解除）／端ドラッグ＝トリム／ホイール＝スクロール／⌘・Ctrl＋ホイール＝拡大縮小</span>
       </span>
     </div>

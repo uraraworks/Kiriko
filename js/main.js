@@ -698,9 +698,17 @@ function placeImage(assetId, placement = null) {
 
 const EFFECTS = [
   {
+    id: 'telop',
+    name: 'テロップ',
+    desc: '文字を重ねる。枠で位置と寄せを決められる。',
+    key: 'T',
+    add: () => addTelop(),
+  },
+  {
     id: 'blur',
     name: 'ぼかし',
     desc: '区間を全画面ぼかし。顔や表札などのプライバシー保護に。',
+    key: 'B',
     add: () => addBlur(),
   },
 ];
@@ -1103,7 +1111,8 @@ function renderEffectBin() {
     const el = document.createElement('div');
     el.className = 'fx-item';
     el.innerHTML = `<div class="row"><div class="n">${esc(fx.name)}</div>`
-      + `<button class="bin-add" title="再生位置に追加">＋</button></div>`
+      + (fx.key ? `<kbd>${esc(fx.key)}</kbd>` : '')
+      + `<button class="bin-add" title="再生位置に追加${fx.key ? `　［ ${fx.key} ］` : ''}">＋</button></div>`
       + `<div class="d">${esc(fx.desc)}</div>`;
     el.querySelector('.bin-add').onclick = (e) => { e.stopPropagation(); fx.add(); };
     el.onclick = () => fx.add();
@@ -2373,7 +2382,6 @@ $('btnRedo').onclick = doRedo;
 $('btnLoadProj').onclick = () => $('projInput').click();
 $('btnAddClip').onclick = addClip;
 $('btnDelete').onclick = deleteSelected;
-$('btnAddTelop').onclick = addTelop;
 $('binAddVideo').onclick = () => openFiles().catch((e) => status(e.message, true));
 $('binAddAudio').onclick = () => $('audioInput').click();
 $('binAddImage').onclick = () => $('imageInput').click();

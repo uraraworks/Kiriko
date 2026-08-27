@@ -65,6 +65,7 @@ body {
 .panel-head {
   background: var(--head); padding: 6px 10px; font-size: 11.5px; font-weight: 700; color: #aeb6c4;
   border-bottom: 1px solid #14161a; display: flex; align-items: center; gap: 8px; flex: none;
+  white-space: nowrap;
 }
 .panel-head.sub { background: #21242b; border-top: 1px solid #14161a; }
 
@@ -100,7 +101,7 @@ body {
 .scrub { padding: 0 8px; background: var(--panel); }
 #scrubBar { width: 100%; height: 34px; display: block; cursor: pointer; }
 .transport {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 5px 10px 8px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 5px 10px 8px;
   border-top: 1px solid var(--line);
 }
 .tc { font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 700; letter-spacing: .02em; }
@@ -370,3 +371,18 @@ kbd {
 /* 表示トグル（サムネイル・波形） */
 .mini.on { background: #2c4a6e; border-color: #3d6da0; color: #cfe4ff; }
 .mini.on:hover { background: #35578020; background: #355780; }
+
+/* ---------- アイコンボタン ---------- */
+.ic { width: 17px; height: 17px; display: block; flex: none; color: currentColor; }
+.tb, .mini { display: inline-flex; align-items: center; gap: 6px; }
+.tb.ico, .mini.ico { padding-left: 8px; padding-right: 8px; gap: 0; }
+.mini .ic { width: 15px; height: 15px; }
+.tb.export .ic { width: 16px; height: 16px; }
+.tb.ico:disabled, .mini.ico:disabled { opacity: .3; }
+.tl-sep { width: 1px; height: 15px; background: var(--line-hard); flex: none; margin: 0 3px; }
+.bin-actions .mini { justify-content: center; gap: 5px; }
+.bin-actions .mini span { font-size: 11px; }
+.fx-item kbd { margin-right: 2px; }
+.mini.accent { background: var(--accent2); border-color: #3d80e6; color: #fff; }
+.mini.accent:hover { background: #3a7fe0; }
+.transport .inout { margin-left: auto; }
