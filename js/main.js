@@ -2450,6 +2450,8 @@ $('scrubBar').addEventListener('pointerdown', (e) => {
     const ratio = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
     const dur = S.mode === 'program' ? P.totalDuration(S.project) : (curSource()?.duration ?? 0);
     if (S.mode === 'program') seekProgram(ratio * dur); else video.currentTime = ratio * dur;
+    // タイムラインの表示範囲も合わせる（拡大したまま遠くへ飛ぶと見失うため）
+    if (S.mode === 'program' && revealPlayhead()) renderTimeline();
     renderScrub(); renderTransport();
   };
   move(e);
@@ -2546,6 +2548,22 @@ function setScroll(sec) {
   const bar = $('tlHScroll');
   const want = Math.round(S.scrollSec * S.pxPerSec);
   if (Math.abs(bar.scrollLeft - want) > 0.5) bar.scrollLeft = want;
+}
+
+/**
+ * 再生位置がタイムラインの見えている範囲から外れていたら、そこまで寄せる。
+ * 拡大率は変えない（プレビューのシークで飛んだ時に、タイムラインを追従させる）。
+ * @returns {boolean} 動かしたか
+ */
+function revealPlayhead(t = S.programTime) {
+  const visible = $('tlWrap').clientWidth / S.pxPerSec;
+  if (!visible) return false;
+  const pad = Math.min(visible * 0.15, 3);   // 端ぴったりだと見づらいので少し余裕を持たせる
+  const before = S.scrollSec;
+  if (t < S.scrollSec + pad) setScroll(t - pad);
+  else if (t > S.scrollSec + visible - pad) setScroll(t - visible + pad);
+  else return false;
+  return S.scrollSec !== before;
 }
 
 /** spacer の幅＝スクロールできる全長。これでネイティブのスクロールバーが出る */
