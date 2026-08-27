@@ -40,6 +40,7 @@ const S = {
   imageLib: new ImageLibrary(),
   focusArea: 'timeline',   // 'preview' ならカーソルキーで枠を動かす
   binTab: 'media',
+  snapLine: null,          // タイムラインで吸着中の位置（秒）
   inspTab: 'props',
   library: null,           // AudioLibrary（初回の音源読み込み時に作る）
   audioPreview: null,
@@ -1681,6 +1682,17 @@ function renderTimeline() {
     ctx.beginPath(); ctx.moveTo(zx1, 4); ctx.lineTo(zx1 - 9, 4); ctx.lineTo(zx1, 13); ctx.fill();
   }
 
+  // --- 吸着位置の目印 ---
+  if (S.snapLine != null) {
+    const sx = secToX(S.snapLine);
+    if (sx >= 0 && sx <= w) {
+      ctx.strokeStyle = '#ff5fa2'; ctx.lineWidth = 1.5;
+      ctx.setLineDash([7, 5]);
+      ctx.beginPath(); ctx.moveTo(sx + 0.5, RULER_H); ctx.lineTo(sx + 0.5, h); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
   // --- プレイヘッド ---
   const px = secToX(S.programTime);
   if (px >= 0 && px <= w) {
@@ -1802,6 +1814,52 @@ function niceStep(pxPerSec) {
   const targets = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
   for (const t of targets) if (t * pxPerSec >= 70) return t;
   return 3600;
+}
+
+// --- タイムラインの吸着 ---
+// テロップ・画像・SE はカットの切り替わりに合わせて置くことが多いので、
+// クリップの境目（と再生位置）に吸わせる。Alt で解除。
+
+function snapTargets() {
+  const list = [0];
+  let t = 0;
+  for (const c of S.project.clips) { t += P.clipDuration(c); list.push(t); }
+  list.push(S.programTime);
+  return list;
+}
+
+/** 1 点を吸着させる。tol は画面上の距離なので、拡大率に関わらず同じ感覚になる */
+function snapOne(value, targets, tolPx = 10) {
+  const tol = tolPx / S.pxPerSec;
+  let best = null, bd = Infinity;
+  for (const t of targets) {
+    const d = Math.abs(value - t);
+    if (d <= tol && d < bd) { bd = d; best = t; }
+  }
+  return best;
+}
+
+/** ブロック全体の移動。始点・終点のうち近い方を吸着させる */
+function snapBlockMove(start, len, alt) {
+  S.snapLine = null;
+  if (alt) return start;
+  const tg = snapTargets();
+  const a = snapOne(start, tg), b = snapOne(start + len, tg);
+  const da = a === null ? Infinity : Math.abs(start - a);
+  const db = b === null ? Infinity : Math.abs(start + len - b);
+  if (da === Infinity && db === Infinity) return start;
+  if (da <= db) { S.snapLine = a; return a; }
+  S.snapLine = b; return b - len;
+}
+
+/** 端のトリム。引いている側だけ吸着させる */
+function snapEdge(value, alt) {
+  S.snapLine = null;
+  if (alt) return value;
+  const hit = snapOne(value, snapTargets());
+  if (hit === null) return value;
+  S.snapLine = hit;
+  return hit;
 }
 
 // --- タイムライン操作 ---
@@ -1971,17 +2029,17 @@ tlCanvas.addEventListener('pointermove', (e) => {
   } else if (drag.type === 'blurMove') {
     const d = (x - drag.startX) / S.pxPerSec;
     const len = drag.orig.end - drag.orig.start;
-    drag.blur.start = Math.max(0, drag.orig.start + d);
+    drag.blur.start = Math.max(0, snapBlockMove(drag.orig.start + d, len, e.altKey));
     drag.blur.end = drag.blur.start + len;
     renderTimeline(); renderOverlay(); syncFxNumbers();
   } else if (drag.type === 'blurTrim') {
     const d = (x - drag.startX) / S.pxPerSec;
-    if (drag.side === 'start') drag.blur.start = Math.max(0, Math.min(drag.orig.end - 0.1, drag.orig.start + d));
-    else drag.blur.end = Math.max(drag.orig.start + 0.1, drag.orig.end + d);
+    if (drag.side === 'start') drag.blur.start = Math.max(0, Math.min(drag.orig.end - 0.1, snapEdge(drag.orig.start + d, e.altKey)));
+    else drag.blur.end = Math.max(drag.orig.start + 0.1, snapEdge(drag.orig.end + d, e.altKey));
     renderTimeline(); renderOverlay(); syncFxNumbers();
   } else if (drag.type === 'audioMove') {
     const d = (x - drag.startX) / S.pxPerSec;
-    drag.ac.start = Math.max(0, drag.orig.start + d);
+    drag.ac.start = Math.max(0, snapBlockMove(drag.orig.start + d, drag.orig.duration, e.altKey));
     renderTimeline(); syncFxNumbers();
   } else if (drag.type === 'audioTrim') {
     const d = (x - drag.startX) / S.pxPerSec;
@@ -1989,37 +2047,38 @@ tlCanvas.addEventListener('pointermove', (e) => {
     const maxLen = asset ? asset.duration : Infinity;
     if (drag.side === 'start') {
       // 頭を詰めると素材の頭出し位置もずれる
-      const ns = Math.max(0, Math.min(drag.orig.start + drag.orig.duration - 0.1, drag.orig.start + d));
+      const ns = Math.max(0, Math.min(drag.orig.start + drag.orig.duration - 0.1, snapEdge(drag.orig.start + d, e.altKey)));
       const shift = ns - drag.orig.start;
       drag.ac.start = ns;
       drag.ac.offset = Math.max(0, (drag.orig.offset ?? 0) + shift);
       drag.ac.duration = Math.max(0.1, drag.orig.duration - shift);
     } else {
       const cap = drag.ac.loop ? Infinity : maxLen - (drag.ac.offset ?? 0);
-      drag.ac.duration = Math.max(0.1, Math.min(cap, drag.orig.duration + d));
+      const ne = snapEdge(drag.orig.start + drag.orig.duration + d, e.altKey);
+      drag.ac.duration = Math.max(0.1, Math.min(cap, ne - drag.ac.start));
     }
     renderTimeline(); syncFxNumbers();
   } else if (drag.type === 'imageMove') {
     const d = (x - drag.startX) / S.pxPerSec;
     const len = drag.orig.end - drag.orig.start;
-    drag.im.start = Math.max(0, drag.orig.start + d);
+    drag.im.start = Math.max(0, snapBlockMove(drag.orig.start + d, len, e.altKey));
     drag.im.end = drag.im.start + len;
     renderTimeline(); renderOverlay(); syncFxNumbers();
   } else if (drag.type === 'imageTrim') {
     const d = (x - drag.startX) / S.pxPerSec;
-    if (drag.side === 'start') drag.im.start = Math.max(0, Math.min(drag.orig.end - 0.1, drag.orig.start + d));
-    else drag.im.end = Math.max(drag.orig.start + 0.1, drag.orig.end + d);
+    if (drag.side === 'start') drag.im.start = Math.max(0, Math.min(drag.orig.end - 0.1, snapEdge(drag.orig.start + d, e.altKey)));
+    else drag.im.end = Math.max(drag.orig.start + 0.1, snapEdge(drag.orig.end + d, e.altKey));
     renderTimeline(); renderOverlay(); syncFxNumbers();
   } else if (drag.type === 'telopMove') {
     const d = (x - drag.startX) / S.pxPerSec;
     const len = drag.orig.end - drag.orig.start;
-    drag.tel.start = Math.max(0, drag.orig.start + d);
+    drag.tel.start = Math.max(0, snapBlockMove(drag.orig.start + d, len, e.altKey));
     drag.tel.end = drag.tel.start + len;
     renderTimeline(); renderOverlay(); syncBoxNumbers();
   } else if (drag.type === 'telopTrim') {
     const d = (x - drag.startX) / S.pxPerSec;
-    if (drag.side === 'start') drag.tel.start = Math.max(0, Math.min(drag.orig.end - 0.1, drag.orig.start + d));
-    else drag.tel.end = Math.max(drag.orig.start + 0.1, drag.orig.end + d);
+    if (drag.side === 'start') drag.tel.start = Math.max(0, Math.min(drag.orig.end - 0.1, snapEdge(drag.orig.start + d, e.altKey)));
+    else drag.tel.end = Math.max(drag.orig.start + 0.1, snapEdge(drag.orig.end + d, e.altKey));
     renderTimeline(); renderOverlay(); syncBoxNumbers();
   } else if (drag.type === 'move') {
     if (Math.abs(x - drag.startX) > 4) drag.moved = true;
@@ -2043,6 +2102,7 @@ document.addEventListener('pointerup', () => history.endGroup());
 document.addEventListener('focusin', () => history.endGroup());
 
 tlCanvas.addEventListener('pointerup', () => {
+  S.snapLine = null;
   if (drag && drag.type === 'move' && !drag.moved) {
     // クリック扱い：選択のみ
   }
