@@ -570,3 +570,22 @@ body.no-workdir .toolbar .tb:not(#btnWorkDir):not(#btnHelp) { opacity: .35; poin
   flex: none; padding: 8px 10px; border-top: 1px solid var(--line-hard);
   background: var(--panel2); border-radius: 0 0 8px 8px;
 }
+
+/* ダイアログ右下のリサイズつまみ */
+.fl-grip {
+  position: absolute; right: 0; bottom: 0; width: 16px; height: 16px;
+  cursor: nwse-resize; z-index: 1;
+  background:
+    linear-gradient(135deg, transparent 50%, var(--dim) 50%, var(--dim) 60%, transparent 60%,
+                    transparent 72%, var(--dim) 72%, var(--dim) 82%, transparent 82%);
+  opacity: .6;
+}
+.fl-grip:hover { opacity: 1; }
+
+/* ダイアログの中身は縦に長くなるので、スクロールバーを常に見えるようにする
+   （macOS の既定は普段隠れていて、スクロールできることに気づけない） */
+.fl-body::-webkit-scrollbar { width: 11px; }
+.fl-body::-webkit-scrollbar-track { background: #14161b; }
+.fl-body::-webkit-scrollbar-thumb { background: #454c5b; border-radius: 6px; border: 2px solid #14161b; }
+.fl-body::-webkit-scrollbar-thumb:hover { background: #566073; }
+.fl-body { scrollbar-width: thin; scrollbar-color: #454c5b #14161b; }

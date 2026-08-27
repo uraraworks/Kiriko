@@ -1211,6 +1211,48 @@ $('helpDialogClose').onclick = () => toggleHelp(false);
     helpDlg.style.top = `${Math.max(0, Math.min(innerHeight - 40, e.clientY - d.dy))}px`;
   });
   head.addEventListener('pointerup', () => { d = null; head.classList.remove('dragging'); });
+
+  // 右下のつまみで大きさを変える。設定が増えて縦に長くなるので、
+  // 広げたい人は広げられるように（大きさは覚える）
+  const grip = $('telopGrip');
+  const MIN_W = 280, MIN_H = 220;
+  let z = null;
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const r = telDlg.getBoundingClientRect();
+    z = { x: e.clientX, y: e.clientY, w: r.width, h: r.height, left: r.left, top: r.top };
+    try { grip.setPointerCapture(e.pointerId); } catch {}
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (!z) return;
+    setTelopDialogSize(z.w + (e.clientX - z.x), z.h + (e.clientY - z.y));
+  });
+  grip.addEventListener('pointerup', () => {
+    if (!z) return;
+    z = null;
+    try {
+      localStorage.setItem('kiriko.telopDlg',
+        JSON.stringify({ w: parseFloat(telDlg.style.width), h: parseFloat(telDlg.style.height) }));
+    } catch { /* プライベートモード等 */ }
+  });
+
+  function setTelopDialogSize(w, h) {
+    const r = telDlg.getBoundingClientRect();
+    // 画面からはみ出さない範囲で
+    telDlg.style.width = `${Math.max(MIN_W, Math.min(w, innerWidth - r.left - 8))}px`;
+    telDlg.style.height = `${Math.max(MIN_H, Math.min(h, innerHeight - r.top - 8))}px`;
+    telDlg.style.maxHeight = 'none';
+  }
+
+  // 前回の大きさを復元する
+  try {
+    const saved = JSON.parse(localStorage.getItem('kiriko.telopDlg') || 'null');
+    if (saved?.w && saved?.h) {
+      telDlg.style.width = `${saved.w}px`;
+      telDlg.style.height = `${saved.h}px`;
+      telDlg.style.maxHeight = 'none';
+    }
+  } catch { /* 壊れていたら既定の大きさで */ }
 })();
 
 // --- ツールチップ ---
@@ -1310,9 +1352,14 @@ overlay.addEventListener('contextmenu', (e) => {
   if (!hit) { hideContextMenu(); return; }
   select(hit.kind, hit.item.id);
   renderAll(); renderTelopForm(true); renderFxForm(true);
-  showContextMenu(e.clientX, e.clientY, [
+  const items = [
     { label: hit.kind === 'image' ? '画像を削除' : 'テロップを削除', key: 'Delete', run: () => deleteSelected() },
-  ]);
+  ];
+  if (hit.kind === 'telop') {
+    items.push({ label: 'テロップを編集…', run: () => openTelopDialog() });
+    items.push({ label: '★ ライブラリに保存…', run: () => saveTelopToLibrary() });
+  }
+  showContextMenu(e.clientX, e.clientY, items);
 });
 
 /**
@@ -3194,7 +3241,12 @@ tlCanvas.addEventListener('contextmenu', (e) => {
     }
     else if (hit.blur) { select('blur', hit.blur.id); items.push({ label: 'ぼかしを削除', key: 'Delete' }); }
     else if (hit.im) { select('image', hit.im.id); items.push({ label: '画像を削除', key: 'Delete' }); }
-    else if (hit.tel) { select('telop', hit.tel.id); items.push({ label: 'テロップを削除', key: 'Delete' }); }
+    else if (hit.tel) {
+      select('telop', hit.tel.id);
+      items.push({ label: 'テロップを削除', key: 'Delete' });
+      items.push({ label: 'テロップを編集…', run: () => openTelopDialog() });
+      items.push({ label: '★ ライブラリに保存…', run: () => saveTelopToLibrary() });
+    }
     else if (hit.ac) { select('audio', hit.ac.id); items.push({ label: '音源を削除', key: 'Delete' }); }
     else if (hit.clip) { select('clip', hit.clip.id); items.push({ label: 'クリップを削除' }); }
     if (!items[0].run) items[0].run = () => deleteSelected();
