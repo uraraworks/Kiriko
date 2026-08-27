@@ -2482,13 +2482,13 @@ function audioTrackCount() {
  */
 // トラックの見出しは 2 文字なので、何の行なのか説明を添える（初見で分からないため）
 const TRACK_TIPS = {
-  marker: 'MK … マーカー。目印や覚え書きを置く行です。区間マーカーは「ここは残す／消す」の印になります　［ M で追加 ］',
-  fx: 'FX … エフェクト。ぼかしを掛ける区間を置く行です',
-  image: 'IM … 画像。差し込んだ画像を置く行です',
-  telop: (i) => `T${i + 1} … テロップ ${i + 1}。文字を置く行です（重ねたい時は別の行へ）`,
-  video: 'V1 … 映像。カットしたクリップが並ぶ行です',
-  audio: 'A1 … 元の音。動画にもともと入っている音です（クリップと一緒に動きます）',
-  music: (i) => `A${i + 2} … 効果音 / BGM ${i + 1}。追加した音源を置く行です`,
+  marker: 'マーカー：目印や覚え書きを置く行です。区間マーカーは「ここは残す／消す」の印になります　［ M で追加 ］',
+  fx: 'エフェクト：ぼかしを掛ける区間を置く行です',
+  image: '画像：差し込んだ画像を置く行です',
+  telop: (i) => `テロップ ${i + 1}：文字を置く行です（重ねたい時は別の行へ）`,
+  video: '映像：カットしたクリップが並ぶ行です',
+  audio: '元の音：動画にもともと入っている音です（クリップと一緒に動きます）',
+  music: (i) => `効果音 / BGM ${i + 1}：追加した音源を置く行です`,
 };
 
 function trackLayout() {
@@ -3783,9 +3783,10 @@ async function doExport() {
   // フォントが未ロードだと別書体で焼き込まれてしまう
   await T.ensureFontsLoaded(S.project.telops);
   S.exporting = true;
+  setExporting(true);
   const ac = new AbortController();
   $('btnCancel').onclick = () => ac.abort();
-  $('overlay').classList.remove('hidden');
+  $('exportDialog').classList.remove('hidden');
   $('ovLog').textContent = '';
   const t0 = performance.now();
 
@@ -3802,6 +3803,7 @@ async function doExport() {
         const el = performance.now() - t0;
         const eta = r > 0.01 ? (el / r - el) / 1000 : 0;
         $('ovText').textContent = `${(r * 100).toFixed(1)}%  ${text}  残り約 ${tc(eta, false)}`;
+        status(`書き出し中… ${(r * 100).toFixed(1)}%（残り約 ${tc(eta, false)}）`);
       },
       onLog: (t) => { $('ovLog').textContent += t + '\n'; $('ovLog').scrollTop = 1e9; },
     });
@@ -3818,10 +3820,27 @@ async function doExport() {
     await new Promise((r) => setTimeout(r, 1500));
   } finally {
     S.exporting = false;
-    $('overlay').classList.add('hidden');
+    setExporting(false);
+    $('exportDialog').classList.add('hidden');
     $('progBar').style.width = '0';
   }
 }
+
+/**
+ * 書き出し中の見た目を切り替える。
+ * 画面はオーバーレイで覆われるが、ボタン自体も止めておく（連打・二重起動の防止）。
+ * 長時間かかるので、うっかりタブを閉じた時にも聞き返す。
+ */
+function setExporting(on) {
+  const btn = $('btnExport');
+  btn.disabled = on;
+  btn.classList.toggle('busy', on);
+  btn.title = on ? '書き出し中です' : 'mp4 で書き出す';
+  document.body.classList.toggle('exporting', on);
+  if (on) addEventListener('beforeunload', warnExporting);
+  else removeEventListener('beforeunload', warnExporting);
+}
+function warnExporting(e) { e.preventDefault(); e.returnValue = ''; }
 
 // ---------------------------------------------------------------- イベント配線
 
