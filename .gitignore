@@ -4,3 +4,4 @@ mcp/node_modules/
 node_modules/
 js/version.js
 public/help/_sample/
+test/.fixtures/

@@ -412,6 +412,44 @@ MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1
 **無音には whisper をかけない** — 何も言っていない所に文章を作ってしまうため、
 Kiriko の音量データで「音がある区間」だけを切り出して渡している。
 
+## テスト
+
+ビルドが無いぶん、壊れても実行するまで気付けない。3 層に分けて置いている。
+
+| 層 | 場所 | 何を見るか | 時間 |
+|---|---|---|---|
+| 単体 | `test/unit/` | 計算とデータ構造（`edit` / `project` / `boxes` / `history` / `images` / `waveform` / `telop` / `exporter`） | 1〜2 秒 |
+| 静的検査 | `test/static/` | 重複 id、`$('x')` の実在、未使用 id、SVG の参照先、リンク切れ、CSS 変数の未定義 | 1 秒未満 |
+| 結合 | `test/e2e/` | 実 Chrome で読み込み→カット→テロップ→**実書き出し**まで。レイアウトの実測も | 1 分ほど |
+
+```bash
+npm test          # 単体＋静的検査。依存なしで走る（node --test だけ）
+npm run test:e2e  # 結合。puppeteer-core ＋ システムの Chrome ＋ ffmpeg
+npm run hooks:install   # push 前に npm test を通す git フックを入れる
+```
+
+**素材はその場で作る。** `test/.fixtures/` に ffmpeg で短い mp4 / mp3 / png を生成する
+（`testdata/` は git 管理外なので、それに依存させない）。
+
+**入口は `window.bme`。** 結合テストは MCP と同じコマンド経路を通るので、
+テストのために別口を用意していない。作業フォルダのゲート解除も、
+`showDirectoryPicker` だけ差し替えて実際の［作業フォルダを開く］を押している。
+
+**DOMParser や Canvas が要るもの**（`kdenlive` / `telop` の描画系）は node では動かないので、
+`test/e2e/modules.test.mjs` でブラウザの中から `import()` して検証する。
+
+### この 3 層で捕まえた実際の退行
+
+| 事例 | 捕まえる層 |
+|---|---|
+| `id="overlay"` の重複で書き出しダイアログが出ない | 静的 |
+| 素材バーが消えるとタイムラインが 6px に潰れる | 結合（高さの実測） |
+| `min-height:0` 忘れでダイアログのボタンが枠外へ | 結合（位置の実測） |
+| H.264 レベル 4.0 固定で 1440p 以上が失敗 | 単体（`avcCodecCandidates`） |
+| 並べ替えが同じ位置で振動する | 単体（`dropIndex` の総当たり） |
+| Kdenlive の複数トラックを取りこぼす | ブラウザ内モジュール |
+| 使わなくなった SVG シンボルが残る | 静的（未使用 id） |
+
 ## ここまでに入ったもの
 
 - Phase 0: カット・mp4 書き出し・サムネイル・実波形

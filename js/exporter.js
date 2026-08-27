@@ -29,15 +29,25 @@ const AVC_LEVELS = [
 ];
 
 /**
+ * その大きさ・フレームレートで足りるレベルの候補を、低い順に返す。
+ * 収まるものが無ければ最上位だけを返す（後は環境任せ）。
+ * 計算だけなのでテストできる。
+ * @returns {string[]} codec 文字列の候補
+ */
+export function avcCodecCandidates(width, height, fps) {
+  const mbFrame = Math.ceil(width / 16) * Math.ceil(height / 16);
+  const mbRate = mbFrame * fps;
+  const fits = AVC_LEVELS.filter((l) => l.mbFrame >= mbFrame && l.mbRate >= mbRate);
+  return (fits.length ? fits : [AVC_LEVELS[AVC_LEVELS.length - 1]])
+    .map((l) => `avc1.6400${l.level.toString(16)}`);
+}
+
+/**
  * その大きさ・フレームレートで通る codec 文字列を選ぶ。
  * 足りるレベルから順に isConfigSupported で確かめる（環境によって上限が違うため）。
  */
 async function pickAvcCodec(width, height, fps, cfg) {
-  const mbFrame = Math.ceil(width / 16) * Math.ceil(height / 16);
-  const mbRate = mbFrame * fps;
-  const fits = AVC_LEVELS.filter((l) => l.mbFrame >= mbFrame && l.mbRate >= mbRate);
-  const cands = (fits.length ? fits : [AVC_LEVELS[AVC_LEVELS.length - 1]])
-    .map((l) => `avc1.6400${l.level.toString(16)}`);
+  const cands = avcCodecCandidates(width, height, fps);
   for (const codec of cands) {
     try {
       const r = await VideoEncoder.isConfigSupported({ codec, ...cfg });

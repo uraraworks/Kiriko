@@ -14,6 +14,7 @@ import { createCommands } from './commands.js';
 import { ThumbCache, THUMB_W, THUMB_H } from './thumbs.js';
 import { WaveformCache, BINS_PER_SEC, bufferPeaks } from './waveform.js';
 import * as B from './boxes.js';
+import { dropIndex, rippleTime, insertTime, trimShift } from './edit.js';
 import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageClip, drawImageClip, drawnRect } from './images.js';
 
 // ---------------------------------------------------------------- 状態
@@ -560,8 +561,7 @@ function extractRange(a, b) {
 
 /** テロップ・ぼかし・音源を、切り取った分だけ前に詰める */
 function rippleAfter(a, b) {
-  const len = b - a;
-  const shift = (v) => (v >= b ? v - len : v > a ? a : v);
+  const shift = (v) => rippleTime(v, a, b);
   const alive = (x, y) => y - x > 0.05;
 
   S.project.telops = S.project.telops
@@ -598,7 +598,7 @@ function rippleAfter(a, b) {
 function insertGapAt(t, len) {
   if (len <= 0.0001) return;
   const P0 = S.project;
-  const push = (v) => (v >= t ? v + len : v);
+  const push = (v) => insertTime(v, t, len);
   const shiftBlock = (x) => ({ ...x, start: push(x.start), end: push(x.end) });
   P0.telops = P0.telops.map(shiftBlock);
   P0.blurs = P0.blurs.map(shiftBlock);
@@ -3492,13 +3492,7 @@ tlCanvas.addEventListener('pointermove', (e) => {
     // 掴んだままの並びで計算すると、入れ替わるたびに長さの配置が変わって
     // 答えが変わり、同じ位置で行ったり来たりする（終端側で顕著だった）
     const others = clips.filter((c) => c !== drag.clip);
-    let acc = 0, to = others.length;
-    for (let i = 0; i < others.length; i++) {
-      const d = P.clipDuration(others[i]);
-      if (t < acc + d / 2) { to = i; break; }
-      acc += d;
-    }
-    others.splice(to, 0, drag.clip);
+    others.splice(dropIndex(others.map(P.clipDuration), t), 0, drag.clip);
     if (others.some((c, i) => c !== clips[i])) {
       if (!drag.reordered) { commit('クリップを並べ替え'); drag.reordered = true; }
       S.project.clips = others;
@@ -3514,14 +3508,11 @@ tlCanvas.addEventListener('pointerup', () => {
   S.snapLine = null;
   // 端をドラッグして長さが変わった分、後ろのものをまとめて動かす
   if (drag?.type === 'trim') {
-    const before = drag.orig.out - drag.orig.in;
-    const after = P.clipDuration(drag.clip);
-    const d = after - before;
-    if (Math.abs(d) > 0.0005) {
-      // 頭を削った時はクリップの先頭、後ろを削った時はクリップの終わりが境目
-      const edge = drag.side === 'in' ? drag.startSec : drag.startSec + Math.min(before, after);
-      if (d < 0) rippleAfter(edge, edge - d);
-      else insertGapAt(edge, d);
+    const { edge, delta } = trimShift(drag.side, drag.startSec,
+      drag.orig.out - drag.orig.in, P.clipDuration(drag.clip));
+    if (Math.abs(delta) > 0.0005) {
+      if (delta < 0) rippleAfter(edge, edge - delta);
+      else insertGapAt(edge, delta);
     }
   }
   if (drag && drag.type === 'move' && !drag.moved) {
@@ -3767,6 +3758,12 @@ function renderWorkDir() {
   // フォルダが無いうちは、保存先も素材の在り処も決まらない。
   // 中途半端に触れるより、開いてもらうまで止めておく（VSCode と同じ考え方）
   document.body.classList.toggle('no-workdir', !ready);
+  // 見た目だけでなく本当に押せなくする（キーボードからも触れないように）。
+  // 作業フォルダのボタンとヘルプ（<a>）だけは残す
+  for (const b of document.querySelectorAll('.toolbar button')) {
+    if (b.id !== 'btnWorkDir' && b.id !== 'mcpDot') b.disabled = !ready;
+  }
+  if (ready) renderHistoryUI();   // 戻す／進むは履歴の状態に従う
   const wc = $('welcome');
   if (wc) wc.classList.toggle('hidden', ready);
   // 前回のフォルダがあれば、開き直すボタンを出す
@@ -4439,6 +4436,9 @@ syncProjectUI();
 renderHistoryUI();
 renderAll();
 reloadLibrary();
+// 先に閉めておく。覚えているフォルダを調べるのは非同期なので、
+// その間だけ編集画面が見えてしまうのを防ぐ
+renderWorkDir();
 restoreWorkDir();
 restoreLibDir();
 status('準備完了 — 作業フォルダを開くか、mp4 をここへドロップしてください');

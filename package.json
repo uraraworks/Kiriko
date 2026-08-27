@@ -5,9 +5,13 @@
   "type": "module",
   "description": "ブラウザだけで完結する動画編集ツール",
   "scripts": {
+    "test": "node --test \"test/unit/*.test.mjs\" \"test/static/*.test.mjs\"",
+    "test:e2e": "node --test --test-timeout 240000 \"test/e2e/*.test.mjs\"",
+    "test:all": "npm test && npm run test:e2e",
     "version:gen": "node scripts/gen-version.mjs",
     "serve": "python3 -m http.server 8901",
-    "capture-help": "node scripts/capture-help-shots.mjs"
+    "capture-help": "node scripts/capture-help-shots.mjs",
+    "hooks:install": "node scripts/install-hooks.mjs"
   },
   "devDependencies": {
     "puppeteer-core": "^25.4.0"

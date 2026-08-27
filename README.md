@@ -137,6 +137,18 @@ MCP（Model Context Protocol）に対応しているので、対応した生成 
 **お使いの生成 AI に [mcp/README.md](mcp/README.md) を示して**
 「ここに書いてある通りに Kiriko へ MCP 接続できるようにして」と指示すれば、そのまま設定できる。
 
+## テスト
+
+```bash
+npm test          # 単体＋静的検査（数秒。依存なし）
+npm run test:e2e  # 実 Chrome での結合テスト（1 分ほど。ffmpeg が要る）
+```
+
+`npm run hooks:install` を一度実行すると、**push の前に `npm test` が走る**ようになる
+（急ぐときは `git push --no-verify`）。結合テストは GitHub Actions でも回している。
+
+詳しくは [docs/DESIGN.md](docs/DESIGN.md#テスト)。
+
 ## ドキュメント
 
 | | 中身 |
