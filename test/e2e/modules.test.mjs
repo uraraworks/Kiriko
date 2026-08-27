@@ -78,6 +78,51 @@ describe('ブラウザが要るモジュール', { skip: haveChrome() ? false : 
     assert.equal(r.unwrapped, 1, '折り返し無しなのに分割された');
   });
 
+  // canvas の measureText は最後の文字のうしろにも字間を足すので、
+  // それを引かないと寄せた時に半分ずれる
+  test('テロップ: 字間を広げると横に伸び、寄せはずれない', async () => {
+    const r = await ev(`(async () => {
+      const T = await import('/js/telop.js');
+      const ctx = new OffscreenCanvas(1920, 1080).getContext('2d');
+      const mk = (sp) => {
+        const t = T.createTelop(0, 3, { letterSpacing: sp, hAlign: 'center', wrap: false }, 'あいうえお');
+        return T.textBounds(ctx, t);
+      };
+      const a = mk(0), b = mk(20), c = mk(-10);
+      return {
+        w0: Math.round(a.w), w20: Math.round(b.w), wm10: Math.round(c.w),
+        c0: Math.round(a.x + a.w / 2), c20: Math.round(b.x + b.w / 2),
+      };
+    })()`);
+    // 5 文字なので、間は 4 つぶん広がる
+    assert.ok(Math.abs((r.w20 - r.w0) - 80) < 4, `広がりが合わない: ${r.w0} → ${r.w20}`);
+    assert.ok(r.wm10 < r.w0, '負の字間で詰まらない');
+    assert.ok(Math.abs(r.c20 - r.c0) <= 1, `中央がずれた: ${r.c0} → ${r.c20}`);
+  });
+
+  test('テロップ: 字間は折り返し幅にも効く', async () => {
+    const r = await ev(`(async () => {
+      const T = await import('/js/telop.js');
+      const ctx = new OffscreenCanvas(1920, 1080).getContext('2d');
+      const row = { ...T.DEFAULT_STYLE, text: 'あ'.repeat(20) };
+      return {
+        tight: T.wrapRow(ctx, { ...row, letterSpacing: 0 }, 600, true).length,
+        wide: T.wrapRow(ctx, { ...row, letterSpacing: 40 }, 600, true).length,
+      };
+    })()`);
+    assert.ok(r.wide > r.tight, `字間を広げても行数が増えない: ${r.tight} → ${r.wide}`);
+  });
+
+  test('テロップ: 測っても共有の ctx に字間が残らない', async () => {
+    const left = await ev(`(async () => {
+      const T = await import('/js/telop.js');
+      const ctx = new OffscreenCanvas(1920, 1080).getContext('2d');
+      T.wrapRow(ctx, { ...T.DEFAULT_STYLE, text: 'あいう', letterSpacing: 40 }, 600, true);
+      return ctx.letterSpacing;
+    })()`);
+    assert.equal(left, '0px');
+  });
+
   test('テロップ: 文字の外形が枠の中に収まる', async () => {
     const r = await ev(`(async () => {
       const T = await import('/js/telop.js');

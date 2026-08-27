@@ -59,6 +59,18 @@ test('migrateTelop: 行の書式に既定値が入る', () => {
   assert.equal(t.rows[0].color, T.DEFAULT_STYLE.color);
 });
 
+test('字間は行ごとの書式で、既定は 0', () => {
+  assert.equal(T.DEFAULT_STYLE.letterSpacing, 0);
+  assert.equal(T.createRow('あ').letterSpacing, 0);
+  assert.equal(T.createTelop(0, 1, { letterSpacing: 12 }, 'あ').rows[0].letterSpacing, 12);
+});
+
+test('migrateTelop: 字間を持たない古い行にも 0 が入る', () => {
+  const t = T.migrateTelop({ id: 'a', start: 0, end: 1, box: { x: 0, y: 0, w: 10, h: 10 },
+    rows: [{ text: 'あ' }] });
+  assert.equal(t.rows[0].letterSpacing, 0);
+});
+
 test('プリセットは枠と縦寄せをセットで持つ', () => {
   assert.ok(T.DEFAULT_PRESETS.length >= 4);
   for (const p of T.DEFAULT_PRESETS) {

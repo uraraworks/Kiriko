@@ -16,6 +16,7 @@ export const DEFAULT_STYLE = {
   outerScale: 2.2,        // strokeWidth に対する倍率（0 で白フチなし）
   shadow: 0.45,           // 0〜1。影の濃さ
   lineHeight: 1.18,
+  letterSpacing: 0,       // 文字と文字の間（px）。マイナスで詰められる
   hAlign: 'center',       // left | center | right … 枠の中での横の寄せ
   vAlign: 'bottom',       // top | middle | bottom … 枠の中での縦の寄せ
   wrap: true,             // 枠の幅で折り返す
@@ -139,28 +140,56 @@ function fontSpec(r) {
   return `${r.bold ? 'bold ' : ''}${r.size}px ${fam}, "Hiragino Maru Gothic ProN", sans-serif`;
 }
 
+/** 文字送り（px）。行ごとの設定 */
+const spacingOf = (r) => Math.max(-200, Math.min(400, Number(r.letterSpacing) || 0));
+
+/** 書体と文字送りをまとめて当てる。測る時も描く時も必ずこれを通す */
+function applyFont(ctx, r) {
+  ctx.font = fontSpec(r);
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${spacingOf(r)}px`;
+}
+
+/**
+ * 文字が実際に占める幅。
+ * canvas の measureText は**最後の文字のうしろにも**文字送りを足した値を返すので、
+ * その分を引く。引かないと、寄せた時に文字送りの半分だけ左へ寄って見える。
+ */
+function inkWidth(ctx, r, text) {
+  const w = ctx.measureText(text).width;
+  return text ? Math.max(0, w - spacingOf(r)) : 0;
+}
+
+/** 寄せに応じた描き出し位置の補正（上と同じ理由） */
+function alignShift(r) {
+  const sp = spacingOf(r);
+  return r.hAlign === 'right' ? sp : r.hAlign === 'left' ? 0 : sp / 2;
+}
+
 /** 枠幅で折り返した行を返す。日本語は単語境界が無いので基本は 1 文字ずつ詰める */
 export function wrapRow(ctx, row, maxW, wrap = true) {
-  ctx.font = fontSpec(row);
   const raw = String(row.text ?? '').split('\n');
   if (!wrap) return raw;
-  const out = [];
-  for (const para of raw) {
-    if (!para) { out.push(''); continue; }
-    let line = '';
-    for (const ch of para) {
-      const next = line + ch;
-      if (line && ctx.measureText(next).width > Math.max(20, maxW)) {
-        const sp = line.lastIndexOf(' ');
-        if (sp > 0 && line.length - sp < 12) { out.push(line.slice(0, sp)); line = line.slice(sp + 1) + ch; }
-        else { out.push(line); line = ch; }
-      } else {
-        line = next;
+  ctx.save();                 // 文字送りを共有の ctx に残さない
+  try {
+    applyFont(ctx, row);
+    const out = [];
+    for (const para of raw) {
+      if (!para) { out.push(''); continue; }
+      let line = '';
+      for (const ch of para) {
+        const next = line + ch;
+        if (line && inkWidth(ctx, row, next) > Math.max(20, maxW)) {
+          const sp = line.lastIndexOf(' ');
+          if (sp > 0 && line.length - sp < 12) { out.push(line.slice(0, sp)); line = line.slice(sp + 1) + ch; }
+          else { out.push(line); line = ch; }
+        } else {
+          line = next;
+        }
       }
+      out.push(line);
     }
-    out.push(line);
-  }
-  return out;
+    return out;
+  } finally { ctx.restore(); }
 }
 
 /** アイコンとして描く元の範囲。既定では透明な余白を切り詰める */
@@ -294,10 +323,11 @@ export function drawTelop(ctx, t, imageLib = null) {
     if (bmp && src) ctx.drawImage(bmp, src.x, src.y, src.w, src.h, icon.x, icon.y, icon.w, icon.h);
   }
   for (const r of rows) {
-    ctx.font = fontSpec(r.row);
+    applyFont(ctx, r.row);
     ctx.textAlign = r.row.hAlign || 'center';
+    const x = r.x + alignShift(r.row);
     for (let i = 0; i < r.lines.length; i++) {
-      drawRowLine(ctx, r.row, r.lines[i], r.x, r.firstY + i * r.lh);
+      drawRowLine(ctx, r.row, r.lines[i], x, r.firstY + i * r.lh);
     }
   }
   ctx.restore();
@@ -315,9 +345,9 @@ export function textBounds(ctx, t, imageLib = null) {
   const { rows, icon } = layoutTelop(ctx, t, imageLib);
   let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
   for (const r of rows) {
-    ctx.font = fontSpec(r.row);
+    applyFont(ctx, r.row);
     let maxW = 0;
-    for (const l of r.lines) maxW = Math.max(maxW, ctx.measureText(l).width);
+    for (const l of r.lines) maxW = Math.max(maxW, inkWidth(ctx, r.row, l));
     const x = r.row.hAlign === 'left' ? r.x : r.row.hAlign === 'right' ? r.x - maxW : r.x - maxW / 2;
     const pad = (r.row.strokeWidth || 0) * (r.row.outerScale || 1) * 0.5;
     left = Math.min(left, x - pad);

@@ -2080,6 +2080,11 @@ function renderTelopForm(force = false) {
     <div class="grid2">
       <label>サイズ <input class="num" type="number" id="telSize" min="16" max="400" value="${row.size}"></label>
       <label>縁の太さ <input class="num" type="number" id="telSW" min="0" max="60" value="${row.strokeWidth}"></label>
+      <label title="文字と文字の間。マイナスにすると詰まります">字間
+        <input class="num" type="number" id="telLetterSp" step="1" min="-100" max="200"
+          value="${Math.round(row.letterSpacing ?? 0)}"></label>
+      <label title="行と行の間。複数行のときだけ効きます">行間
+        <input class="num" type="number" id="telRowGap" step="2" value="${Math.round(tel.rowGap ?? 0)}"></label>
     </div>
 
     <div class="grid2">
@@ -2127,12 +2132,9 @@ function renderTelopForm(force = false) {
           `<button data-icv="${v}" class="${tel.icon.valign === v ? 'on' : ''}">${n}</button>`).join('')}</div></label>
     </div>` : ''}
 
-    <div class="grid2">
-      <label>縦の寄せ
-        <div class="align-grid">${['top', 'middle', 'bottom'].map((a) =>
-          `<button data-v="${a}" class="${tel.vAlign === a ? 'on' : ''}" title="${a}">${VA[a]}</button>`).join('')}</div></label>
-      <label>行間 <input class="num" type="number" id="telRowGap" step="2" value="${Math.round(tel.rowGap ?? 0)}"></label>
-    </div>
+    <label>縦の寄せ
+      <div class="align-grid">${['top', 'middle', 'bottom'].map((a) =>
+        `<button data-v="${a}" class="${tel.vAlign === a ? 'on' : ''}" title="${a}">${VA[a]}</button>`).join('')}</div></label>
     <label class="chk"><input type="checkbox" id="telWrap" ${tel.wrap ? 'checked' : ''}> 枠の幅で折り返す</label>
 
     <div class="z-row">
@@ -2215,6 +2217,7 @@ function renderTelopForm(force = false) {
     commit('背景の伸縮を切り替え'); tel.bgFit = e.target.checked ? 'stretch' : 'contain'; live();
   });
   bind('telRowGap', (v) => { tel.rowGap = +v; });
+  bind('telLetterSp', (v) => { row.letterSpacing = +v || 0; });
   bind('telIcon', (v) => { tel.icon = { ...tel.icon, assetId: v || null }; renderTelopForm(true); });
   bind('telIconSize', (v) => { tel.icon.size = Math.max(8, +v); });
   bind('telIconGap', (v) => { tel.icon.gap = Math.max(0, +v); });
