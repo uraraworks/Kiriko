@@ -878,6 +878,44 @@ overlay.addEventListener('pointerup', () => {
   renderOverlay();
 });
 
+// --- 右クリックメニュー ---
+// canvas の上ではブラウザ標準のメニュー（「全て選択」など）が出て邪魔なので、
+// 抑止して必要な項目だけ自前で出す。
+const ctxMenu = $('ctxMenu');
+
+function hideContextMenu() { ctxMenu.classList.add('hidden'); }
+
+function showContextMenu(clientX, clientY, items) {
+  ctxMenu.innerHTML = '';
+  for (const it of items) {
+    const b = document.createElement('button');
+    b.innerHTML = `<span>${esc(it.label)}</span>${it.key ? `<span class="k">${esc(it.key)}</span>` : ''}`;
+    b.onclick = () => { hideContextMenu(); it.run(); };
+    ctxMenu.appendChild(b);
+  }
+  ctxMenu.classList.remove('hidden');
+  // 画面からはみ出さない位置に
+  const r = ctxMenu.getBoundingClientRect();
+  ctxMenu.style.left = `${Math.min(clientX, innerWidth - r.width - 6)}px`;
+  ctxMenu.style.top = `${Math.min(clientY, innerHeight - r.height - 6)}px`;
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (!ctxMenu.contains(e.target)) hideContextMenu();
+}, true);
+window.addEventListener('blur', hideContextMenu);
+
+overlay.addEventListener('contextmenu', (e) => {
+  e.preventDefault(); // ブラウザ標準のメニューは出さない
+  const hit = pickBox(stagePoint(e), currentTimelineTime());
+  if (!hit) { hideContextMenu(); return; }
+  select(hit.kind, hit.item.id);
+  renderAll(); renderTelopForm(true); renderFxForm(true);
+  showContextMenu(e.clientX, e.clientY, [
+    { label: hit.kind === 'image' ? '画像を削除' : 'テロップを削除', key: 'Delete', run: () => deleteSelected() },
+  ]);
+});
+
 /**
  * ダブルクリック。
  *  - つまみの上 … 中身にぴったり合うように枠を詰める
@@ -2293,7 +2331,11 @@ document.addEventListener('keydown', (e) => {
       if (e.shiftKey && S.mode === 'program' && S.zoneOut !== null) { seekProgram(S.zoneOut, true); renderAll(); }
       else markOut();
       break;
-    case 'escape': if (!$('telopDialog').classList.contains('hidden')) closeTelopDialog(); else clearZone(); break;
+    case 'escape':
+      if (!ctxMenu.classList.contains('hidden')) hideContextMenu();
+      else if (!$('telopDialog').classList.contains('hidden')) closeTelopDialog();
+      else clearZone();
+      break;
     case 'enter': addClip(); break;
     case 't': addTelop(); break;
     case 'b': addBlur(); break;
