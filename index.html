@@ -42,6 +42,7 @@
     <div class="spacer"></div>
     <div class="tb-group">
       <span class="totalinfo">尺 <b id="totalDur">00:00.00</b> / <b id="clipCount">0</b> クリップ</span>
+      <button id="btnHelp" class="tb" title="ショートカット一覧　［ ? ］">?</button>
       <button id="btnExport" class="tb export" title="mp4 で書き出す">▶ 書き出し</button>
     </div>
   </header>
@@ -111,75 +112,68 @@
 
     <!-- インスペクタ -->
     <aside class="panel inspector">
-      <div class="panel-head">出力設定</div>
-      <div class="form">
-        <label>解像度
-          <select id="optRes">
-            <option value="1920x1080" selected>1920 × 1080 (FHD)</option>
-            <option value="1280x720">1280 × 720 (HD)</option>
-          </select>
-        </label>
-        <label>フレームレート
-          <select id="optFps">
-            <option value="30" selected>30 fps (CFR)</option>
-            <option value="60">60 fps (CFR)</option>
-            <option value="24">24 fps (CFR)</option>
-          </select>
-        </label>
-        <label>映像ビットレート
-          <select id="optVbr">
-            <option value="8000000">8 Mbps</option>
-            <option value="12000000" selected>12 Mbps</option>
-            <option value="16000000">16 Mbps</option>
-            <option value="20000000">20 Mbps</option>
-          </select>
-        </label>
-        <label>音声ビットレート
-          <select id="optAbr">
-            <option value="128000">128 kbps</option>
-            <option value="192000" selected>192 kbps</option>
-            <option value="256000">256 kbps</option>
-          </select>
-        </label>
+      <div class="panel-head tabs">
+        <button class="tab insptab active" data-insp="props">プロパティ</button>
+        <button class="tab insptab" data-insp="output">出力</button>
+        <button class="tab insptab" data-insp="notes">メモ</button>
       </div>
 
-      <div class="panel-head sub" id="selHead">選択クリップ</div>
-      <div class="form" id="clipForm">
-        <div class="empty">未選択</div>
-      </div>
-      <div class="form hidden" id="fxForm"></div>
-
-      <div class="panel-head sub">音量（全体）</div>
-      <div class="form">
-        <label>効果音 <span id="mixSeLbl">100%</span>
-          <input type="range" id="mixSe" min="0" max="150" value="100"></label>
-        <label>BGM <span id="mixBgmLbl">100%</span>
-          <input type="range" id="mixBgm" min="0" max="150" value="100"></label>
+      <!-- プロパティ -->
+      <div id="inspProps" class="insp-pane">
+        <div class="panel-head sub" id="selHead">選択クリップ</div>
+        <div class="form" id="clipForm">
+          <div class="empty">未選択</div>
+        </div>
+        <div class="form hidden" id="fxForm"></div>
       </div>
 
-      <div class="panel-head sub">作業メモ</div>
-      <div class="form">
-        <textarea id="notes" rows="6" placeholder="進捗メモ・やり残し・気付いたことなど。プロジェクトに一緒に保存されます（動画には出ません）"></textarea>
+      <!-- 出力 -->
+      <div id="inspOutput" class="insp-pane hidden">
+        <div class="panel-head sub">書き出し設定</div>
+        <div class="form">
+          <label>解像度
+            <select id="optRes">
+              <option value="1920x1080" selected>1920 × 1080 (FHD)</option>
+              <option value="1280x720">1280 × 720 (HD)</option>
+            </select>
+          </label>
+          <label>フレームレート
+            <select id="optFps">
+              <option value="30" selected>30 fps (CFR)</option>
+              <option value="60">60 fps (CFR)</option>
+              <option value="24">24 fps (CFR)</option>
+            </select>
+          </label>
+          <label>映像ビットレート
+            <select id="optVbr">
+              <option value="8000000">8 Mbps</option>
+              <option value="12000000" selected>12 Mbps</option>
+              <option value="16000000">16 Mbps</option>
+              <option value="20000000">20 Mbps</option>
+            </select>
+          </label>
+          <label>音声ビットレート
+            <select id="optAbr">
+              <option value="128000">128 kbps</option>
+              <option value="192000" selected>192 kbps</option>
+              <option value="256000">256 kbps</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="panel-head sub">音量（全体）</div>
+        <div class="form">
+          <label>効果音 <span id="mixSeLbl">100%</span>
+            <input type="range" id="mixSe" min="0" max="150" value="100"></label>
+          <label>BGM <span id="mixBgmLbl">100%</span>
+            <input type="range" id="mixBgm" min="0" max="150" value="100"></label>
+        </div>
       </div>
 
-      <div class="panel-head sub">ショートカット</div>
-      <ul class="keys">
-        <li><kbd>Space</kbd> 再生／停止</li>
-        <li><kbd>I</kbd> / <kbd>O</kbd> 範囲の開始／終了</li>
-        <li><kbd>Delete</kbd> 範囲を切り取って詰める</li>
-        <li><kbd>Esc</kbd> 範囲選択を解除</li>
-        <li><kbd>Shift</kbd>+<kbd>I</kbd>/<kbd>O</kbd> 範囲の端へ移動</li>
-        <li><kbd>Enter</kbd> クリップ追加（ソース）</li>
-        <li><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> 逆／停止／早送り</li>
-        <li><kbd>←</kbd><kbd>→</kbd> 1フレーム</li>
-        <li><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 1秒</li>
-        <li><kbd>T</kbd> テロップ追加／<kbd>B</kbd> ぼかし追加</li>
-        <li><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> 選択中の枠を 1px 移動<br><span style="opacity:.7">（プレビューをクリックした後。<kbd>Shift</kbd> で 10px）</span></li>
-        <li><kbd>Delete</kbd> 選択中の要素を削除</li>
-        <li><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd> 元に戻す</li>
-        <li><kbd>⇧⌘Z</kbd>/<kbd>Ctrl</kbd>+<kbd>Y</kbd> やり直す</li>
-        <li><kbd>Ctrl</kbd>+<kbd>S</kbd> プロジェクト保存</li>
-      </ul>
+      <!-- メモ -->
+      <div id="inspNotes" class="insp-pane hidden notes-pane">
+        <textarea id="notes" placeholder="進捗メモ・やり残し・気付いたことなど。&#10;プロジェクトに一緒に保存されます（動画には出ません）"></textarea>
+      </div>
     </aside>
   </main>
 
@@ -222,6 +216,45 @@
     <div class="progress"><div id="progBar"></div></div>
     <div id="status" class="status">準備完了</div>
   </footer>
+
+  <!-- ショートカット一覧 -->
+  <div id="helpDialog" class="floating hidden">
+    <div class="fl-head" id="helpDialogHead">
+      <span>ショートカット</span>
+      <button class="fl-close" id="helpDialogClose" title="閉じる　［ Esc ］">×</button>
+    </div>
+    <div class="fl-body">
+      <table class="keys-table">
+        <tr><th colspan="2">再生・移動</th></tr>
+        <tr><td><kbd>Space</kbd></td><td>再生／停止</td></tr>
+        <tr><td><kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>逆送り／停止／早送り</td></tr>
+        <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>1 フレーム（<kbd>Shift</kbd> で 1 秒）</td></tr>
+        <tr><td><kbd>Home</kbd> <kbd>End</kbd></td><td>先頭／末尾</td></tr>
+
+        <tr><th colspan="2">カット</th></tr>
+        <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>範囲の開始／終了</td></tr>
+        <tr><td><kbd>Delete</kbd></td><td>範囲を切り取って詰める</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>範囲選択を解除</td></tr>
+        <tr><td><kbd>⇧</kbd>+<kbd>I</kbd>/<kbd>O</kbd></td><td>範囲の端へ移動</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>クリップ追加（ソースモニター）</td></tr>
+
+        <tr><th colspan="2">重ね物</th></tr>
+        <tr><td><kbd>T</kbd> / <kbd>B</kbd></td><td>テロップ／ぼかしを追加</td></tr>
+        <tr><td><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></td><td>選択中の枠を 1px 移動<br><span class="dim">プレビューをクリックした後。<kbd>Shift</kbd> で 10px</span></td></tr>
+        <tr><td>ダブルクリック</td><td>つまみ＝枠を中身に合わせる<br>画像＝等倍に戻す</td></tr>
+        <tr><td>右クリック</td><td>削除メニュー</td></tr>
+
+        <tr><th colspan="2">タイムライン</th></tr>
+        <tr><td>ホイール</td><td>横スクロール</td></tr>
+        <tr><td><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+ホイール</td><td>拡大縮小</td></tr>
+
+        <tr><th colspan="2">ファイル</th></tr>
+        <tr><td><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>元に戻す</td></tr>
+        <tr><td><kbd>⇧⌘Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>やり直す</td></tr>
+        <tr><td><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>プロジェクト保存</td></tr>
+      </table>
+    </div>
+  </div>
 
   <!-- 右クリックメニュー -->
   <div id="ctxMenu" class="ctx-menu hidden"></div>

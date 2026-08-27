@@ -40,6 +40,7 @@ const S = {
   imageLib: new ImageLibrary(),
   focusArea: 'timeline',   // 'preview' ならカーソルキーで枠を動かす
   binTab: 'media',
+  inspTab: 'props',
   library: null,           // AudioLibrary（初回の音源読み込み時に作る）
   audioPreview: null,
 };
@@ -64,6 +65,8 @@ const curSource = () => S.sources.get(S.currentSourceId) || null;
 
 /** クリップとテロップの選択は排他 */
 function select(type, id) {
+  // 何かを選んだらプロパティが見えている状態にする
+  if (id && type !== 'telop') S.inspTab = 'props';
   S.selectedClipId = type === 'clip' ? id : null;
   S.selectedTelopId = type === 'telop' ? id : null;
   S.selectedBlurId = type === 'blur' ? id : null;
@@ -878,6 +881,37 @@ overlay.addEventListener('pointerup', () => {
   renderOverlay();
 });
 
+// --- ショートカット一覧（フローティング）---
+const helpDlg = $('helpDialog');
+function toggleHelp(show) {
+  const on = show ?? helpDlg.classList.contains('hidden');
+  helpDlg.classList.toggle('hidden', !on);
+  if (on && !helpDlg.style.left) {
+    // 初期位置は画面中央寄り（インスペクタを覆わない）。ヘッダをつかんで動かせる
+    helpDlg.style.left = `${Math.max(8, Math.round(innerWidth / 2 - 180))}px`;
+    helpDlg.style.top = '58px';
+  }
+}
+$('btnHelp').onclick = () => toggleHelp();
+$('helpDialogClose').onclick = () => toggleHelp(false);
+(() => {
+  const head = $('helpDialogHead');
+  let d = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (e.target.id === 'helpDialogClose') return;
+    const r = helpDlg.getBoundingClientRect();
+    d = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    head.classList.add('dragging');
+    try { head.setPointerCapture(e.pointerId); } catch {}
+  });
+  head.addEventListener('pointermove', (e) => {
+    if (!d) return;
+    helpDlg.style.left = `${Math.max(0, Math.min(innerWidth - 60, e.clientX - d.dx))}px`;
+    helpDlg.style.top = `${Math.max(0, Math.min(innerHeight - 40, e.clientY - d.dy))}px`;
+  });
+  head.addEventListener('pointerup', () => { d = null; head.classList.remove('dragging'); });
+})();
+
 // --- 右クリックメニュー ---
 // canvas の上ではブラウザ標準のメニュー（「全て選択」など）が出て邪魔なので、
 // 抑止して必要な項目だけ自前で出す。
@@ -971,6 +1005,14 @@ function nudgeBox(dx, dy) {
 }
 
 // ---------------------------------------------------------------- 描画：ビン / インスペクタ
+
+/** インスペクタのタブ（プロパティ / 出力 / メモ） */
+function renderInspTabs() {
+  for (const t of document.querySelectorAll('.insptab')) t.classList.toggle('active', t.dataset.insp === S.inspTab);
+  $('inspProps').classList.toggle('hidden', S.inspTab !== 'props');
+  $('inspOutput').classList.toggle('hidden', S.inspTab !== 'output');
+  $('inspNotes').classList.toggle('hidden', S.inspTab !== 'notes');
+}
 
 function renderBin() {
   for (const t of document.querySelectorAll('.bintab')) t.classList.toggle('active', t.dataset.bin === S.binTab);
@@ -2199,6 +2241,9 @@ $('imageInput').onchange = (e) => { addImageAssets([...e.target.files]); e.targe
 for (const t of document.querySelectorAll('.bintab')) {
   t.onclick = () => { S.binTab = t.dataset.bin; renderBin(); };
 }
+for (const t of document.querySelectorAll('.insptab')) {
+  t.onclick = () => { S.inspTab = t.dataset.insp; renderInspTabs(); };
+}
 $('mixSe').oninput = (e) => {
   commit('効果音の全体音量', 'mixSe');
   S.project.mix.se = +e.target.value / 100; $('mixSeLbl').textContent = `${e.target.value}%`;
@@ -2331,8 +2376,10 @@ document.addEventListener('keydown', (e) => {
       if (e.shiftKey && S.mode === 'program' && S.zoneOut !== null) { seekProgram(S.zoneOut, true); renderAll(); }
       else markOut();
       break;
+    case '?': case '/': toggleHelp(); break;
     case 'escape':
       if (!ctxMenu.classList.contains('hidden')) hideContextMenu();
+      else if (!helpDlg.classList.contains('hidden')) toggleHelp(false);
       else if (!$('telopDialog').classList.contains('hidden')) closeTelopDialog();
       else clearZone();
       break;
@@ -2373,6 +2420,7 @@ new ResizeObserver(() => { renderTimeline(); renderScrub(); renderOverlay(); }).
 
 function renderAll() {
   renderBin();
+  renderInspTabs();
   renderInspector();
   renderTelopForm();
   renderFxForm();
