@@ -9,13 +9,17 @@ export function createProject() {
   return {
     version: PROJECT_VERSION,
     title: '無題プロジェクト',
+    notes: '',   // 作業メモ（進捗管理用。書き出しには影響しない）
     output: { width: 1920, height: 1080, fps: 30, videoBitrate: 12_000_000, audioBitrate: 192_000 },
     sources: [],   // { id, name, size, duration }
     clips: [],     // { id, sourceId, in, out, volume }
-    telops: [],    // { id, text, start, end, x, y, ...style } 時刻は出力タイムライン秒
+    telops: [],     // { id, text, start, end, box:{x,y,w,h}, hAlign, vAlign, ...style }
+    imageAssets: [],// { id, name, width, height }
+    images: [],     // { id, assetId, start, end, box, opacity, fit }
     telopPresets: null, // null なら telop.js の既定プリセットを使う
     audioAssets: [],// { id, name, duration } SE / BGM 素材
-    audioClips: [], // { id, assetId, kind, start, offset, duration, volume, fadeIn, fadeOut }
+    audioClips: [], // { id, assetId, kind, start, offset, duration, volume, fadeIn, fadeOut, loop }
+    mix: { se: 1, bgm: 1 }, // 効果音 / BGM のマスター音量
     blurs: [],      // { id, start, end, strength } 区間ぼかし（プライバシー保護）
   };
 }

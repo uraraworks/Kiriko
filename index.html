@@ -47,14 +47,30 @@
   </header>
 
   <!-- ============ ワークスペース ============ -->
-  <main class="workspace">
+  <main class="workspace" id="workspace">
 
     <!-- メディアビン -->
     <aside class="panel bin">
-      <div class="panel-head">メディアビン</div>
-      <div id="binList" class="bin-list">
-        <div class="empty">「素材を開く」で mp4 を読み込みます</div>
+      <div class="panel-head tabs">
+        <button class="tab bintab active" data-bin="media">メディア</button>
+        <button class="tab bintab" data-bin="fx">エフェクト</button>
       </div>
+
+      <div id="binMedia" class="bin-pane">
+        <div class="bin-actions">
+          <button class="mini" id="binAddVideo" title="動画素材を読み込む">＋ 動画</button>
+          <button class="mini" id="binAddAudio" title="効果音 / BGM を読み込む">＋ 音源</button>
+          <button class="mini" id="binAddImage" title="画像を読み込む">＋ 画像</button>
+        </div>
+        <div id="binList" class="bin-list">
+          <div class="empty">mp4 / mp3 / png をここにドロップしても読み込めます</div>
+        </div>
+      </div>
+
+      <div id="binFx" class="bin-pane hidden">
+        <div id="fxList" class="bin-list"></div>
+      </div>
+
       <div class="panel-head sub">素材情報</div>
       <div id="srcInfo" class="srcinfo">—</div>
     </aside>
@@ -131,8 +147,20 @@
       <div class="form" id="clipForm">
         <div class="empty">未選択</div>
       </div>
-      <div class="form hidden" id="telopForm"></div>
       <div class="form hidden" id="fxForm"></div>
+
+      <div class="panel-head sub">音量（全体）</div>
+      <div class="form">
+        <label>効果音 <span id="mixSeLbl">100%</span>
+          <input type="range" id="mixSe" min="0" max="150" value="100"></label>
+        <label>BGM <span id="mixBgmLbl">100%</span>
+          <input type="range" id="mixBgm" min="0" max="150" value="100"></label>
+      </div>
+
+      <div class="panel-head sub">作業メモ</div>
+      <div class="form">
+        <textarea id="notes" rows="6" placeholder="進捗メモ・やり残し・気付いたことなど。プロジェクトに一緒に保存されます（動画には出ません）"></textarea>
+      </div>
 
       <div class="panel-head sub">ショートカット</div>
       <ul class="keys">
@@ -146,6 +174,7 @@
         <li><kbd>←</kbd><kbd>→</kbd> 1フレーム</li>
         <li><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 1秒</li>
         <li><kbd>T</kbd> テロップ追加／<kbd>B</kbd> ぼかし追加</li>
+        <li><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> 選択中の枠を 1px 移動<br><span style="opacity:.7">（プレビューをクリックした後。<kbd>Shift</kbd> で 10px）</span></li>
         <li><kbd>Delete</kbd> 選択中の要素を削除</li>
         <li><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd> 元に戻す</li>
         <li><kbd>⇧⌘Z</kbd>/<kbd>Ctrl</kbd>+<kbd>Y</kbd> やり直す</li>
@@ -176,6 +205,7 @@
       <div class="tl-heads">
         <div class="tl-head ruler-head"></div>
         <div class="tl-head fx">FX</div>
+        <div class="tl-head img">IM</div>
         <div class="tl-head telop">T1</div>
         <div class="tl-head">V1</div>
         <div class="tl-head">A1</div>
@@ -193,6 +223,15 @@
     <div id="status" class="status">準備完了</div>
   </footer>
 
+  <!-- テロップ編集（フローティング） -->
+  <div id="telopDialog" class="floating hidden">
+    <div class="fl-head" id="telopDialogHead">
+      <span>テロップ</span>
+      <button class="fl-close" id="telopDialogClose" title="閉じる　［ Esc ］">×</button>
+    </div>
+    <div class="fl-body form" id="telopForm"></div>
+  </div>
+
   <!-- 書き出しオーバーレイ -->
   <div id="overlay" class="overlay hidden">
     <div class="overlay-box">
@@ -209,6 +248,7 @@
 <input type="file" id="projInput" accept="application/json,.json" hidden>
 <input type="file" id="fontInput" accept=".ttf,.otf,.woff,.woff2,.ttc" multiple hidden>
 <input type="file" id="audioInput" accept="audio/*,.mp3,.wav,.m4a,.ogg" multiple hidden>
+<input type="file" id="imageInput" accept="image/*,.png,.jpg,.jpeg,.webp" multiple hidden>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

@@ -7,6 +7,8 @@ import * as T from './telop.js';
 import { composeFrame, activeBlur } from './compose.js';
 import { AudioLibrary, AudioPreview, mixInto } from './audio.js';
 import { History } from './history.js';
+import * as B from './boxes.js';
+import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageClip, drawImagesAt } from './images.js';
 
 // ---------------------------------------------------------------- 状態
 
@@ -34,6 +36,10 @@ const S = {
   selectedAudioId: null,
   zoneIn: null,            // タイムラインの範囲選択（Kdenlive のゾーン相当）
   zoneOut: null,
+  selectedImageId: null,
+  imageLib: new ImageLibrary(),
+  focusArea: 'timeline',   // 'preview' ならカーソルキーで枠を動かす
+  binTab: 'media',
   library: null,           // AudioLibrary（初回の音源読み込み時に作る）
   audioPreview: null,
 };
@@ -62,10 +68,12 @@ function select(type, id) {
   S.selectedTelopId = type === 'telop' ? id : null;
   S.selectedBlurId = type === 'blur' ? id : null;
   S.selectedAudioId = type === 'audio' ? id : null;
+  S.selectedImageId = type === 'image' ? id : null;
 }
 const selectedTelop = () => S.project.telops.find((t) => t.id === S.selectedTelopId) || null;
 const selectedBlur = () => S.project.blurs.find((b) => b.id === S.selectedBlurId) || null;
 const selectedAudio = () => S.project.audioClips.find((a) => a.id === S.selectedAudioId) || null;
+const selectedImage = () => S.project.images.find((i) => i.id === S.selectedImageId) || null;
 const presets = () => S.project.telopPresets ?? T.DEFAULT_PRESETS;
 
 // ---------------------------------------------------------------- 履歴（アンドゥ / リドゥ）
@@ -87,22 +95,43 @@ const history = new History(
         }
       }
     }
+    for (const [id, bmp] of S.imageLib.bitmaps) {
+      if (!S.project.imageAssets.some((x) => x.id === id)) {
+        S.project.imageAssets.push({ id, name: id, width: bmp.width, height: bmp.height });
+      }
+    }
     // 消えた要素を選択したままにしない
     if (!S.project.clips.some((c) => c.id === S.selectedClipId)) S.selectedClipId = null;
     if (!S.project.telops.some((t) => t.id === S.selectedTelopId)) S.selectedTelopId = null;
     if (!S.project.blurs.some((b) => b.id === S.selectedBlurId)) S.selectedBlurId = null;
     if (!S.project.audioClips.some((a) => a.id === S.selectedAudioId)) S.selectedAudioId = null;
+    if (!S.project.images.some((i) => i.id === S.selectedImageId)) S.selectedImageId = null;
+    normalizeProject();
     S.programTime = Math.min(S.programTime, P.totalDuration(S.project));
     S.programIndex = -1;
     seekProgram(S.programTime, true);
     renderAll();
     renderTelopForm(true);
     renderFxForm(true);
+    syncProjectUI();
   },
 );
 
 /** 変更を加える直前に呼ぶ */
 const commit = (label, key = null) => history.commit(label, key);
+
+/** プロジェクト側の値をフォーム類へ反映する（読み込み・アンドゥ後） */
+function syncProjectUI() {
+  const p = S.project;
+  const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v; };
+  set('notes', p.notes ?? '');
+  set('mixSe', Math.round((p.mix?.se ?? 1) * 100));
+  set('mixBgm', Math.round((p.mix?.bgm ?? 1) * 100));
+  $('mixSeLbl').textContent = `${Math.round((p.mix?.se ?? 1) * 100)}%`;
+  $('mixBgmLbl').textContent = `${Math.round((p.mix?.bgm ?? 1) * 100)}%`;
+  set('optRes', `${p.output.width}x${p.output.height}`);
+  set('optFps', String(p.output.fps));
+}
 
 function renderHistoryUI() {
   $('btnUndo').disabled = !history.canUndo;
@@ -119,6 +148,18 @@ function doUndo() {
 function doRedo() {
   const l = history.redo();
   status(l ? `やり直しました：${l}` : 'これ以上進めません');
+}
+
+/** 旧いプロジェクトを現在の形に揃える */
+function normalizeProject() {
+  const p = S.project;
+  p.telops = (p.telops ?? []).map(T.migrateTelop);
+  p.images = p.images ?? [];
+  p.imageAssets = p.imageAssets ?? [];
+  p.blurs = p.blurs ?? [];
+  p.audioClips = p.audioClips ?? [];
+  p.audioAssets = p.audioAssets ?? [];
+  p.mix = { se: 1, bgm: 1, ...(p.mix ?? {}) };
 }
 
 function status(msg, isErr = false) {
@@ -140,6 +181,7 @@ async function openFiles() {
           accept: {
             'video/*': ['.mp4', '.mov', '.m4v'],
             'audio/*': ['.mp3', '.wav', '.m4a', '.ogg'],
+            'image/*': ['.png', '.jpg', '.jpeg', '.webp'],
             'application/xml': ['.kdenlive'],
           },
         }],
@@ -154,12 +196,15 @@ async function openFiles() {
 }
 
 const AUDIO_RE = /\.(mp3|wav|m4a|aac|ogg|flac)$/i;
+const IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp)$/i;
 
 async function addFiles(files) {
   const audio = files.filter((f) => AUDIO_RE.test(f.name));
   if (audio.length) await addAudioAssets(audio);
+  const imgs = files.filter((f) => IMAGE_RE.test(f.name));
+  if (imgs.length) await addImageAssets(imgs);
   for (const file of files) {
-    if (AUDIO_RE.test(file.name)) continue;
+    if (AUDIO_RE.test(file.name) || IMAGE_RE.test(file.name)) continue;
     if (/\.kdenlive$/i.test(file.name)) { await importKdenlive(file); continue; }
     try {
       status(`${file.name} を解析中…`);
@@ -238,7 +283,7 @@ function setVideoSource(id) {
 
 function setMode(mode) {
   S.mode = mode;
-  for (const t of document.querySelectorAll('.tab')) t.classList.toggle('active', t.dataset.mode === mode);
+  for (const t of document.querySelectorAll('.tab[data-mode]')) t.classList.toggle('active', t.dataset.mode === mode);
   if (mode === 'program') {
     seekProgram(S.programTime, true);
   } else {
@@ -343,13 +388,14 @@ function addClip() {
 
 function zoneIn() {
   S.zoneIn = S.programTime;
-  if (S.zoneOut !== null && S.zoneOut <= S.zoneIn) S.zoneOut = null;
+  // 終了の初期値は開始地点。O を打つまで範囲は 0 のまま（誤って末尾まで消さないように）
+  if (S.zoneOut === null || S.zoneOut < S.zoneIn) S.zoneOut = S.zoneIn;
   renderZoneUI();
 }
 
 function zoneOut() {
   S.zoneOut = S.programTime;
-  if (S.zoneIn !== null && S.zoneIn >= S.zoneOut) S.zoneIn = null;
+  if (S.zoneIn === null || S.zoneIn > S.zoneOut) S.zoneIn = S.zoneOut;
   renderZoneUI();
 }
 
@@ -360,18 +406,17 @@ function clearZone() {
 
 /** 範囲が確定しているか（片方だけならタイムラインの端で補う） */
 function zoneRange() {
-  const total = P.totalDuration(S.project);
-  if (S.zoneIn === null && S.zoneOut === null) return null;
-  const a = S.zoneIn ?? 0;
-  const b = S.zoneOut ?? total;
-  return b - a > 0.001 ? [a, b] : null;
+  if (S.zoneIn === null || S.zoneOut === null) return null;
+  return S.zoneOut - S.zoneIn > 0.001 ? [S.zoneIn, S.zoneOut] : null;
 }
 
 function renderZoneInfo() {
   const r = zoneRange();
   $('zoneInfo').textContent = r
     ? `範囲 ${tc(r[0], false)} 〜 ${tc(r[1], false)}（${tc(r[1] - r[0], false)}）`
-    : '範囲 未選択';
+    : S.zoneIn !== null
+      ? `範囲 ${tc(S.zoneIn, false)} 〜 —（O で終了を打つ）`
+      : '範囲 未選択';
   $('btnExtract').disabled = !r;
   $('btnZoneClear').disabled = !r;
 }
@@ -422,6 +467,9 @@ function rippleAfter(a, b) {
   S.project.blurs = S.project.blurs
     .map((x) => ({ ...x, start: shift(x.start), end: shift(x.end) }))
     .filter((x) => alive(x.start, x.end));
+  S.project.images = S.project.images
+    .map((x) => ({ ...x, start: shift(x.start), end: shift(x.end) }))
+    .filter((x) => alive(x.start, x.end));
   S.project.audioClips = S.project.audioClips
     .map((x) => {
       const s0 = shift(x.start), e0 = shift(x.start + x.duration);
@@ -453,6 +501,11 @@ function deleteSelected() {
     commit('ぼかしを削除');
     S.project.blurs = S.project.blurs.filter((b) => b.id !== S.selectedBlurId);
     S.selectedBlurId = null; renderAll(); renderFxForm(true); return;
+  }
+  if (S.selectedImageId) {
+    commit('画像を削除');
+    S.project.images = S.project.images.filter((i) => i.id !== S.selectedImageId);
+    S.selectedImageId = null; renderAll(); renderFxForm(true); return;
   }
   if (S.selectedAudioId) {
     commit('音源を削除');
@@ -572,12 +625,60 @@ function placeAudio(assetId) {
   status(`${asset.name} を ${tc(start, false)} に配置しました`);
 }
 
+// ---------------------------------------------------------------- 画像
+
+async function addImageAssets(files) {
+  for (const f of files) {
+    try {
+      const id = P.newId('img');
+      const meta = await S.imageLib.add(f, id);
+      S.project.imageAssets.push(meta);
+      status(`${f.name} を読み込みました（${meta.width}×${meta.height}）`);
+    } catch {
+      status(`${f.name}: 画像を読み込めませんでした`, true);
+    }
+  }
+  renderAll();
+}
+
+/** 画像を再生位置に配置する */
+function placeImage(assetId, placement = null) {
+  const asset = S.project.imageAssets.find((a) => a.id === assetId);
+  if (!asset) return;
+  const total = P.totalDuration(S.project);
+  if (total <= 0) return status('先にクリップを作ってください', true);
+  const W = S.project.output.width, H = S.project.output.height;
+  const place = placement ?? defaultPlacement(asset, W, H);
+  const start = Math.min(currentTimelineTime(), Math.max(0, total - 0.5));
+  commit(`${asset.name} を配置`);
+  const im = createImageClip(assetId, start, Math.min(total, start + 4), placementBox(place, asset, W, H));
+  S.project.images.push(im);
+  select('image', im.id);
+  setMode('program');
+  seekProgram(start, true);
+  S.focusArea = 'preview';
+  renderAll(); renderFxForm(true);
+  status(`${asset.name} を ${PLACEMENTS.find((x) => x.id === place)?.name ?? place} に配置しました`);
+}
+
+// ---------------------------------------------------------------- エフェクト一覧
+// 今はぼかしだけ。ここに足せば一覧に並ぶ。
+
+const EFFECTS = [
+  {
+    id: 'blur',
+    name: 'ぼかし',
+    desc: '区間を全画面ぼかし。顔や表札などのプライバシー保護に。',
+    add: () => addBlur(),
+  },
+];
+
 /** SE/BGM のミックス関数（書き出しとプレビューで共通の定義を使う） */
 function audioMixer() {
   const clips = S.project.audioClips;
   if (!clips.length || !S.library) return null;
-  const lib = S.library;
-  return (planar, n, absStart, ch, rate) => mixInto(planar, n, absStart, ch, rate, clips, lib);
+  const lib = S.library, mix = S.project.mix;
+  return (planar, n, absStart, ch, rate) => mixInto(planar, n, absStart, ch, rate, clips, lib, mix);
 }
 
 // --- ステージ（<video> ＋ オーバーレイ canvas）---
@@ -595,10 +696,23 @@ function fitStage() {
   if (overlay.width !== ow) { overlay.width = ow; overlay.height = oh; }
 }
 
+/** 出力ピクセル ÷ 表示ピクセル。枠線やハンドルの見た目の太さを一定に保つのに使う */
+const stageScale = () => (S.project.output.width || 1920) / Math.max(1, stage.clientWidth);
+
+/** いま編集できる枠（テロップ or 画像）。プレビュー上で選択されているもの */
+function activeBox() {
+  const tel = selectedTelop();
+  if (tel) return { kind: 'telop', item: tel };
+  const im = selectedImage();
+  if (im) return { kind: 'image', item: im };
+  return null;
+}
+
 function renderOverlay() {
   fitStage();
   const ctx = overlay.getContext('2d');
-  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  const W = overlay.width, H = overlay.height;
+  ctx.clearRect(0, 0, W, H);
   const t = currentTimelineTime();
 
   // ぼかしは <video> 側に CSS filter で掛ける（表示サイズに合わせて半径を換算）
@@ -607,21 +721,21 @@ function renderOverlay() {
   video.style.filter = px > 0 ? `blur(${(px * disp).toFixed(2)}px)` : '';
   video.style.transform = px > 0 ? `scale(${(1 + (px * 4) / Math.min(S.project.output.width, S.project.output.height)).toFixed(4)})` : '';
 
+  const sel = activeBox();
   if (S.mode === 'program') {
+    drawImagesAt(ctx, S.project.images, t, S.imageLib);
     T.drawTelopsAt(ctx, S.project.telops, t);
-  } else {
-    // ソースモニターでは、位置調整しやすいよう選択中のテロップだけ出す
-    const sel = selectedTelop();
-    if (sel) T.drawTelop(ctx, sel);
+  } else if (sel) {
+    // ソースモニターでは、位置調整しやすいよう選択中のものだけ出す
+    if (sel.kind === 'image') drawImagesAt(ctx, [sel.item], sel.item.start, S.imageLib);
+    else T.drawTelop(ctx, sel.item);
   }
-  // 選択中は枠を出す
-  const sel = selectedTelop();
-  if (sel && (S.mode !== 'program' || (t >= sel.start && t < sel.end))) {
-    const b = T.telopBounds(ctx, sel);
-    ctx.save();
-    ctx.strokeStyle = '#4c9affcc'; ctx.lineWidth = 3; ctx.setLineDash([10, 7]);
-    ctx.strokeRect(b.x, b.y, b.w, b.h);
-    ctx.restore();
+
+  // 選択枠とハンドル
+  if (sel && (S.mode !== 'program' || (t >= sel.item.start && t < sel.item.end))) {
+    const sc = stageScale();
+    B.drawBoxChrome(ctx, sel.item.box, sc, { color: sel.kind === 'image' ? '#e0ab74' : '#4c9aff' });
+    if (boxDrag?.guides?.length) B.drawGuides(ctx, boxDrag.guides, W, H, sc);
   }
 }
 
@@ -634,80 +748,157 @@ function stagePoint(e) {
   };
 }
 
-let telopDrag = null;
-overlay.addEventListener('pointerdown', (e) => {
+/** クリック位置にある枠を拾う（テロップ優先、後ろに描いたものから）*/
+function pickBox(p, t) {
   const ctx = overlay.getContext('2d');
-  const p = stagePoint(e);
-  const t = currentTimelineTime();
-  const pool = S.mode === 'program' ? S.project.telops : (selectedTelop() ? [selectedTelop()] : []);
-  const hit = S.mode === 'program'
-    ? T.hitTelop(ctx, pool, t, p.x, p.y)
-    : (pool[0] && insideBounds(ctx, pool[0], p) ? pool[0] : null);
-  if (!hit) return;
-  try { overlay.setPointerCapture(e.pointerId); } catch {}
-  const rebuild = hit.id !== S.selectedTelopId;
-  select('telop', hit.id);
-  commit('テロップの位置を変更', `telopPos:${hit.id}`);
-  telopDrag = { tel: hit, dx: p.x - hit.x, dy: p.y - hit.y };
-  overlay.classList.add('grabbing');
-  renderAll();
-  if (rebuild) renderTelopForm(true);
-});
-
-function insideBounds(ctx, tel, p) {
-  const b = T.telopBounds(ctx, tel);
-  return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
+  const tels = S.mode === 'program'
+    ? S.project.telops.filter((x) => t >= x.start && t < x.end)
+    : (selectedTelop() ? [selectedTelop()] : []);
+  for (let i = tels.length - 1; i >= 0; i--) {
+    const tb = T.textBounds(ctx, tels[i]);
+    if (B.insideBox(tels[i].box, p.x, p.y) || B.insideBox(tb, p.x, p.y)) {
+      return { kind: 'telop', item: tels[i] };
+    }
+  }
+  const imgs = S.mode === 'program'
+    ? S.project.images.filter((x) => t >= x.start && t < x.end)
+    : (selectedImage() ? [selectedImage()] : []);
+  for (let i = imgs.length - 1; i >= 0; i--) {
+    if (B.insideBox(imgs[i].box, p.x, p.y)) return { kind: 'image', item: imgs[i] };
+  }
+  return null;
 }
 
-overlay.addEventListener('pointermove', (e) => {
-  const ctx = overlay.getContext('2d');
+let boxDrag = null;
+
+overlay.addEventListener('pointerdown', (e) => {
   const p = stagePoint(e);
-  if (!telopDrag) {
-    const t = currentTimelineTime();
-    const pool = S.mode === 'program' ? S.project.telops : (selectedTelop() ? [selectedTelop()] : []);
-    const over = S.mode === 'program'
-      ? T.hitTelop(ctx, pool, t, p.x, p.y)
-      : (pool[0] && insideBounds(ctx, pool[0], p) ? pool[0] : null);
-    overlay.classList.toggle('grab', !!over);
+  const t = currentTimelineTime();
+  S.focusArea = 'preview'; // カーソルキーで枠を動かせるようにする
+
+  // まず選択中の枠のハンドルを見る
+  const sel = activeBox();
+  const r = 9 * stageScale();
+  if (sel) {
+    const h = B.hitHandle(sel.item.box, p.x, p.y, r);
+    if (h) {
+      try { overlay.setPointerCapture(e.pointerId); } catch {}
+      commit(sel.kind === 'image' ? '画像の大きさを変更' : 'テロップの枠を変更', `box:${sel.item.id}`);
+      boxDrag = { ...sel, mode: 'resize', handle: h, startX: p.x, startY: p.y, orig: { ...sel.item.box }, guides: [] };
+      renderOverlay();
+      return;
+    }
+  }
+
+  const hit = pickBox(p, t);
+  if (!hit) { renderTimeline(); return; }
+  try { overlay.setPointerCapture(e.pointerId); } catch {}
+  const changed = hit.item.id !== (sel?.item.id ?? null);
+  select(hit.kind, hit.item.id);
+  commit(hit.kind === 'image' ? '画像の位置を変更' : 'テロップの位置を変更', `box:${hit.item.id}`);
+  boxDrag = { ...hit, mode: 'move', startX: p.x, startY: p.y, orig: { ...hit.item.box }, guides: [] };
+  overlay.classList.add('grabbing');
+  renderAll();
+  if (changed) { renderTelopForm(true); renderFxForm(true); }
+});
+
+overlay.addEventListener('pointermove', (e) => {
+  const p = stagePoint(e);
+  const W = overlay.width, H = overlay.height;
+
+  if (!boxDrag) {
+    // カーソル形状（ハンドルの上ではリサイズ、枠の中では move）
+    const sel = activeBox();
+    let cur = 'default';
+    if (sel) {
+      const h = B.hitHandle(sel.item.box, p.x, p.y, 9 * stageScale());
+      if (h) cur = B.handleCursor(h);
+    }
+    if (cur === 'default' && pickBox(p, currentTimelineTime())) cur = 'grab';
+    overlay.style.cursor = cur;
     return;
   }
-  let x = p.x - telopDrag.dx, y = p.y - telopDrag.dy;
-  if (!e.altKey) { // Alt を押していない間は中央・端にスナップ
-    const W = overlay.width, H = overlay.height;
-    for (const gx of [W / 2, 90, W - 90]) if (Math.abs(x - gx) < 18) x = gx;
-    for (const gy of [H / 2, 140, H - 140]) if (Math.abs(y - gy) < 18) y = gy;
+
+  const dx = p.x - boxDrag.startX, dy = p.y - boxDrag.startY;
+  const item = boxDrag.item;
+  if (boxDrag.mode === 'resize') {
+    const asset = boxDrag.kind === 'image' && e.shiftKey
+      ? S.project.imageAssets.find((a) => a.id === item.assetId)
+      : null;
+    const box = B.resizeBox(boxDrag.orig, boxDrag.handle, dx, dy, {
+      min: 40,
+      aspect: asset ? asset.width / asset.height : null,
+    });
+    item.box = B.clampBox(box, W, H);
+    boxDrag.guides = [];
+  } else {
+    let box = { ...boxDrag.orig, x: boxDrag.orig.x + dx, y: boxDrag.orig.y + dy };
+    if (!e.altKey) {
+      const snapped = B.snapBox(box, W, H);   // 端・中央に吸着（Alt で解除）
+      box = snapped.box;
+      boxDrag.guides = snapped.guides;
+    } else {
+      boxDrag.guides = [];
+    }
+    item.box = B.clampBox(box, W, H);          // 画面外へは出さない
   }
-  telopDrag.tel.x = Math.round(x);
-  telopDrag.tel.y = Math.round(y);
   renderOverlay();
-  syncTelopNumbers();
+  syncBoxNumbers();
 });
 
 overlay.addEventListener('pointerup', () => {
-  if (!telopDrag) return;
-  telopDrag = null;
+  if (!boxDrag) return;
+  boxDrag = null;
   overlay.classList.remove('grabbing');
+  renderOverlay();
 });
+
+/** カーソルキーで 1px（Shift で 10px）動かす */
+function nudgeBox(dx, dy) {
+  const sel = activeBox();
+  if (!sel) return false;
+  commit(sel.kind === 'image' ? '画像を移動' : 'テロップを移動', `nudge:${sel.item.id}`);
+  const b = sel.item.box;
+  sel.item.box = B.clampBox({ ...b, x: b.x + dx, y: b.y + dy }, overlay.width, overlay.height);
+  renderOverlay();
+  syncBoxNumbers();
+  return true;
+}
 
 // ---------------------------------------------------------------- 描画：ビン / インスペクタ
 
 function renderBin() {
+  for (const t of document.querySelectorAll('.bintab')) t.classList.toggle('active', t.dataset.bin === S.binTab);
+  $('binMedia').classList.toggle('hidden', S.binTab !== 'media');
+  $('binFx').classList.toggle('hidden', S.binTab !== 'fx');
+
+  renderMediaBin();
+  renderEffectBin();
+
+  const src = curSource();
+  $('srcInfo').innerHTML = src
+    ? `映像 <b>${esc(src.video.codec)}</b><br>${src.video.width}×${src.video.height} ／ ${src.video.samples.length} フレーム<br>`
+      + (src.audio ? `音声 <b>${esc(src.audio.codec)}</b><br>${src.audio.sampleRate} Hz ／ ${src.audio.channels} ch` : '音声トラックなし')
+    : '—';
+}
+
+function renderMediaBin() {
   const list = $('binList');
-  if (!S.project.sources.length) {
-    list.innerHTML = '<div class="empty">「素材を開く」で mp4 を読み込みます</div>';
-  } else {
-    list.innerHTML = '';
-    for (const s of S.project.sources) {
-      const el = document.createElement('div');
-      el.className = 'bin-item' + (s.id === S.currentSourceId ? ' active' : '');
-      el.innerHTML = `<div class="row"><div class="n">${esc(s.name)}</div>`
-        + `<button class="bin-add" title="素材まるごとをタイムラインに置く（範囲を消していく編集の起点）">全体</button></div>`
-        + `<div class="m">${tc(s.duration)} ／ ${(s.size / 1e9).toFixed(2)} GB</div>`;
-      el.querySelector('.bin-add').onclick = (ev) => { ev.stopPropagation(); placeWholeSource(s.id); };
-      el.onclick = () => selectSource(s.id);
-      list.appendChild(el);
-    }
+  const empty = !S.project.sources.length && !S.project.audioAssets.length && !S.project.imageAssets.length;
+  list.innerHTML = empty ? '<div class="empty">mp4 / mp3 / png をここにドロップしても読み込めます</div>' : '';
+  if (empty) return;
+
+  for (const s of S.project.sources) {
+    const el = document.createElement('div');
+    el.className = 'bin-item' + (s.id === S.currentSourceId ? ' active' : '');
+    el.innerHTML = `<div class="row"><div class="n">${esc(s.name)}</div>`
+      + `<button class="bin-add" title="素材まるごとをタイムラインに置く（範囲を消していく編集の起点）">全体</button></div>`
+      + `<div class="m">${tc(s.duration)} ／ ${(s.size / 1e9).toFixed(2)} GB</div>`;
+    el.querySelector('.bin-add').onclick = (ev) => { ev.stopPropagation(); placeWholeSource(s.id); };
+    el.onclick = () => selectSource(s.id);
+    list.appendChild(el);
   }
+
   for (const a of S.project.audioAssets) {
     const el = document.createElement('div');
     el.className = 'bin-item audio';
@@ -716,17 +907,56 @@ function renderBin() {
       + `<div class="m">${tc(a.duration, false)} ／ ${a.duration > 20 ? 'BGM' : '効果音'}</div>`;
     el.querySelector('.bin-add').onclick = (e) => { e.stopPropagation(); placeAudio(a.id); };
     el.onclick = () => placeAudio(a.id);
-    $('binList').appendChild(el);
+    list.appendChild(el);
   }
-  const src = curSource();
-  $('srcInfo').innerHTML = src
-    ? `映像 <b>${esc(src.video.codec)}</b><br>${src.video.width}×${src.video.height} ／ ${src.video.samples.length} フレーム<br>`
-      + (src.audio ? `音声 <b>${esc(src.audio.codec)}</b><br>${src.audio.sampleRate} Hz ／ ${src.audio.channels} ch` : '音声トラックなし')
-    : '—';
+
+  for (const a of S.project.imageAssets) {
+    const el = document.createElement('div');
+    el.className = 'bin-item image';
+    el.innerHTML = `<div class="row"><div class="n">▣ ${esc(a.name)}</div></div>`
+      + `<div class="m">${a.width}×${a.height}</div>`
+      + `<div class="place-row">${PLACEMENTS.map((pl) => `<button data-p="${pl.id}">${pl.name}</button>`).join('')}</div>`;
+    const bmp = S.imageLib.get(a.id);
+    if (bmp) {
+      const cv = document.createElement('canvas');
+      const s2 = Math.min(200 / bmp.width, 54 / bmp.height);
+      cv.width = Math.max(1, Math.round(bmp.width * s2));
+      cv.height = Math.max(1, Math.round(bmp.height * s2));
+      cv.className = 'thumb';
+      cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+      el.insertBefore(cv, el.querySelector('.place-row'));
+    }
+    for (const b of el.querySelectorAll('.place-row button')) {
+      b.onclick = (e) => { e.stopPropagation(); placeImage(a.id, b.dataset.p); };
+    }
+    list.appendChild(el);
+  }
+}
+
+function renderEffectBin() {
+  const list = $('fxList');
+  list.innerHTML = '';
+  for (const fx of EFFECTS) {
+    const el = document.createElement('div');
+    el.className = 'fx-item';
+    el.innerHTML = `<div class="row"><div class="n">${esc(fx.name)}</div>`
+      + `<button class="bin-add" title="再生位置に追加">＋</button></div>`
+      + `<div class="d">${esc(fx.desc)}</div>`;
+    el.querySelector('.bin-add').onclick = (e) => { e.stopPropagation(); fx.add(); };
+    el.onclick = () => fx.add();
+    list.appendChild(el);
+  }
 }
 
 function renderInspector() {
   const form = $('clipForm');
+  const tel = selectedTelop(), other = selectedBlur() || selectedAudio() || selectedImage();
+  $('selHead').textContent = tel ? '選択テロップ'
+    : selectedBlur() ? '選択ぼかし' : selectedAudio() ? '選択音源'
+    : selectedImage() ? '選択画像' : '選択クリップ';
+  // テロップはフローティングダイアログ側、それ以外は fxForm 側に出る
+  form.classList.toggle('hidden', !!other || !!tel);
+
   const clip = S.project.clips.find((c) => c.id === S.selectedClipId);
   if (!clip) { form.innerHTML = '<div class="empty">未選択</div>'; return; }
   const src = S.sources.get(clip.sourceId);
@@ -770,28 +1000,59 @@ function fontOptions(current) {
 
 let telopFormId = null;
 
+// --- フローティングダイアログ ---
+const telDlg = $('telopDialog');
+
+function openTelopDialog() {
+  telDlg.classList.remove('hidden');
+  if (!telDlg.style.left) {
+    // 初期位置は左端（右パネルまで手を伸ばさずに済み、プレビューも隠さない）。
+    // ヘッダをつかんで好きな場所へ移せる。位置は覚える。
+    telDlg.style.left = '8px';
+    telDlg.style.top = `${$('workspace')?.getBoundingClientRect().top ?? 48}px`;
+  }
+}
+function closeTelopDialog() { telDlg.classList.add('hidden'); }
+
+(() => { // ヘッダをつかんで移動
+  const head = $('telopDialogHead');
+  let d = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (e.target.id === 'telopDialogClose') return;
+    const r = telDlg.getBoundingClientRect();
+    d = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    head.classList.add('dragging');
+    try { head.setPointerCapture(e.pointerId); } catch {}
+  });
+  head.addEventListener('pointermove', (e) => {
+    if (!d) return;
+    telDlg.style.left = `${Math.max(0, Math.min(innerWidth - 60, e.clientX - d.dx))}px`;
+    telDlg.style.top = `${Math.max(0, Math.min(innerHeight - 40, e.clientY - d.dy))}px`;
+  });
+  head.addEventListener('pointerup', () => { d = null; head.classList.remove('dragging'); });
+})();
+$('telopDialogClose').onclick = () => { closeTelopDialog(); };
+
 function renderTelopForm(force = false) {
   const form = $('telopForm');
-  const clipForm = $('clipForm');
   const tel = selectedTelop();
-  const other = selectedBlur() || selectedAudio();
-  $('selHead').textContent = tel ? '選択テロップ'
-    : selectedBlur() ? '選択ぼかし' : selectedAudio() ? '選択音源' : '選択クリップ';
-  form.classList.toggle('hidden', !tel);
-  clipForm.classList.toggle('hidden', !!tel || !!other);
-  if (!tel) { telopFormId = null; return; }
-  if (!force && telopFormId === tel.id) { syncTelopNumbers(); return; }
+  if (!tel) { telopFormId = null; closeTelopDialog(); return; }
+  openTelopDialog();
+  if (!force && telopFormId === tel.id) { syncBoxNumbers(); return; }
   telopFormId = tel.id;
 
+  const AL = { left: '⇤', center: '↔', right: '⇥' };
+  const VA = { top: '⤒', middle: '↕', bottom: '⤓' };
+
   form.innerHTML = `
-    <label>テキスト（改行で複数行）
+    <label>テキスト（改行で複数行・枠の幅で折り返し）
       <textarea id="telText" rows="2">${esc(tel.text)}</textarea></label>
 
     <div class="preset-row">
       <select id="telPreset"><option value="">プリセットを適用…</option>
         ${presets().map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join('')}
       </select>
-      <button class="mini" id="telPresetSave" title="現在のスタイルと位置をプリセットとして保存">＋</button>
+      <button class="mini" id="telPresetSave" title="現在のスタイルと枠をプリセットとして保存">＋</button>
     </div>
 
     <label>フォント<select id="telFont">${fontOptions(tel.font)}</select></label>
@@ -805,11 +1066,15 @@ function renderTelopForm(force = false) {
       <label>縁の太さ <input class="num" type="number" id="telSW" min="0" max="60" value="${tel.strokeWidth}"></label>
     </div>
 
-    <label>配置
-      <div class="align-group">
-        ${['left', 'center', 'right'].map((a) =>
-          `<button data-align="${a}" class="${tel.align === a ? 'on' : ''}">${{ left: '左', center: '中央', right: '右' }[a]}</button>`).join('')}
-      </div></label>
+    <div class="grid2">
+      <label>横の寄せ
+        <div class="align-grid">${['left', 'center', 'right'].map((a) =>
+          `<button data-h="${a}" class="${tel.hAlign === a ? 'on' : ''}" title="${a}">${AL[a]}</button>`).join('')}</div></label>
+      <label>縦の寄せ
+        <div class="align-grid">${['top', 'middle', 'bottom'].map((a) =>
+          `<button data-v="${a}" class="${tel.vAlign === a ? 'on' : ''}" title="${a}">${VA[a]}</button>`).join('')}</div></label>
+    </div>
+    <label class="chk"><input type="checkbox" id="telWrap" ${tel.wrap ? 'checked' : ''}> 枠の幅で折り返す</label>
 
     <div class="grid2">
       <div class="swatch"><input type="color" id="telFill" value="${tel.fill}"><span>文字</span></div>
@@ -826,13 +1091,15 @@ function renderTelopForm(force = false) {
       <label>終了（秒）<input class="num" type="number" id="telEnd" step="0.1" value="${tel.end.toFixed(2)}"></label>
     </div>
     <div class="grid2">
-      <label>X <input class="num" type="number" id="telX" value="${Math.round(tel.x)}"></label>
-      <label>Y <input class="num" type="number" id="telY" value="${Math.round(tel.y)}"></label>
+      <label>枠 X <input class="num" type="number" id="boxX" value="${Math.round(tel.box.x)}"></label>
+      <label>枠 Y <input class="num" type="number" id="boxY" value="${Math.round(tel.box.y)}"></label>
+      <label>枠 幅 <input class="num" type="number" id="boxW" value="${Math.round(tel.box.w)}"></label>
+      <label>枠 高さ <input class="num" type="number" id="boxH" value="${Math.round(tel.box.h)}"></label>
     </div>
-    <div class="sub-label">プレビュー上でドラッグして位置を決められます（Alt でスナップ解除）</div>`;
+    <div class="sub-label">プレビュー上で枠をドラッグして移動、四隅・辺で大きさを変更。<br>
+      端と中央に吸着（Alt で解除）。カーソルキーで 1px（Shift で 10px）。</div>`;
 
   const live = () => { renderOverlay(); renderTimeline(); };
-  // 連続入力（スライダー・文字入力）は 1 エントリにまとめる
   const bind = (id, fn, ev = 'input') => $(id).addEventListener(ev, (e) => {
     commit('テロップを編集', `tel:${tel.id}:${id}`);
     fn(e.target.value, e); live();
@@ -852,14 +1119,27 @@ function renderTelopForm(force = false) {
   bind('telShadow', (v) => { tel.shadow = +v / 100; S.telopStyle.shadow = tel.shadow; $('telShadowLbl').textContent = `${v}%`; });
   bind('telStart', (v) => { tel.start = Math.max(0, +v); });
   bind('telEnd', (v) => { tel.end = Math.max(tel.start + 0.1, +v); });
-  bind('telX', (v) => { tel.x = +v; });
-  bind('telY', (v) => { tel.y = +v; });
+  bind('boxX', (v) => { tel.box.x = +v; });
+  bind('boxY', (v) => { tel.box.y = +v; });
+  bind('boxW', (v) => { tel.box.w = Math.max(40, +v); });
+  bind('boxH', (v) => { tel.box.h = Math.max(40, +v); });
+  $('telWrap').addEventListener('change', (e) => {
+    commit('折り返しを切り替え'); tel.wrap = e.target.checked; S.telopStyle.wrap = tel.wrap; live();
+  });
 
-  for (const b of form.querySelectorAll('.align-group button')) {
+  for (const b of form.querySelectorAll('[data-h]')) {
     b.onclick = () => {
-      commit('テロップの配置を変更');
-      tel.align = b.dataset.align; S.telopStyle.align = tel.align;
-      for (const o of form.querySelectorAll('.align-group button')) o.classList.toggle('on', o === b);
+      commit('テロップの寄せを変更');
+      tel.hAlign = b.dataset.h; S.telopStyle.hAlign = tel.hAlign;
+      for (const o of form.querySelectorAll('[data-h]')) o.classList.toggle('on', o === b);
+      live();
+    };
+  }
+  for (const b of form.querySelectorAll('[data-v]')) {
+    b.onclick = () => {
+      commit('テロップの寄せを変更');
+      tel.vAlign = b.dataset.v; S.telopStyle.vAlign = tel.vAlign;
+      for (const o of form.querySelectorAll('[data-v]')) o.classList.toggle('on', o === b);
       live();
     };
   }
@@ -868,7 +1148,9 @@ function renderTelopForm(force = false) {
     const p = presets()[+e.target.value];
     if (!p) return;
     commit(`プリセット「${p.name}」を適用`);
-    Object.assign(tel, p.style);
+    const { box, ...rest } = p.style;
+    Object.assign(tel, rest);
+    if (box) tel.box = { ...box };
     S.telopStyle = { ...p.style };
     e.target.value = '';
     renderTelopForm(true);
@@ -878,8 +1160,8 @@ function renderTelopForm(force = false) {
     const name = prompt('プリセット名', `プリセット ${presets().length + 1}`);
     if (!name) return;
     commit('プリセットを保存');
-    const { id, text, start, end, ...style } = tel;
-    S.project.telopPresets = [...presets(), { name, style }];
+    const { id, text, start, end, box, ...style } = tel;
+    S.project.telopPresets = [...presets(), { name, style: { ...style, box: { ...box } } }];
     renderTelopForm(true);
     status(`プリセット「${name}」を保存しました`);
   };
@@ -893,15 +1175,26 @@ function renderTelopForm(force = false) {
   };
 }
 
+/** ドラッグ中など、フォームを作り直さずに枠の数値だけ追従させる */
+function syncBoxNumbers() {
+  const sel = activeBox();
+  if (!sel) return;
+  const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v; };
+  const b = sel.item.box;
+  set('boxX', Math.round(b.x)); set('boxY', Math.round(b.y));
+  set('boxW', Math.round(b.w)); set('boxH', Math.round(b.h));
+}
+
 let fxFormKey = null;
 
+/** ぼかし・音源・画像のプロパティ（インスペクタ側） */
 function renderFxForm(force = false) {
   const form = $('fxForm');
-  const blur = selectedBlur(), ac = selectedAudio();
-  const key = blur ? `b:${blur.id}` : ac ? `a:${ac.id}` : null;
+  const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage();
+  const key = blur ? `b:${blur.id}` : ac ? `a:${ac.id}` : im ? `i:${im.id}` : null;
   form.classList.toggle('hidden', !key);
   if (!key) { fxFormKey = null; return; }
-  if (!force && fxFormKey === key) { syncFxNumbers(); return; }
+  if (!force && fxFormKey === key) { syncBoxNumbers(); syncFxNumbers(); return; }
   fxFormKey = key;
 
   const live = () => { renderTimeline(); renderOverlay(); };
@@ -925,6 +1218,51 @@ function renderFxForm(force = false) {
     return;
   }
 
+  if (im) {
+    const a = S.project.imageAssets.find((x) => x.id === im.assetId);
+    form.innerHTML = `
+      <div class="sub-label">${esc(a?.name ?? im.assetId)}${a ? `（${a.width}×${a.height}）` : ''}</div>
+      <div class="place-row">${PLACEMENTS.map((pl) => `<button data-p="${pl.id}">${pl.name}</button>`).join('')}</div>
+      <label>不透明度 <span id="imOpLbl">${Math.round((im.opacity ?? 1) * 100)}%</span>
+        <input type="range" id="imOp" min="0" max="100" value="${Math.round((im.opacity ?? 1) * 100)}"></label>
+      <label class="chk"><input type="checkbox" id="imStretch" ${im.fit === 'stretch' ? 'checked' : ''}> 枠いっぱいに引き伸ばす（比率を無視）</label>
+      <div class="grid2">
+        <label>開始（秒）<input class="num" type="number" id="imStart" step="0.1" value="${im.start.toFixed(2)}"></label>
+        <label>終了（秒）<input class="num" type="number" id="imEnd" step="0.1" value="${im.end.toFixed(2)}"></label>
+      </div>
+      <div class="grid2">
+        <label>枠 X <input class="num" type="number" id="boxX" value="${Math.round(im.box.x)}"></label>
+        <label>枠 Y <input class="num" type="number" id="boxY" value="${Math.round(im.box.y)}"></label>
+        <label>枠 幅 <input class="num" type="number" id="boxW" value="${Math.round(im.box.w)}"></label>
+        <label>枠 高さ <input class="num" type="number" id="boxH" value="${Math.round(im.box.h)}"></label>
+      </div>
+      <div class="sub-label">プレビュー上で枠をドラッグして移動、四隅・辺で拡大縮小。<br>
+        Shift ＋ 角のドラッグで比率を保つ。カーソルキーで 1px（Shift で 10px）。</div>`;
+    const b = (id, fn) => $(id).addEventListener('input', (e) => {
+      commit('画像を編集', `imF:${im.id}:${id}`); fn(e.target.value); live();
+    });
+    b('imOp', (v) => { im.opacity = +v / 100; $('imOpLbl').textContent = `${v}%`; });
+    b('imStart', (v) => { im.start = Math.max(0, +v); });
+    b('imEnd', (v) => { im.end = Math.max(im.start + 0.1, +v); });
+    b('boxX', (v) => { im.box.x = +v; });
+    b('boxY', (v) => { im.box.y = +v; });
+    b('boxW', (v) => { im.box.w = Math.max(20, +v); });
+    b('boxH', (v) => { im.box.h = Math.max(20, +v); });
+    $('imStretch').addEventListener('change', (e) => {
+      commit('画像の伸縮を切り替え'); im.fit = e.target.checked ? 'stretch' : 'contain'; live();
+    });
+    for (const btn of form.querySelectorAll('.place-row button')) {
+      btn.onclick = () => {
+        const a2 = S.project.imageAssets.find((x) => x.id === im.assetId);
+        if (!a2) return;
+        commit('画像の配置を変更');
+        im.box = placementBox(btn.dataset.p, a2, S.project.output.width, S.project.output.height);
+        renderFxForm(true); live();
+      };
+    }
+    return;
+  }
+
   const asset = S.project.audioAssets.find((a) => a.id === ac.assetId);
   form.innerHTML = `
     <div class="sub-label">${esc(asset?.name ?? ac.assetId)}（${ac.kind === 'bgm' ? 'BGM' : '効果音'}）</div>
@@ -939,7 +1277,9 @@ function renderFxForm(force = false) {
       <label>長さ（秒）<input class="num" type="number" id="fxDur" step="0.1" value="${ac.duration.toFixed(2)}"></label>
     </div>
     <label>素材の頭出し（秒）<input class="num" type="number" id="fxOff" step="0.1" min="0" value="${(ac.offset ?? 0).toFixed(2)}"></label>
-    <div class="sub-label">BGM を重ねて両方にフェードを付ければクロスフェードになります</div>`;
+    <label class="chk"><input type="checkbox" id="fxLoop" ${ac.loop ? 'checked' : ''}> 終了位置まで繰り返す（ループ）</label>
+    <div class="sub-label">素材より長い尺にすると頭に戻って繰り返します。<br>
+      BGM を重ねて両方にフェードを付ければクロスフェードになります。</div>`;
   const b = (id, fn) => $(id).addEventListener('input', (e) => {
     commit('音源を編集', `acF:${ac.id}:${id}`); fn(e.target.value); live();
   });
@@ -949,24 +1289,17 @@ function renderFxForm(force = false) {
   b('fxStart', (v) => { ac.start = Math.max(0, +v); });
   b('fxDur', (v) => { ac.duration = Math.max(0.1, +v); });
   b('fxOff', (v) => { ac.offset = Math.max(0, +v); });
+  $('fxLoop').addEventListener('change', (e) => {
+    commit('ループを切り替え'); ac.loop = e.target.checked; live();
+  });
 }
 
 function syncFxNumbers() {
   const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v; };
-  const blur = selectedBlur(), ac = selectedAudio();
+  const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage();
   if (blur) { set('fxStart', blur.start.toFixed(2)); set('fxEnd', blur.end.toFixed(2)); }
   else if (ac) { set('fxStart', ac.start.toFixed(2)); set('fxDur', ac.duration.toFixed(2)); }
-}
-
-/** ドラッグ中など、フォームを作り直さずに数値だけ追従させる */
-function syncTelopNumbers() {
-  const tel = selectedTelop();
-  if (!tel || telopFormId !== tel.id) return;
-  const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v; };
-  set('telX', Math.round(tel.x));
-  set('telY', Math.round(tel.y));
-  set('telStart', tel.start.toFixed(2));
-  set('telEnd', tel.end.toFixed(2));
+  else if (im) { set('imStart', im.start.toFixed(2)); set('imEnd', im.end.toFixed(2)); }
 }
 
 function renderTransport() {
@@ -1062,9 +1395,10 @@ $('scrubBar').addEventListener('pointerdown', (e) => {
 // ---------------------------------------------------------------- 描画：タイムライン
 
 const tlCanvas = $('tlCanvas');
-const RULER_H = 26, FX_H = 22, TELOP_H = 34, TRACK_H = 62, AUD_H = 48;
+const RULER_H = 26, FX_H = 22, IMG_H = 30, TELOP_H = 30, TRACK_H = 56, AUD_H = 44;
 const Y_FX = RULER_H;
-const Y_TELOP = Y_FX + FX_H;
+const Y_IMG = Y_FX + FX_H;
+const Y_TELOP = Y_IMG + IMG_H;
 const Y_V = Y_TELOP + TELOP_H;
 const Y_A = Y_V + TRACK_H;
 const Y_A2 = Y_A + TRACK_H;
@@ -1115,12 +1449,13 @@ function renderTimeline() {
 
   // --- トラック背景 ---
   ctx.fillStyle = '#191f22'; ctx.fillRect(0, Y_FX, w, FX_H);
+  ctx.fillStyle = '#241d16'; ctx.fillRect(0, Y_IMG, w, IMG_H);
   ctx.fillStyle = '#1b1d24'; ctx.fillRect(0, Y_TELOP, w, TELOP_H);
   ctx.fillStyle = '#1e2128'; ctx.fillRect(0, Y_V, w, TRACK_H);
   ctx.fillStyle = '#1c1f26'; ctx.fillRect(0, Y_A, w, TRACK_H);
   ctx.fillStyle = '#1d1b26'; ctx.fillRect(0, Y_A2, w, AUD_H);
   ctx.strokeStyle = '#2b303a'; ctx.beginPath();
-  for (const y of [Y_TELOP, Y_V, Y_A, Y_A2, Y_A2 + AUD_H]) { ctx.moveTo(0, y + 0.5); ctx.lineTo(w, y + 0.5); }
+  for (const y of [Y_IMG, Y_TELOP, Y_V, Y_A, Y_A2, Y_A2 + AUD_H]) { ctx.moveTo(0, y + 0.5); ctx.lineTo(w, y + 0.5); }
   ctx.stroke();
 
   // --- クリップ ---
@@ -1150,6 +1485,15 @@ function renderTimeline() {
     drawAudioClip(ctx, x, ry, Math.max(3, aw), rh, ac, asset, ac.id === S.selectedAudioId);
   }
 
+  // --- 画像 ---
+  for (const im of S.project.images) {
+    const x = secToX(im.start), iw = (im.end - im.start) * S.pxPerSec;
+    if (x + iw < -5 || x > w + 5) continue;
+    const a = S.project.imageAssets.find((y) => y.id === im.assetId);
+    drawFxBlock(ctx, x, Y_IMG + 2, Math.max(3, iw), IMG_H - 5, `▣ ${a?.name ?? ''}`,
+      im.id === S.selectedImageId, ['#e6b482', '#b57a3e'], '#2b1a06');
+  }
+
   // --- テロップ ---
   for (const tel of S.project.telops) {
     const x = secToX(tel.start);
@@ -1159,7 +1503,7 @@ function renderTimeline() {
   }
 
   // --- 範囲選択（ゾーン）---
-  const zr = zoneRange();
+  const zr = zoneRange() ?? (S.zoneIn !== null ? [S.zoneIn, S.zoneIn] : null);
   if (zr) {
     const zx0 = secToX(zr[0]), zx1 = secToX(zr[1]);
     ctx.fillStyle = '#f0c33c18';
@@ -1318,6 +1662,16 @@ function hitAudioClip(x, y) {
   return null;
 }
 
+function hitImageBlock(x, y) {
+  if (y < Y_IMG || y >= Y_TELOP) return null;
+  for (let i = S.project.images.length - 1; i >= 0; i--) {
+    const im = S.project.images[i];
+    const cx = secToX(im.start), cw = (im.end - im.start) * S.pxPerSec;
+    if (x >= cx && x <= cx + cw) return { im, cx, cw };
+  }
+  return null;
+}
+
 function hitTelopBlock(x, y) {
   if (y < Y_TELOP || y >= Y_V) return null;
   for (let i = S.project.telops.length - 1; i >= 0; i--) {
@@ -1341,7 +1695,7 @@ tlCanvas.addEventListener('pointermove', (e) => {
   if (drag) return;
   const r = tlCanvas.getBoundingClientRect();
   const x = e.clientX - r.left, y = e.clientY - r.top;
-  const hit = hitBlurBlock(x, y) || hitTelopBlock(x, y) || hitAudioClip(x, y) || hitClip(x, y);
+  const hit = hitBlurBlock(x, y) || hitImageBlock(x, y) || hitTelopBlock(x, y) || hitAudioClip(x, y) || hitClip(x, y);
   tlCanvas.style.cursor = !hit ? 'default'
     : (Math.abs(x - hit.cx) < 6 || Math.abs(x - (hit.cx + hit.cw)) < 6) ? 'ew-resize' : 'grab';
 });
@@ -1350,6 +1704,7 @@ let drag = null;
 tlCanvas.addEventListener('pointerdown', (e) => {
   const r = tlCanvas.getBoundingClientRect();
   const x = e.clientX - r.left, y = e.clientY - r.top;
+  S.focusArea = 'timeline'; // カーソルキーはコマ送りに戻す
   try { tlCanvas.setPointerCapture(e.pointerId); } catch {}
 
   // ぼかしトラック
@@ -1363,7 +1718,20 @@ tlCanvas.addEventListener('pointerdown', (e) => {
       : { type: 'blurMove', blur: bh.blur, startX: x, orig: { ...bh.blur } };
     renderAll(); renderFxForm(true); return;
   }
-  if (y >= Y_FX && y < Y_TELOP) { select('clip', null); renderAll(); renderFxForm(true); renderTelopForm(true); return; }
+  if (y >= Y_FX && y < Y_IMG) { select('clip', null); renderAll(); renderFxForm(true); renderTelopForm(true); return; }
+
+  // 画像トラック
+  const ih = hitImageBlock(x, y);
+  if (ih) {
+    select('image', ih.im.id);
+    const eL = Math.abs(x - ih.cx) < 6, eR = Math.abs(x - (ih.cx + ih.cw)) < 6;
+    drag = eL || eR
+      ? { type: 'imageTrim', im: ih.im, side: eL ? 'start' : 'end', startX: x, orig: { ...ih.im } }
+      : { type: 'imageMove', im: ih.im, startX: x, orig: { ...ih.im } };
+    renderAll(); renderFxForm(true); renderTelopForm(true);
+    return;
+  }
+  if (y >= Y_IMG && y < Y_TELOP) { select('clip', null); renderAll(); renderFxForm(true); renderTelopForm(true); return; }
 
   // SE / BGM トラック
   const ah = hitAudioClip(x, y);
@@ -1463,20 +1831,32 @@ tlCanvas.addEventListener('pointermove', (e) => {
       drag.ac.offset = Math.max(0, (drag.orig.offset ?? 0) + shift);
       drag.ac.duration = Math.max(0.1, drag.orig.duration - shift);
     } else {
-      drag.ac.duration = Math.max(0.1, Math.min(maxLen - (drag.ac.offset ?? 0), drag.orig.duration + d));
+      const cap = drag.ac.loop ? Infinity : maxLen - (drag.ac.offset ?? 0);
+      drag.ac.duration = Math.max(0.1, Math.min(cap, drag.orig.duration + d));
     }
     renderTimeline(); syncFxNumbers();
+  } else if (drag.type === 'imageMove') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    const len = drag.orig.end - drag.orig.start;
+    drag.im.start = Math.max(0, drag.orig.start + d);
+    drag.im.end = drag.im.start + len;
+    renderTimeline(); renderOverlay(); syncFxNumbers();
+  } else if (drag.type === 'imageTrim') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    if (drag.side === 'start') drag.im.start = Math.max(0, Math.min(drag.orig.end - 0.1, drag.orig.start + d));
+    else drag.im.end = Math.max(drag.orig.start + 0.1, drag.orig.end + d);
+    renderTimeline(); renderOverlay(); syncFxNumbers();
   } else if (drag.type === 'telopMove') {
     const d = (x - drag.startX) / S.pxPerSec;
     const len = drag.orig.end - drag.orig.start;
     drag.tel.start = Math.max(0, drag.orig.start + d);
     drag.tel.end = drag.tel.start + len;
-    renderTimeline(); renderOverlay(); syncTelopNumbers();
+    renderTimeline(); renderOverlay(); syncBoxNumbers();
   } else if (drag.type === 'telopTrim') {
     const d = (x - drag.startX) / S.pxPerSec;
     if (drag.side === 'start') drag.tel.start = Math.max(0, Math.min(drag.orig.end - 0.1, drag.orig.start + d));
     else drag.tel.end = Math.max(drag.orig.start + 0.1, drag.orig.end + d);
-    renderTimeline(); renderOverlay(); syncTelopNumbers();
+    renderTimeline(); renderOverlay(); syncBoxNumbers();
   } else if (drag.type === 'move') {
     if (Math.abs(x - drag.startX) > 4) drag.moved = true;
     const clips = S.project.clips;
@@ -1523,6 +1903,7 @@ function contentEndSec() {
   let end = P.totalDuration(S.project);
   for (const t of S.project.telops) end = Math.max(end, t.end);
   for (const b of S.project.blurs) end = Math.max(end, b.end);
+  for (const i of S.project.images) end = Math.max(end, i.end);
   for (const a of S.project.audioClips) end = Math.max(end, a.start + a.duration);
   return end;
 }
@@ -1592,6 +1973,8 @@ async function loadProject(file) {
     p.sources = S.project.sources;
     commit('プロジェクトを読み込み');
     S.project = p;
+    normalizeProject();
+    syncProjectUI();
     select(null, null);
     const missing = p.clips.filter((c) => !S.sources.has(c.sourceId)).length;
     zoomFit();
@@ -1644,7 +2027,7 @@ async function doExport() {
     const buf = await exportProject(proj, S.sources, {
       fileHandle,
       signal: ac.signal,
-      composeFrame: (ctx, frame, t, w, h) => composeFrame(ctx, frame, t, w, h, proj),
+      composeFrame: (ctx, frame, t, w, h) => composeFrame(ctx, frame, t, w, h, proj, S.imageLib),
       audioMix: audioMixer(),
       onProgress: (r, text) => {
         $('ovProg').style.width = `${Math.min(100, r * 100).toFixed(1)}%`;
@@ -1687,6 +2070,25 @@ $('btnDelete').onclick = deleteSelected;
 $('btnAddTelop').onclick = addTelop;
 $('btnAddBlur').onclick = addBlur;
 $('btnAddAudio').onclick = () => $('audioInput').click();
+$('binAddVideo').onclick = () => openFiles().catch((e) => status(e.message, true));
+$('binAddAudio').onclick = () => $('audioInput').click();
+$('binAddImage').onclick = () => $('imageInput').click();
+$('imageInput').onchange = (e) => { addImageAssets([...e.target.files]); e.target.value = ''; };
+for (const t of document.querySelectorAll('.bintab')) {
+  t.onclick = () => { S.binTab = t.dataset.bin; renderBin(); };
+}
+$('mixSe').oninput = (e) => {
+  commit('効果音の全体音量', 'mixSe');
+  S.project.mix.se = +e.target.value / 100; $('mixSeLbl').textContent = `${e.target.value}%`;
+};
+$('mixBgm').oninput = (e) => {
+  commit('BGM の全体音量', 'mixBgm');
+  S.project.mix.bgm = +e.target.value / 100; $('mixBgmLbl').textContent = `${e.target.value}%`;
+};
+$('notes').addEventListener('input', (e) => {
+  commit('作業メモを編集', 'notes');
+  S.project.notes = e.target.value;
+});
 $('audioInput').onchange = (e) => { addAudioAssets([...e.target.files]); e.target.value = ''; };
 $('fontInput').onchange = async (e) => {
   for (const f of e.target.files) {
@@ -1729,7 +2131,7 @@ $('optRes').onchange = (e) => {
 $('fileInput').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
 $('projInput').onchange = (e) => { if (e.target.files[0]) loadProject(e.target.files[0]); e.target.value = ''; };
 
-for (const t of document.querySelectorAll('.tab')) t.onclick = () => { setMode(t.dataset.mode); renderAll(); };
+for (const t of document.querySelectorAll('.tab[data-mode]')) t.onclick = () => { setMode(t.dataset.mode); renderAll(); };
 
 $('btnPlay').onclick = togglePlay;
 $('btnHome').onclick = () => { if (S.mode === 'program') seekProgram(0, true); else video.currentTime = 0; renderAll(); };
@@ -1758,7 +2160,7 @@ function syncAudioPreview() {
   // ずれが大きくなった時だけスケジュールし直す。
   const pos = S.audioPreview.positionNow();
   if (pos !== null && Math.abs(pos - S.programTime) < 0.25) return;
-  S.audioPreview.start(S.project.audioClips, S.programTime);
+  S.audioPreview.start(S.project.audioClips, S.programTime, S.project.mix);
 }
 function step(d) {
   video.pause();
@@ -1807,7 +2209,7 @@ document.addEventListener('keydown', (e) => {
       if (e.shiftKey && S.mode === 'program' && S.zoneOut !== null) { seekProgram(S.zoneOut, true); renderAll(); }
       else markOut();
       break;
-    case 'escape': clearZone(); break;
+    case 'escape': if (!$('telopDialog').classList.contains('hidden')) closeTelopDialog(); else clearZone(); break;
     case 'enter': addClip(); break;
     case 't': addTelop(); break;
     case 'b': addBlur(); break;
@@ -1818,8 +2220,21 @@ document.addEventListener('keydown', (e) => {
     case 'l':
       video.playbackRate = Math.min(8, video.paused ? 2 : video.playbackRate * 2);
       video.play().catch(() => {}); renderTransport(); break;
-    case 'arrowleft': e.preventDefault(); step(e.shiftKey ? -1 : -1 / fps()); break;
-    case 'arrowright': e.preventDefault(); step(e.shiftKey ? 1 : 1 / fps()); break;
+    // プレビューで枠を選んでいる間は、カーソルキーで 1px ずつ動かす
+    case 'arrowleft': case 'arrowright': case 'arrowup': case 'arrowdown': {
+      e.preventDefault();
+      const d = e.shiftKey ? 10 : 1;
+      if (S.focusArea === 'preview' && activeBox()) {
+        if (k === 'arrowleft') nudgeBox(-d, 0);
+        else if (k === 'arrowright') nudgeBox(d, 0);
+        else if (k === 'arrowup') nudgeBox(0, -d);
+        else nudgeBox(0, d);
+        break;
+      }
+      if (k === 'arrowleft') step(e.shiftKey ? -1 : -1 / fps());
+      else if (k === 'arrowright') step(e.shiftKey ? 1 : 1 / fps());
+      break;
+    }
     case 'home': $('btnHome').click(); break;
     case 'end': $('btnEnd').click(); break;
     case 'delete': case 'backspace': e.preventDefault(); deleteSelected(); break;
@@ -1845,6 +2260,8 @@ function renderAll() {
 if (!('VideoEncoder' in window)) {
   status('このブラウザは WebCodecs 非対応です（Chrome / Edge をお使いください）', true);
 }
+normalizeProject();
+syncProjectUI();
 renderHistoryUI();
 renderAll();
 status('準備完了 — 「素材を開く」または mp4 をドロップしてください');
@@ -1858,6 +2275,8 @@ window.bme = {
   addFiles,
   addTelop,
   addBlur,
+  addImageAssets,
+  placeImage,
   addAudioAssets,
   placeAudio,
   telop: T,

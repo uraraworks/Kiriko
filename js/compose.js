@@ -1,11 +1,12 @@
 // compose.js
 // 1 フレーム分の絵を組み立てる。プレビューと書き出しで共有する唯一の合成経路。
 //
-//   映像フレーム → （区間ぼかし）→ テロップ
+//   映像フレーム → （区間ぼかし）→ 画像 → テロップ
 //
 // ぼかしはプライバシー保護用の全画面ぼかし（企画書の必須機能）。
 
 import { drawTelopsAt } from './telop.js';
+import { drawImagesAt } from './images.js';
 
 /** 時刻 t に効いているぼかしの強さ（出力ピクセル単位）。無ければ 0 */
 export function activeBlur(blurs, t) {
@@ -34,12 +35,14 @@ export function drawBlurred(ctx, frame, w, h, px) {
  * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} ctx
  * @param {*} frame VideoFrame / HTMLVideoElement / null（null なら映像は描かない）
  * @param {number} t 出力タイムライン秒
+ * @param {ImageLibrary} imageLib 画像素材
  */
-export function composeFrame(ctx, frame, t, w, h, project) {
+export function composeFrame(ctx, frame, t, w, h, project, imageLib = null) {
   if (frame) {
     const px = activeBlur(project.blurs, t);
     if (px > 0) drawBlurred(ctx, frame, w, h, px);
     else ctx.drawImage(frame, 0, 0, w, h);
   }
+  drawImagesAt(ctx, project.images || [], t, imageLib);
   drawTelopsAt(ctx, project.telops || [], t);
 }

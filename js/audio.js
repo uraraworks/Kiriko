@@ -24,8 +24,8 @@ export class AudioLibrary {
 }
 
 /** 音量エンベロープ（フェードイン／アウト）。クロスフェードはこれを重ねて作る */
-export function gainAt(ac, localSec) {
-  let g = ac.volume ?? 1;
+export function gainAt(ac, localSec, master = 1) {
+  let g = (ac.volume ?? 1) * master;
   const fi = ac.fadeIn ?? 0, fo = ac.fadeOut ?? 0;
   if (fi > 0 && localSec < fi) g *= localSec / fi;
   const rem = (ac.duration ?? 0) - localSec;
@@ -37,10 +37,12 @@ export function gainAt(ac, localSec) {
  * 出力の [absStart, absStart+n) サンプル区間に、SE/BGM を加算ミックスする。
  * @param {Float32Array} planar チャンネル順に並んだ平面バッファ（長さ n*channels）
  */
-export function mixInto(planar, n, absStart, channels, rate, audioClips, library) {
+export function mixInto(planar, n, absStart, channels, rate, audioClips, library, mix = null) {
   for (const ac of audioClips || []) {
     const buf = library.get(ac.assetId);
     if (!buf) continue;
+    const master = (ac.kind === 'bgm' ? mix?.bgm : mix?.se) ?? 1;
+    if (master <= 0) continue;
     const start = Math.round(ac.start * rate);
     const len = Math.round((ac.duration ?? buf.duration) * rate);
     const from = Math.max(absStart, start);
@@ -48,14 +50,16 @@ export function mixInto(planar, n, absStart, channels, rate, audioClips, library
     if (to <= from) continue;
 
     const offset = Math.round((ac.offset ?? 0) * rate);
+    const loopLen = buf.length - offset; // ループ時に繰り返す長さ
     for (let ch = 0; ch < channels; ch++) {
       const src = buf.getChannelData(Math.min(ch, buf.numberOfChannels - 1));
       const out = planar.subarray(ch * n, ch * n + n);
       for (let i = from; i < to; i++) {
         const local = i - start;
-        const si = offset + local;
+        // ループ指定なら素材の頭に巻き戻して、指定した終了位置まで繰り返す
+        const si = ac.loop && loopLen > 0 ? offset + (local % loopLen) : offset + local;
         if (si < 0 || si >= src.length) continue;
-        out[i - absStart] += src[si] * gainAt(ac, local / rate);
+        out[i - absStart] += src[si] * gainAt(ac, local / rate, master);
       }
     }
   }
@@ -82,7 +86,7 @@ export class AudioPreview {
   }
 
   /** timelineSec の位置から再生を開始する */
-  start(audioClips, timelineSec) {
+  start(audioClips, timelineSec, mix = null) {
     this.stop();
     const ctx = this.lib.ctx;
     if (ctx.state === 'suspended') ctx.resume();
@@ -101,17 +105,30 @@ export class AudioPreview {
       const dur = (ac.duration ?? buf.duration) - skip;
       if (dur <= 0 || offset >= buf.duration) continue;
 
+      const master = (ac.kind === 'bgm' ? mix?.bgm : mix?.se) ?? 1;
+      if (master <= 0) continue;
+
       const src = ctx.createBufferSource();
       src.buffer = buf;
+      if (ac.loop) {
+        src.loop = true;
+        src.loopStart = ac.offset ?? 0;
+        src.loopEnd = buf.duration;
+      }
       const gain = ctx.createGain();
       // フェードをそのまま自動化カーブとして貼る
-      const g0 = gainAt(ac, skip);
-      gain.gain.setValueAtTime(g0, when);
+      gain.gain.setValueAtTime(gainAt(ac, skip, master), when);
       const fi = ac.fadeIn ?? 0, fo = ac.fadeOut ?? 0;
-      if (fi > 0 && skip < fi) gain.gain.linearRampToValueAtTime(ac.volume ?? 1, when + (fi - skip));
+      if (fi > 0 && skip < fi) gain.gain.linearRampToValueAtTime((ac.volume ?? 1) * master, when + (fi - skip));
       if (fo > 0) gain.gain.linearRampToValueAtTime(0, when + Math.max(0, dur));
       src.connect(gain).connect(ctx.destination);
-      src.start(when, Math.min(offset, buf.duration - 0.001), Math.min(dur, buf.duration - offset));
+
+      // ループ時は素材尺を超えて鳴らせるので、長さは配置した尺で切る
+      const startOffset = ac.loop
+        ? (ac.offset ?? 0) + (skip % Math.max(0.001, buf.duration - (ac.offset ?? 0)))
+        : Math.min(offset, buf.duration - 0.001);
+      const playDur = ac.loop ? dur : Math.min(dur, buf.duration - offset);
+      src.start(when, startOffset, playDur);
       this.nodes.push(src);
     }
   }

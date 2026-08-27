@@ -28,7 +28,7 @@ body {
   overflow: hidden;
   user-select: none;
 }
-#app { display: grid; grid-template-rows: 40px minmax(0,1fr) 300px 26px; height: 100%; }
+#app { display: grid; grid-template-rows: 40px minmax(0,1fr) 312px 26px; height: 100%; }
 
 /* ---------- ツールバー ---------- */
 .toolbar {
@@ -241,3 +241,77 @@ kbd {
   color: #c9b876; font-size: 11px; font-variant-numeric: tabular-nums;
   margin-left: 6px; white-space: nowrap;
 }
+
+/* ---------- 左パネル：メディア / エフェクトのタブ ---------- */
+.bin .panel-head.tabs { padding: 0 4px; }
+.tab.bintab { padding: 6px 12px; }
+.bin-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.bin-actions {
+  display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--line); flex: none;
+}
+.bin-actions .mini { flex: 1; padding: 4px 0; }
+
+.fx-item {
+  padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer;
+}
+.fx-item:hover { background: #262a33; }
+.fx-item .row { display: flex; align-items: center; gap: 6px; }
+.fx-item .n { flex: 1; font-size: 12px; }
+.fx-item .d { font-size: 10.5px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
+.bin-item.image { box-shadow: inset 3px 0 0 #d08a4e; }
+.bin-item.image.active { background: #43301f; }
+.bin-item .thumb {
+  width: 100%; height: 54px; object-fit: contain; background: #12141a;
+  border-radius: 4px; margin-top: 4px;
+}
+.place-row { display: flex; gap: 3px; margin-top: 5px; flex-wrap: wrap; }
+.place-row button {
+  background: #3a3020; border: 1px solid #6b5730; color: #e8d3ab;
+  border-radius: 4px; font-size: 10.5px; padding: 2px 7px; cursor: pointer;
+}
+.place-row button:hover { background: #4a3d27; }
+
+/* ---------- フローティングダイアログ ---------- */
+.floating {
+  position: fixed; z-index: 40; width: 330px;
+  background: var(--panel); border: 1px solid var(--line-hard); border-radius: 9px;
+  box-shadow: 0 18px 48px #0009; display: flex; flex-direction: column;
+  max-height: 78vh;
+}
+.floating.hidden { display: none; }
+.fl-head {
+  background: var(--head); padding: 7px 10px; font-size: 12px; font-weight: 700; color: #cfd6e2;
+  border-radius: 8px 8px 0 0; cursor: grab; display: flex; align-items: center; gap: 8px;
+  border-bottom: 1px solid #14161a; user-select: none;
+}
+.fl-head.dragging { cursor: grabbing; }
+.fl-close {
+  margin-left: auto; background: transparent; border: none; color: var(--dim);
+  font-size: 17px; line-height: 1; cursor: pointer; padding: 0 3px;
+}
+.fl-close:hover { color: #fff; }
+.fl-body { overflow: auto; padding: 10px; }
+
+/* テロップの寄せ指定 */
+.align-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+.align-grid button {
+  background: #2a2e37; border: 1px solid #3c424e; color: var(--dim);
+  border-radius: 4px; padding: 5px 0; font-size: 13px; cursor: pointer; line-height: 1;
+}
+.align-grid button.on { background: var(--accent2); border-color: #3d80e6; color: #fff; }
+.chk { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--dim); }
+.chk input { accent-color: var(--accent); }
+
+/* タイムライン: 画像トラック */
+.tl-head.img { height: 30px; color: #e0ab74; }
+.tl-head.telop { height: 30px; }
+.tl-head.fx { height: 22px; }
+.tl-head.aud2 { height: 44px; }
+
+/* 作業メモ（動画には出ない。プロジェクトに一緒に保存される） */
+#notes {
+  background: #2a2e37; color: var(--text); border: 1px solid #3c424e; border-radius: 4px;
+  padding: 6px 7px; font-size: 12px; line-height: 1.6; font-family: inherit;
+  resize: vertical; min-height: 90px; width: 100%;
+}
+#notes::placeholder { color: #626a78; }
