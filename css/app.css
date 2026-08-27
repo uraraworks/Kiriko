@@ -589,3 +589,12 @@ body.no-workdir .toolbar .tb:not(#btnWorkDir):not(#btnHelp) { opacity: .35; poin
 .fl-body::-webkit-scrollbar-thumb { background: #454c5b; border-radius: 6px; border: 2px solid #14161b; }
 .fl-body::-webkit-scrollbar-thumb:hover { background: #566073; }
 .fl-body { scrollbar-width: thin; scrollbar-color: #454c5b #14161b; }
+
+/* ライブラリフォルダの表示 */
+.lib-dir { display: flex; align-items: center; gap: 6px; padding: 0 8px 6px; }
+.lib-dir .mini { flex: none; }
+.lib-dir-name {
+  flex: 1; min-width: 0; font-size: 11px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lib-dir-name.unset { color: var(--dim); font-style: italic; }

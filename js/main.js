@@ -23,6 +23,7 @@ const S = {
   sources: new Map(),      // sourceId -> Mp4Source
   workDir: null,           // 作業フォルダ（FileSystemDirectoryHandle）
   workDirReady: false,     // その許可が生きているか
+  libDir: null,            // テロップ用画像の置き場所（FileSystemDirectoryHandle）
   currentSourceId: null,
   markIn: null,
   markOut: null,
@@ -1524,26 +1525,79 @@ async function reloadLibrary() {
   renderLibraryBin();
 }
 
+/**
+ * 画像を含むセットを保存する前に、ライブラリフォルダを確かめる。
+ * 未設定・許可切れのまま保存すると画像がブラウザの中に溜まり、
+ * 閲覧データを消したときに一緒に消えてしまう。
+ * @returns {Promise<boolean>} 保存を続けてよいか
+ */
+async function ensureLibDir() {
+  if (S.libDir) {
+    // 許可はブラウザ再起動などで切れる。ここはボタンの直後なので尋ねられる
+    if ((await S.libDir.queryPermission?.({ mode: 'readwrite' })) === 'granted') return true;
+    try {
+      if ((await S.libDir.requestPermission({ mode: 'readwrite' })) === 'granted') return true;
+    } catch { /* もう無い等 */ }
+  }
+  if (!('showDirectoryPicker' in window)) return true;   // 選べないブラウザはそのまま
+
+  const first = !S.libDir;
+  const ok = confirm(
+    (first ? 'ライブラリフォルダがまだ決まっていません。' : `ライブラリフォルダ「${S.libDir.name}」を使えません。`)
+    + '\n\nこのまま保存すると、画像はブラウザの中に取り込まれます。'
+    + '\n閲覧データを消したときに一緒に消えてしまいます。'
+    + '\n\n［OK］フォルダを決める（おすすめ）'
+    + '\n［キャンセル］このまま保存する');
+  if (!ok) return true;
+
+  try {
+    const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    S.libDir = dir;
+    await FS.setLibDir(dir);
+    renderLibDir();
+    return true;
+  } catch (e) {
+    if (e.name === 'AbortError') return false;           // 選ぶのをやめた＝保存も取りやめ
+    status(e.message, true);
+    return false;
+  }
+}
+
 /** 選択中のテロップを、画像ごとライブラリに保存する */
 async function saveTelopToLibrary() {
   const tel = selectedTelop();
   if (!tel) return;
+  // 画像を使っているセットだけ、置き場所を先に確かめる
+  const usesImages = [tel.bgAssetId, tel.icon?.assetId].some(Boolean);
+  if (usesImages && !(await ensureLibDir())) return;
   const name = prompt('セット名', Lib.setLabel({ telop: tel }).slice(0, 30));
   if (!name) return;
 
-  // 使っている画像を dataURL にして同梱する（別プロジェクトでもそのまま出せるように）
+  // 使っている画像も一緒に保存する（別プロジェクトでもそのまま出せるように）。
+  // ライブラリフォルダを決めてあれば実ファイルとして置き、ライブラリには名前だけ持たせる。
+  // 決まっていない時は dataURL で抱える（従来どおり。IndexedDB は膨らむ）
   const assets = [];
+  let stashed = 0;
   for (const id of [tel.bgAssetId, tel.icon?.assetId].filter(Boolean)) {
     const bmp = S.imageLib.get(id);
     const meta = S.project.imageAssets.find((a) => a.id === id);
     if (!bmp) continue;
-    assets.push({ id, name: meta?.name ?? id, dataUrl: await Lib.bitmapToDataURL(bmp) });
+    const iname = meta?.name ?? `${id}.png`;
+    if (await Lib.stashAsset(iname, await Lib.bitmapToBlob(bmp))) {
+      assets.push({ id, name: iname, file: true });
+      stashed++;
+    } else {
+      assets.push({ id, name: iname, dataUrl: await Lib.bitmapToDataURL(bmp) });
+    }
   }
   const { id, start, end, track, z, ...body } = tel;
   try {
     await Lib.putSet({ id: P.newId('set'), name, savedAt: Date.now(), telop: body, assets });
     await reloadLibrary();
-    status(`「${name}」をライブラリに保存しました`);
+    const inBrowser = assets.length - stashed;
+    status(`「${name}」をライブラリに保存しました`
+      + (stashed ? `（画像 ${stashed} 件は ${S.libDir?.name ?? 'ライブラリフォルダ'} に置きました）` : '')
+      + (inBrowser ? `（画像 ${inBrowser} 件はブラウザの中に取り込みました）` : ''));
   } catch (e) {
     status(`保存できませんでした: ${e.message}`, true);
   }
@@ -1563,7 +1617,8 @@ async function placeLibrarySet(entry) {
   for (const a of entry.assets ?? []) {
     const existing = S.project.imageAssets.find((x) => x.name === a.name);
     if (existing) { remap.set(a.id, existing.id); continue; }
-    const file = await Lib.dataURLToFile(a.dataUrl, a.name);
+    const file = await Lib.assetToFile(a);
+    if (!file) { status(`${a.name} が見つかりません（ライブラリフォルダを確認してください）`, true); continue; }
     const id = P.newId('img');
     const meta = await S.imageLib.add(file, id);
     S.project.imageAssets.push(meta);
@@ -1595,10 +1650,10 @@ async function placeLibrarySet(entry) {
 function renderLibraryBin() {
   const list = $('libList');
   if (!S.libSets.length) {
-    list.innerHTML = '<div class="empty">テロップを選んで「ライブラリに保存」すると、'
+    list.innerHTML = '<div class="empty">テロップ編集ダイアログの下にある「★ ライブラリに保存」で、'
       + 'ここに貯まります。別のプロジェクトでもそのまま使えます。'
-      + '<br><br>画像を使ったセットは、<b>元の画像ファイルも残しておいてください</b>。'
-      + 'ライブラリの中のコピーは、セットを消すと一緒に無くなります。</div>';
+      + '<br><br>先に<b>ライブラリフォルダ</b>を決めておくと、テロップ用の画像が'
+      + 'そこに実ファイルで残るので、ブラウザのデータを消しても無くなりません。</div>';
     return;
   }
   list.innerHTML = '';
@@ -3517,7 +3572,10 @@ async function reloadMissingAssets(ask = false) {
     // （ライブラリから置いたテロップの画像は、元ファイルが手元に無いことがある）
     if (!file && a.kind === 'image') {
       const asset = await Lib.findAssetByName(a.name).catch(() => null);
-      if (asset) { file = await Lib.dataURLToFile(asset.dataUrl, asset.name); fromLib++; }
+      if (asset) {
+        file = await Lib.assetToFile(asset).catch(() => null);
+        if (file) fromLib++;
+      }
     }
     if (!file) continue;
     status(`${a.name} を読み込んでいます…`);
@@ -3714,11 +3772,45 @@ for (const t of document.querySelectorAll('.bintab')) {
 }
 $('libRefresh').onclick = () => reloadLibrary();
 
+// ライブラリフォルダ（テロップ用画像の置き場所）
+$('libDirPick').onclick = async () => {
+  if (!('showDirectoryPicker' in window)) return status('このブラウザはフォルダを選べません', true);
+  try {
+    const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    S.libDir = dir;
+    await FS.setLibDir(dir);
+    renderLibDir();
+    status(`ライブラリフォルダを ${dir.name} にしました`);
+  } catch (e) { if (e.name !== 'AbortError') status(e.message, true); }
+};
+
+/** ライブラリフォルダの表示を更新する */
+function renderLibDir() {
+  const el = $('libDirName');
+  if (!el) return;
+  el.textContent = S.libDir ? S.libDir.name : '未設定';
+  el.classList.toggle('unset', !S.libDir);
+  el.title = S.libDir ? `ライブラリフォルダ: ${S.libDir.name}` : 'まだ決めていません（画像はブラウザの中に抱えます）';
+}
+
+/** 覚えているライブラリフォルダを読み戻す */
+async function restoreLibDir() {
+  S.libDir = await FS.getLibDir().catch(() => null);
+  renderLibDir();
+}
+
 $('libExport').onclick = async () => {
   try {
-    const text = await Lib.exportAll();
     const n = S.libSets.length;
     if (!n) return status('ライブラリが空です', true);
+    // ライブラリフォルダに実ファイルで置いてある画像は、既定では名前だけ書き出す。
+    // 別の PC へ持っていくなら埋め込んでおかないと画像が付いてこない
+    const hasFiles = S.libSets.some((e) => (e.assets ?? []).some((a) => a.file));
+    const embed = hasFiles
+      && confirm('画像もファイルに埋め込みますか？\n\n'
+        + '［OK］別の PC へ移せます（サイズは大きくなります）\n'
+        + '［キャンセル］名前だけ書き出します（ライブラリフォルダと一緒に使ってください）');
+    const text = await Lib.exportAll(embed);
     const name = 'テロップライブラリ.kirikolib';
     if ('showSaveFilePicker' in window) {
       try {
@@ -4004,6 +4096,7 @@ renderHistoryUI();
 renderAll();
 reloadLibrary();
 restoreWorkDir();
+restoreLibDir();
 status('準備完了 — 作業フォルダを開くか、mp4 をここへドロップしてください');
 
 // ---------------------------------------------------------------- MCP 連携

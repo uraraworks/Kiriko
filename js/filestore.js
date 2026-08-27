@@ -45,6 +45,32 @@ export async function setWorkDir(handle) {
   db.close();
 }
 
+// テロップライブラリの画像を置くフォルダ。
+// IndexedDB に画像を丸ごと（dataURL で）抱えると重くなるので、
+// 実ファイルはここに置いて、ライブラリからは名前で参照する。
+const LIB = '__lib__';
+
+/** ライブラリフォルダを覚える */
+export async function setLibDir(handle) {
+  if (!handle) return;
+  const db = await open();
+  await tx(db, DIRS, 'readwrite', (st) => st.put(handle, LIB));
+  db.close();
+}
+
+/** 覚えているライブラリフォルダ（無ければ null） */
+export async function getLibDir() {
+  const db = await open();
+  const h = await tx(db, DIRS, 'readonly', (st) => st.get(LIB));
+  db.close();
+  return h ?? null;
+}
+
+/** ライブラリフォルダから 1 ファイル読む */
+export async function readFile(dir, name) {
+  try { return await (await dir.getFileHandle(name)).getFile(); } catch { return null; }
+}
+
 /** 覚えている作業フォルダ（無ければ null） */
 export async function getWorkDir() {
   const db = await open();
