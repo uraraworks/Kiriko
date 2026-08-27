@@ -28,7 +28,11 @@ body {
   overflow: hidden;
   user-select: none;
 }
-#app { display: grid; grid-template-rows: 40px minmax(0,1fr) 330px 26px; height: 100%; }
+#app {
+  display: grid;
+  grid-template-rows: 40px minmax(120px,1fr) 6px var(--tl-h, 330px) 26px;
+  height: 100%;
+}
 
 /* ---------- ツールバー ---------- */
 .toolbar {
@@ -148,7 +152,7 @@ kbd {
 }
 
 /* ---------- タイムライン ---------- */
-.timeline { border-top: 1px solid #101216; }
+.timeline { border-top: 1px solid #101216; min-height: 0; overflow: hidden; }
 .timeline > .panel-head { overflow-x: auto; overflow-y: hidden; }
 .tl-tools { margin-left: auto; display: flex; align-items: center; gap: 5px; font-weight: 400; flex: none; }
 .tl-tools .hint { color: #6f7684; font-size: 10.5px; margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -158,24 +162,40 @@ kbd {
   white-space: nowrap; flex: none;
 }
 .mini:hover { background: #3a404b; }
-.tl-body { flex: 1; display: grid; grid-template-columns: 56px minmax(0,1fr); min-height: 0; }
+/* 縦スクロールはここ。見出しとキャンバスが一緒に動く */
+.tl-body {
+  flex: 1; display: grid; grid-template-columns: 56px minmax(0,1fr);
+  min-height: 0; overflow-y: auto; overflow-x: hidden; align-content: start;
+}
 .tl-heads { background: var(--panel2); border-right: 1px solid var(--line-hard); }
 .tl-head {
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; font-weight: 700; color: #9aa2b0; border-bottom: 1px solid var(--line);
 }
 
-.tl-canvas-wrap { position: relative; overflow-x: auto; overflow-y: hidden; }
-.tl-spacer { height: 100%; position: relative; }
-/* canvas は表示幅ぶんだけ描いて左に貼り付けたままにし、スクロールは spacer が担う */
-#tlCanvas { position: sticky; left: 0; display: block; height: 100%; cursor: default; }
+.tl-canvas-wrap { position: relative; overflow: hidden; }
+#tlCanvas { display: block; cursor: default; }
 
-.tl-canvas-wrap::-webkit-scrollbar { height: 11px; }
-.tl-canvas-wrap::-webkit-scrollbar-track { background: #14161b; }
-.tl-canvas-wrap::-webkit-scrollbar-thumb {
+/* 上下を分けるスプリットバー */
+.tl-split {
+  background: #101216; cursor: row-resize; position: relative;
+}
+.tl-split::after {
+  content: ''; position: absolute; left: 50%; top: 2px; width: 46px; height: 2px;
+  transform: translateX(-50%); background: #4a5160; border-radius: 1px;
+}
+.tl-split:hover { background: #2a3140; }
+.tl-split.dragging { background: var(--accent2); }
+
+/* 横スクロール専用の帯 */
+.tl-hscroll { height: 13px; overflow-x: auto; overflow-y: hidden; flex: none; background: #14161b; }
+.tl-hscroll > div { height: 1px; }
+.tl-hscroll::-webkit-scrollbar, .tl-body::-webkit-scrollbar { height: 11px; width: 11px; }
+.tl-hscroll::-webkit-scrollbar-track, .tl-body::-webkit-scrollbar-track { background: #14161b; }
+.tl-hscroll::-webkit-scrollbar-thumb, .tl-body::-webkit-scrollbar-thumb {
   background: #454c5a; border-radius: 6px; border: 2px solid #14161b;
 }
-.tl-canvas-wrap::-webkit-scrollbar-thumb:hover { background: #566073; }
+.tl-hscroll::-webkit-scrollbar-thumb:hover, .tl-body::-webkit-scrollbar-thumb:hover { background: #566073; }
 
 /* ---------- ステータスバー ---------- */
 .statusbar { display: flex; align-items: center; gap: 10px; padding: 0 10px; background: #1a1d23; border-top: 1px solid #101216; }

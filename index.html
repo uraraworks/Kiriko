@@ -259,12 +259,13 @@
   </main>
 
   <!-- ============ タイムライン ============ -->
+  <div class="tl-split" id="tlSplit" title="ドラッグで高さを変える"></div>
   <section class="panel timeline">
     <div class="panel-head">
       タイムライン
       <span class="tl-edit">
         <button id="btnAddMarker" class="mini ico" title="再生位置にマーカーを立てる　［ M ］"><svg class="ic"><use href="#i-marker"/></svg></button>
-        <button id="btnKeepMarked" class="mini" title="区間マーカーの外側をまとめて切り取る（セリフの所だけ残す）"><svg class="ic"><use href="#i-keep"/></svg><span>マーカー区間だけ残す</span></button>
+        <button id="btnNextGap" class="mini" title="区間マーカーの外側（＝消す候補）を 1 つずつ範囲選択して確認する　［ G ］"><svg class="ic"><use href="#i-keep"/></svg><span>次の区間外へ</span></button>
         <span class="tl-sep"></span>
         <button id="btnAddTelop" class="mini ico" title="再生位置にテロップを追加　［ T ］"><svg class="ic"><use href="#i-telop"/></svg></button>
         <span class="tl-sep"></span>
@@ -286,12 +287,14 @@
         <span class="hint">ドラッグ＝移動（カット位置に吸着・Alt で解除）／端ドラッグ＝トリム／ホイール＝スクロール／⌘・Ctrl＋ホイール＝拡大縮小</span>
       </span>
     </div>
-    <div class="tl-body">
+    <div class="tl-body" id="tlBody">
       <div class="tl-heads" id="tlHeads"></div>
       <div class="tl-canvas-wrap" id="tlWrap">
-        <div class="tl-spacer" id="tlSpacer"><canvas id="tlCanvas"></canvas></div>
+        <canvas id="tlCanvas"></canvas>
       </div>
     </div>
+    <!-- 横スクロールは縦スクロールと干渉しないよう独立させる -->
+    <div class="tl-hscroll" id="tlHScroll"><div id="tlSpacer"></div></div>
   </section>
 
   <!-- ============ ステータスバー ============ -->
@@ -324,6 +327,7 @@
         <tr><th colspan="2">マーカー</th></tr>
         <tr><td><kbd>M</kbd></td><td>再生位置にマーカーを立てる</td></tr>
         <tr><td><kbd>,</kbd> / <kbd>.</kbd></td><td>前／次のマーカーへ</td></tr>
+        <tr><td><kbd>G</kbd></td><td>次の「区間マーカーの外」を範囲選択</td></tr>
 
         <tr><th colspan="2">重ね物</th></tr>
         <tr><td><kbd>T</kbd> / <kbd>B</kbd></td><td>テロップ／ぼかしを追加</td></tr>

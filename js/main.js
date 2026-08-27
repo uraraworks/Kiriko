@@ -198,6 +198,7 @@ function normalizeProject() {
   p.blurs = p.blurs ?? [];
   p.markers = (p.markers ?? []).map((m) => ({ duration: 0, text: '', ...m })).sort((a, b) => a.time - b.time);
   p.audioClips = p.audioClips ?? [];
+  p.audioClips.forEach((a) => { if (typeof a.track !== 'number') a.track = a.kind === 'bgm' ? 1 : 0; });
   p.audioAssets = p.audioAssets ?? [];
   p.mix = { se: 1, bgm: 1, ...(p.mix ?? {}) };
 }
@@ -545,6 +546,13 @@ function placeWholeSource(sourceId) {
 }
 
 /** 使われていないテロップトラックを詰める（T1 が空で T2 だけ残る、を避ける） */
+/** 使われていない音源トラックを詰める */
+function compactAudioTracks() {
+  const used = [...new Set(S.project.audioClips.map((a) => a.track ?? 0))].sort((a, b) => a - b);
+  const map = new Map(used.map((v, i) => [v, i]));
+  for (const a of S.project.audioClips) a.track = map.get(a.track ?? 0) ?? 0;
+}
+
 function compactTelopTracks() {
   const used = [...new Set(S.project.telops.map((t) => t.track ?? 0))].sort((a, b) => a - b);
   const map = new Map(used.map((v, i) => [v, i]));
@@ -572,6 +580,7 @@ function deleteSelected() {
   if (S.selectedAudioId) {
     commit('音源を削除');
     S.project.audioClips = S.project.audioClips.filter((a) => a.id !== S.selectedAudioId);
+    compactAudioTracks();
     S.selectedAudioId = null; renderAll(); renderFxForm(true); return;
   }
   if (S.selectedTelopId) {
@@ -674,33 +683,71 @@ function selectBetweenMarkers() {
   status(`マーカー間を選択しました（${tc(a, false)} 〜 ${tc(b, false)}）`);
 }
 
-/**
- * 区間マーカー（duration > 0）で示した所だけを残し、あとは全部切り取る。
- * 「セリフのある所に区間マーカーを立てて」→ ここを押す、が本命の使い方。
- */
-function keepMarkedRangesOnly() {
+/** 区間マーカーをまとめた「残す区間」（重なりは統合する） */
+function keepRanges() {
   const ranges = S.project.markers
     .filter((m) => (m.duration ?? 0) > 0.02)
     .map((m) => [m.time, m.time + m.duration])
     .sort((a, b) => a[0] - b[0]);
-  if (!ranges.length) return status('区間マーカー（長さのあるマーカー）がありません', true);
-
-  // 重なりをまとめる
   const merged = [];
   for (const r of ranges) {
     const last = merged[merged.length - 1];
     if (last && r[0] <= last[1] + 0.001) last[1] = Math.max(last[1], r[1]);
     else merged.push([...r]);
   }
+  return merged;
+}
+
+/** 「残す区間」の外側（＝消す候補）の一覧 */
+function gapRanges() {
   const total = P.totalDuration(S.project);
-  // 残す区間の「隙間」＝消す区間。後ろから消すと前の位置がずれない
   const gaps = [];
   let prev = 0;
-  for (const [a, b] of merged) {
+  for (const [a, b] of keepRanges()) {
     if (a - prev > 0.02) gaps.push([prev, Math.min(a, total)]);
     prev = Math.max(prev, b);
   }
   if (total - prev > 0.02) gaps.push([prev, total]);
+  return gaps;
+}
+
+/**
+ * 再生位置より後ろにある「区間マーカーの外側」を 1 つ範囲選択して、そこへ移動する。
+ * 中身を見て、必要なら範囲を詰めてから Delete、を繰り返す使い方を想定している。
+ * （まとめて消すより、こちらの方が取りこぼしに気付ける）
+ */
+function selectNextGap() {
+  const gaps = gapRanges();
+  if (!gaps.length) return status('区間マーカーの外側がありません（先に区間マーカーを立ててください）', true);
+  // 再生位置より後ろで「終わり」が来る最初の区間外。先頭（0 秒始まり）も拾える
+  const t = S.programTime;
+  const g = gaps.find(([, b]) => b > t + 0.05) ?? gaps[0];
+  setMode('program');
+  S.zoneIn = g[0]; S.zoneOut = g[1];
+  seekProgram(g[0], true);
+  renderZoneUI(); renderAll();
+  const i = gaps.indexOf(g) + 1;
+  status(`区間外 ${i}/${gaps.length} を選択（${tc(g[0], false)} 〜 ${tc(g[1], false)} ／ ${tc(g[1] - g[0], false)}）— 確認して Delete`);
+}
+
+/** 選択中のマーカーの区間をそのまま範囲選択にする */
+function selectMarkerRange() {
+  const m = selectedMarker();
+  if (!m || (m.duration ?? 0) <= 0.02) return status('区間マーカーを選んでください', true);
+  setMode('program');
+  S.zoneIn = m.time; S.zoneOut = m.time + m.duration;
+  seekProgram(m.time, true);
+  renderZoneUI(); renderAll();
+  status(`マーカーの区間を選択しました（${tc(m.time, false)} 〜 ${tc(m.time + m.duration, false)}）`);
+}
+
+/**
+ * 区間マーカー（duration > 0）で示した所だけを残し、あとは全部切り取る。
+ * 「セリフのある所に区間マーカーを立てて」→ ここを押す、が本命の使い方。
+ */
+function keepMarkedRangesOnly() {
+  if (!keepRanges().length) return status('区間マーカー（長さのあるマーカー）がありません', true);
+  const gaps = gapRanges();
   if (!gaps.length) return status('切り取る所がありません');
 
   const removed = gaps.reduce((acc, g) => acc + (g[1] - g[0]), 0);
@@ -772,6 +819,9 @@ function placeAudio(assetId) {
     fadeIn: isBgm ? 1.5 : 0,
     fadeOut: isBgm ? 2 : 0,
   };
+  ac.track = 0;
+  while (S.project.audioClips.some((o) => (o.track ?? 0) === ac.track
+    && ac.start < o.start + o.duration && ac.start + ac.duration > o.start)) ac.track++;
   S.project.audioClips.push(ac);
   select('audio', ac.id);
   renderAll(); renderFxForm(true);
@@ -1948,11 +1998,17 @@ $('scrubBar').addEventListener('pointerdown', (e) => {
 // ---------------------------------------------------------------- 描画：タイムライン
 
 const tlCanvas = $('tlCanvas');
-const RULER_H = 26, MARK_H = 24, FX_H = 22, IMG_H = 30, TELOP_H = 30, TRACK_H = 64, AUD_H = 48;
+const RULER_H = 26, MARK_H = 24, FX_H = 22, IMG_H = 30, TELOP_H = 30, TRACK_H = 60, AUD_H = 42;
 
 /** テロップのトラック数。いつでも 1 本空きがあるようにして、そこへドラッグで移せる */
 function telopTrackCount() {
   const max = S.project.telops.reduce((m, t) => Math.max(m, t.track ?? 0), -1);
+  return Math.max(2, max + 2);
+}
+
+/** SE / BGM のトラック数。A1 は素材音なので、こちらは A2 から始まる */
+function audioTrackCount() {
+  const max = S.project.audioClips.reduce((m, a) => Math.max(m, a.track ?? 0), -1);
   return Math.max(2, max + 2);
 }
 
@@ -1970,7 +2026,7 @@ function trackLayout() {
   for (let i = 0; i < telopTrackCount(); i++) push('telop', i, `T${i + 1}`, TELOP_H);
   push('video', 0, 'V1', TRACK_H);
   push('audio', 0, 'A1', TRACK_H);
-  push('music', 0, 'A2', AUD_H);
+  for (let i = 0; i < audioTrackCount(); i++) push('music', i, `A${i + 2}`, AUD_H);
   return rows;
 }
 
@@ -1994,11 +2050,13 @@ function tracksBottom() {
 function tlSize() {
   const wrap = $('tlWrap');
   const dpr = devicePixelRatio || 1;
-  const w = wrap.clientWidth, h = wrap.clientHeight;
+  const w = wrap.clientWidth;
+  const h = tracksBottom();           // 全トラック分。足りない分は .tl-body が縦スクロールする
   if (tlCanvas.width !== Math.round(w * dpr) || tlCanvas.height !== Math.round(h * dpr)) {
     tlCanvas.width = Math.round(w * dpr); tlCanvas.height = Math.round(h * dpr);
   }
   tlCanvas.style.width = `${w}px`;
+  tlCanvas.style.height = `${h}px`;
   return { w, h, dpr };
 }
 
@@ -2008,9 +2066,9 @@ function tlSize() {
  */
 function setScroll(sec) {
   S.scrollSec = clampScroll(sec);
-  const wrap = $('tlWrap');
+  const bar = $('tlHScroll');
   const want = Math.round(S.scrollSec * S.pxPerSec);
-  if (Math.abs(wrap.scrollLeft - want) > 0.5) wrap.scrollLeft = want;
+  if (Math.abs(bar.scrollLeft - want) > 0.5) bar.scrollLeft = want;
 }
 
 /** spacer の幅＝スクロールできる全長。これでネイティブのスクロールバーが出る */
@@ -2023,13 +2081,45 @@ function updateScrollRange() {
   $('tlSpacer').style.width = `${Math.max(wrap.clientWidth, Math.round(total * S.pxPerSec))}px`;
 }
 
-$('tlWrap').addEventListener('scroll', () => {
+$('tlHScroll').addEventListener('scroll', () => {
   // 自分で scrollLeft を書き換えた分は無視する（フラグではなく値で判定する方が取りこぼさない）
-  const sec = $('tlWrap').scrollLeft / S.pxPerSec;
+  const sec = $('tlHScroll').scrollLeft / S.pxPerSec;
   if (Math.abs(sec - S.scrollSec) < 0.002) return;
   S.scrollSec = sec;
   renderTimeline();
 });
+
+// --- 上下を分けるスプリットバー ---
+(() => {
+  const split = $('tlSplit');
+  const KEY = 'kiriko.timelineHeight';
+  const setHeight = (px) => {
+    const h = Math.max(140, Math.min(innerHeight - 260, px));
+    document.documentElement.style.setProperty('--tl-h', `${Math.round(h)}px`);
+  };
+  const apply = (px) => { setHeight(px); renderTimeline(); };
+  // 起動時は高さを入れるだけ。描画は後段の renderAll() に任せる（この時点ではまだ初期化前）
+  try { const saved = Number(localStorage.getItem(KEY)); if (saved) setHeight(saved); } catch {}
+
+  let dragging = false;
+  split.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    split.classList.add('dragging');
+    try { split.setPointerCapture(e.pointerId); } catch {}
+  });
+  split.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    apply(innerHeight - e.clientY - 26); // ステータスバーのぶんを引く
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    split.classList.remove('dragging');
+    try { localStorage.setItem(KEY, parseInt(getComputedStyle(document.documentElement).getPropertyValue('--tl-h'))); } catch {}
+  };
+  split.addEventListener('pointerup', end);
+  split.addEventListener('pointercancel', end);
+})();
 const secToX = (t) => (t - S.scrollSec) * S.pxPerSec;
 const xToSec = (x) => x / S.pxPerSec + S.scrollSec;
 
@@ -2043,7 +2133,7 @@ function zoomFit() {
   renderTimeline();
 }
 
-/** トラック見出しは本数が変わるので動的に組む */
+/** トラック見出しは本数が変わるので動的に組む。高さもここで内容に合わせる */
 function renderTrackHeads() {
   const el = $('tlHeads');
   const layout = trackLayout();
@@ -2052,6 +2142,8 @@ function renderTrackHeads() {
   el.dataset.sig = sig;
   el.innerHTML = `<div class="tl-head ruler-head" style="height:${RULER_H}px"></div>`
     + layout.map((r) => `<div class="tl-head ${r.kind}" style="height:${r.h}px">${r.label}</div>`).join('');
+  // トラックが増えても収まるよう、タイムラインの高さを中身に合わせる
+  $('tlWrap').style.height = `${tracksBottom()}px`;
 }
 
 let lastView = '';
@@ -2262,11 +2354,9 @@ function drawFxBlock(ctx, x, y, w, h, label, sel, colors, textColor) {
   ctx.restore();
 }
 
-/** A2 は上段が効果音、下段が BGM。重ならないので掴みやすい */
+/** 音源クリップの縦位置。トラックごとに 1 本ずつ置く */
 function audioRowRect(ac) {
-  const top = trackTop('music');
-  const half = (AUD_H - 6) / 2;
-  return ac.kind === 'bgm' ? [top + 3 + half + 1, half - 1] : [top + 3, half - 1];
+  return [trackTop('music', ac.track ?? 0) + 3, AUD_H - 7];
 }
 
 function drawAudioClip(ctx, x, y, w, h, ac, asset, sel) {
@@ -2452,8 +2542,8 @@ function hitMarker(x, y) {
   for (let i = S.project.markers.length - 1; i >= 0; i--) {
     const m = S.project.markers[i];
     const cx = secToX(m.time);
-    const cw = Math.max(10, (m.duration ?? 0) * S.pxPerSec);
-    if (x >= cx - 4 && x <= cx + cw + 4) return { m, cx, cw };
+    const cw = (m.duration ?? 0) > 0 ? (m.duration * S.pxPerSec) : 10;
+    if (x >= cx - 5 && x <= cx + cw + 5) return { m, cx, cw };
   }
   return null;
 }
@@ -2469,12 +2559,13 @@ function hitBlurBlock(x, y) {
 }
 
 function hitAudioClip(x, y) {
-  if (trackAt(y)?.kind !== 'music') return null;
+  const tr = trackAt(y);
+  if (tr?.kind !== 'music') return null;
   for (let i = S.project.audioClips.length - 1; i >= 0; i--) {
     const ac = S.project.audioClips[i];
+    if ((ac.track ?? 0) !== tr.index) continue;
     const cx = secToX(ac.start), cw = ac.duration * S.pxPerSec;
-    const [ry, rh] = audioRowRect(ac);
-    if (x >= cx && x <= cx + cw && y >= ry && y <= ry + rh) return { ac, cx, cw };
+    if (x >= cx && x <= cx + cw) return { ac, cx, cw };
   }
   return null;
 }
@@ -2531,9 +2622,11 @@ tlCanvas.addEventListener('pointerdown', (e) => {
   const mh = hitMarker(x, y);
   if (mh) {
     select('marker', mh.m.id);
-    const eR = (mh.m.duration ?? 0) > 0 && Math.abs(x - (mh.cx + mh.cw)) < 6;
-    drag = eR
-      ? { type: 'markerTrim', m: mh.m, startX: x, orig: { ...mh.m } }
+    const hasRange = (mh.m.duration ?? 0) > 0;
+    const eL = hasRange && Math.abs(x - mh.cx) < 6;
+    const eR = hasRange && Math.abs(x - (mh.cx + mh.cw)) < 6;
+    drag = (eL || eR)
+      ? { type: 'markerTrim', m: mh.m, side: eL ? 'start' : 'end', startX: x, orig: { ...mh.m } }
       : { type: 'markerMove', m: mh.m, startX: x, orig: { ...mh.m } };
     renderAll(); renderFxForm(true); renderTelopForm(true);
     return;
@@ -2643,8 +2736,15 @@ tlCanvas.addEventListener('pointermove', (e) => {
     renderTimeline(); syncFxNumbers();
   } else if (drag.type === 'markerTrim') {
     const d = (x - drag.startX) / S.pxPerSec;
-    const end = snapEdge(drag.orig.time + drag.orig.duration + d, e.altKey);
-    drag.m.duration = Math.max(0, end - drag.m.time);
+    if (drag.side === 'start') {
+      const endAt = drag.orig.time + drag.orig.duration;
+      const ns = Math.max(0, Math.min(endAt - 0.05, snapEdge(drag.orig.time + d, e.altKey)));
+      drag.m.time = ns;
+      drag.m.duration = endAt - ns;
+    } else {
+      const end = snapEdge(drag.orig.time + drag.orig.duration + d, e.altKey);
+      drag.m.duration = Math.max(0.05, end - drag.m.time);
+    }
     renderTimeline(); syncFxNumbers();
   } else if (drag.type === 'blurMove') {
     const d = (x - drag.startX) / S.pxPerSec;
@@ -2660,6 +2760,8 @@ tlCanvas.addEventListener('pointermove', (e) => {
   } else if (drag.type === 'audioMove') {
     const d = (x - drag.startX) / S.pxPerSec;
     drag.ac.start = Math.max(0, snapBlockMove(drag.orig.start + d, drag.orig.duration, e.altKey));
+    const tr = trackAt(e.clientY - tlCanvas.getBoundingClientRect().top);
+    if (tr?.kind === 'music') drag.ac.track = tr.index;
     renderTimeline(); syncFxNumbers();
   } else if (drag.type === 'audioTrim') {
     const d = (x - drag.startX) / S.pxPerSec;
@@ -2788,7 +2890,11 @@ tlCanvas.addEventListener('contextmenu', (e) => {
     if (hit.m) {
       select('marker', hit.m.id);
       items.push({ label: 'マーカーを削除', key: 'Delete' });
-      items.push({ label: 'ここから次のマーカーまでを範囲に', run: () => { seekProgram(hit.m.time, true); selectBetweenMarkers(); } });
+      if ((hit.m.duration ?? 0) > 0.02) {
+        items.push({ label: 'この区間を範囲選択', run: () => { select('marker', hit.m.id); selectMarkerRange(); } });
+      }
+      items.push({ label: '次の区間外を範囲選択', key: 'G', run: () => { seekProgram(hit.m.time, true); selectNextGap(); } });
+      items.push({ label: '区間マーカーの外を全部切り取る…', run: () => keepMarkedRangesOnly() });
     }
     else if (hit.blur) { select('blur', hit.blur.id); items.push({ label: 'ぼかしを削除', key: 'Delete' }); }
     else if (hit.im) { select('image', hit.im.id); items.push({ label: '画像を削除', key: 'Delete' }); }
@@ -2800,6 +2906,10 @@ tlCanvas.addEventListener('contextmenu', (e) => {
   }
   if (zoneRange()) {
     items.push({ label: '範囲を切り取って詰める', key: 'Delete', run: () => extractZone() });
+  }
+  if (!hit && trackAt(y)?.kind === 'marker') {
+    items.push({ label: 'ここにマーカーを立てる', key: 'M', run: () => addMarker(xToSec(x)) });
+    if (keepRanges().length) items.push({ label: '区間マーカーの外を全部切り取る…', run: () => keepMarkedRangesOnly() });
   }
   if (!items.length) { hideContextMenu(); return; }
   showContextMenu(e.clientX, e.clientY, items);
@@ -3020,7 +3130,7 @@ $('btnWaves').onclick = () => {
   renderTimeline();
 };
 $('btnAddMarker').onclick = () => addMarker();
-$('btnKeepMarked').onclick = keepMarkedRangesOnly;
+$('btnNextGap').onclick = selectNextGap;
 $('btnAddTelop').onclick = addTelop;
 $('btnZoneIn').onclick = () => { setMode('program'); zoneIn(); };
 $('btnZoneOut').onclick = () => { setMode('program'); zoneOut(); };
@@ -3126,6 +3236,7 @@ document.addEventListener('keydown', (e) => {
     case 'm': addMarker(); break;
     case ',': jumpMarker(-1); break;
     case '.': jumpMarker(1); break;
+    case 'g': selectNextGap(); break;
     case 'b': addBlur(); break;
     case 'j':
       video.playbackRate = video.paused || video.playbackRate > 0 ? 1 : video.playbackRate;
@@ -3194,6 +3305,9 @@ window.bme = {
   addMarker,
   keepMarkedRangesOnly,
   jumpMarker,
+  selectNextGap,
+  selectMarkerRange,
+  gapRanges,
   addImageAssets,
   placeImage,
   addAudioAssets,
