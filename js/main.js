@@ -698,13 +698,6 @@ function placeImage(assetId, placement = null) {
 
 const EFFECTS = [
   {
-    id: 'telop',
-    name: 'テロップ',
-    desc: '文字を重ねる。枠で位置と寄せを決められる。',
-    key: 'T',
-    add: () => addTelop(),
-  },
-  {
     id: 'blur',
     name: 'ぼかし',
     desc: '区間を全画面ぼかし。顔や表札などのプライバシー保護に。',
@@ -962,6 +955,15 @@ document.addEventListener('pointerdown', (e) => {
   if (!ctxMenu.contains(e.target)) hideContextMenu();
 }, true);
 window.addEventListener('blur', hideContextMenu);
+
+// 文字入力欄以外ではブラウザ標準のメニュー（「コピー」「全てを選択」など）を出さない。
+// 入力欄ではコピー & ペーストが要るのでそのまま通す。
+document.addEventListener('contextmenu', (e) => {
+  const t = e.target;
+  const editable = t instanceof Element
+    && (t.matches('input, textarea, [contenteditable=""], [contenteditable="true"]') || t.closest('[contenteditable="true"]'));
+  if (!editable) e.preventDefault();
+});
 
 overlay.addEventListener('contextmenu', (e) => {
   e.preventDefault(); // ブラウザ標準のメニューは出さない
@@ -1599,8 +1601,38 @@ function tlSize() {
   if (tlCanvas.width !== Math.round(w * dpr) || tlCanvas.height !== Math.round(h * dpr)) {
     tlCanvas.width = Math.round(w * dpr); tlCanvas.height = Math.round(h * dpr);
   }
+  tlCanvas.style.width = `${w}px`;
   return { w, h, dpr };
 }
+
+/**
+ * スクロール位置はここだけで書き換える。
+ * 実際のスクロールバーは spacer の幅で作るので、S.scrollSec と scrollLeft を常に同期させる。
+ */
+function setScroll(sec) {
+  S.scrollSec = clampScroll(sec);
+  const wrap = $('tlWrap');
+  const want = Math.round(S.scrollSec * S.pxPerSec);
+  if (Math.abs(wrap.scrollLeft - want) > 0.5) wrap.scrollLeft = want;
+}
+
+/** spacer の幅＝スクロールできる全長。これでネイティブのスクロールバーが出る */
+function updateScrollRange() {
+  const wrap = $('tlWrap');
+  const visible = wrap.clientWidth / S.pxPerSec;
+  const end = contentEndSec();
+  const margin = Math.min(visible * 0.3, 10);
+  const total = end <= visible ? visible : end + margin;
+  $('tlSpacer').style.width = `${Math.max(wrap.clientWidth, Math.round(total * S.pxPerSec))}px`;
+}
+
+$('tlWrap').addEventListener('scroll', () => {
+  // 自分で scrollLeft を書き換えた分は無視する（フラグではなく値で判定する方が取りこぼさない）
+  const sec = $('tlWrap').scrollLeft / S.pxPerSec;
+  if (Math.abs(sec - S.scrollSec) < 0.002) return;
+  S.scrollSec = sec;
+  renderTimeline();
+});
 const secToX = (t) => (t - S.scrollSec) * S.pxPerSec;
 const xToSec = (x) => x / S.pxPerSec + S.scrollSec;
 
@@ -1608,8 +1640,9 @@ function zoomFit() {
   // クリップだけでなく、末尾に伸びたテロップ・ぼかし・BGM まで含めて収める
   const total = contentEndSec();
   const w = $('tlWrap').clientWidth || 800;
-  S.scrollSec = 0;
   S.pxPerSec = total > 0 ? Math.max(0.5, (w - 20) / total) : 8;
+  updateScrollRange();
+  setScroll(0);
   renderTimeline();
 }
 
@@ -1619,6 +1652,7 @@ function renderTimeline() {
   // 表示範囲が変わったら、まだ手を付けていない生成要求は捨てる（見えない所を作らない）
   const view = `${S.scrollSec.toFixed(2)}:${S.pxPerSec.toFixed(2)}:${w}`;
   if (view !== lastView) { lastView = view; thumbs.clearPending(); waves.clearPending(); }
+  updateScrollRange();
   const ctx = tlCanvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#191c22';
@@ -2236,6 +2270,30 @@ function clampScroll(sec) {
   return Math.max(0, Math.min(max, sec));
 }
 
+// タイムラインの右クリック
+tlCanvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const r = tlCanvas.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  const hit = hitBlurBlock(x, y) || hitImageBlock(x, y) || hitTelopBlock(x, y) || hitAudioClip(x, y) || hitClip(x, y);
+  const items = [];
+
+  if (hit) {
+    if (hit.blur) { select('blur', hit.blur.id); items.push({ label: 'ぼかしを削除', key: 'Delete' }); }
+    else if (hit.im) { select('image', hit.im.id); items.push({ label: '画像を削除', key: 'Delete' }); }
+    else if (hit.tel) { select('telop', hit.tel.id); items.push({ label: 'テロップを削除', key: 'Delete' }); }
+    else if (hit.ac) { select('audio', hit.ac.id); items.push({ label: '音源を削除', key: 'Delete' }); }
+    else if (hit.clip) { select('clip', hit.clip.id); items.push({ label: 'クリップを削除' }); }
+    items[0].run = () => deleteSelected();
+    renderAll(); renderTelopForm(true); renderFxForm(true);
+  }
+  if (zoneRange()) {
+    items.push({ label: '範囲を切り取って詰める', key: 'Delete', run: () => extractZone() });
+  }
+  if (!items.length) { hideContextMenu(); return; }
+  showContextMenu(e.clientX, e.clientY, items);
+});
+
 $('tlWrap').addEventListener('wheel', (e) => {
   e.preventDefault();
   const r = tlCanvas.getBoundingClientRect();
@@ -2246,11 +2304,12 @@ $('tlWrap').addEventListener('wheel', (e) => {
     const anchorSec = xToSec(px);
     const f = Math.exp(-e.deltaY * 0.002);
     S.pxPerSec = Math.max(0.2, Math.min(400, S.pxPerSec * f));
-    S.scrollSec = Math.max(0, anchorSec - px / S.pxPerSec);
+    updateScrollRange();
+    setScroll(anchorSec - px / S.pxPerSec);
   } else {
     // ホイールは横スクロール。トラックパッドの横スワイプ（deltaX）も拾う。
     const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    S.scrollSec = clampScroll(S.scrollSec + d / S.pxPerSec);
+    setScroll(S.scrollSec + d / S.pxPerSec);
   }
   renderTimeline();
 }, { passive: false });
@@ -2426,7 +2485,8 @@ function zoomBy(f) {
   const centerSec = S.scrollSec + visible / 2;
   S.pxPerSec = Math.max(0.2, Math.min(400, S.pxPerSec * f));
   const nv = ($('tlWrap').clientWidth || 800) / S.pxPerSec;
-  S.scrollSec = clampScroll(centerSec - nv / 2);
+  updateScrollRange();
+  setScroll(centerSec - nv / 2);
   renderTimeline();
 }
 $('btnZoomIn').onclick = () => zoomBy(1.5);
@@ -2444,6 +2504,7 @@ $('btnWaves').onclick = () => {
   $('btnWaves').classList.toggle('on', S.showWaves);
   renderTimeline();
 };
+$('btnAddTelop').onclick = addTelop;
 $('btnZoneIn').onclick = () => { setMode('program'); zoneIn(); };
 $('btnZoneOut').onclick = () => { setMode('program'); zoneOut(); };
 $('btnExtract').onclick = extractZone;

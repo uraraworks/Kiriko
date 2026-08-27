@@ -249,6 +249,8 @@
     <div class="panel-head">
       タイムライン
       <span class="tl-edit">
+        <button id="btnAddTelop" class="mini ico" title="再生位置にテロップを追加　［ T ］"><svg class="ic"><use href="#i-telop"/></svg></button>
+        <span class="tl-sep"></span>
         <button id="btnZoneIn" class="mini zone ico" title="範囲の開始をカーソル位置に　［ I ］"><svg class="ic"><use href="#i-in"/></svg></button>
         <button id="btnZoneOut" class="mini zone ico" title="範囲の終了をカーソル位置に　［ O ］"><svg class="ic"><use href="#i-out"/></svg></button>
         <button id="btnExtract" class="mini danger" title="範囲を切り取って後ろを詰める　［ Delete ］"><svg class="ic"><use href="#i-cut"/></svg><span>切り取り</span></button>
@@ -278,7 +280,7 @@
         <div class="tl-head aud2">A2</div>
       </div>
       <div class="tl-canvas-wrap" id="tlWrap">
-        <canvas id="tlCanvas"></canvas>
+        <div class="tl-spacer" id="tlSpacer"><canvas id="tlCanvas"></canvas></div>
       </div>
     </div>
   </section>
