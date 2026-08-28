@@ -64,3 +64,76 @@ test('deserialize: 素材の一覧が消えない', () => {
   const back = P.deserialize(JSON.stringify({ version: P.PROJECT_VERSION, sources: src }));
   assert.deepEqual(back.sources, src);
 });
+
+// --- 出力の大きさを変えた時の作り直し ---
+
+const sample = () => ({
+  output: { width: 1920, height: 1080 },
+  telops: [{
+    id: 't1', box: { x: 160, y: 820, w: 1600, h: 200 },
+    textX: 40, textY: -20, rowGap: 10,
+    bgBox: { x: 10, y: 20, w: 100, h: 50 },
+    icon: { size: 120, gap: 20, x: 30, y: 40 },
+    rows: [{ size: 96, strokeWidth: 16, letterSpacing: 4, fill: '#fff' }],
+  }],
+  images: [{ id: 'i1', box: { x: 100, y: 200, w: 400, h: 300 }, crop: { x: 5, y: 6, w: 7, h: 8 } }],
+  blurs: [{ id: 'b1', strength: 40, rect: { x: 760, y: 400, w: 400, h: 280 },
+            keys: [{ t: 1, x: 100, y: 100, w: 200, h: 100 }] }],
+  telopPresets: [{ name: 'p', style: { size: 92, strokeWidth: 16, box: { x: 160, y: 820, w: 1600, h: 200 } } }],
+});
+
+test('rescale: FHD → 4K で位置も大きさも 2 倍になる', () => {
+  const p = P.rescale(sample(), 2, 2);
+  assert.deepEqual(p.telops[0].box, { x: 320, y: 1640, w: 3200, h: 400 });
+  assert.deepEqual(p.images[0].box, { x: 200, y: 400, w: 800, h: 600 });
+  assert.equal(p.telops[0].rows[0].size, 192);
+  assert.equal(p.telops[0].rows[0].strokeWidth, 32);
+  assert.equal(p.telops[0].rows[0].letterSpacing, 8);
+  assert.equal(p.telops[0].rowGap, 20);
+  assert.deepEqual(p.blurs[0].rect, { x: 1520, y: 800, w: 800, h: 560 });
+  assert.deepEqual(p.blurs[0].keys[0], { t: 1, x: 200, y: 200, w: 400, h: 200 });
+});
+
+test('rescale: 文字の位置・背景画像・アイコンも付いてくる', () => {
+  const p = P.rescale(sample(), 2, 2);
+  const t = p.telops[0];
+  assert.equal(t.textX, 80);
+  assert.equal(t.textY, -40);
+  assert.deepEqual(t.bgBox, { x: 20, y: 40, w: 200, h: 100 });
+  assert.deepEqual(t.icon, { size: 240, gap: 40, x: 60, y: 80 });
+});
+
+test('rescale: 画像の使う範囲（素材側の画素）は触らない', () => {
+  const p = P.rescale(sample(), 2, 2);
+  assert.deepEqual(p.images[0].crop, { x: 5, y: 6, w: 7, h: 8 });
+});
+
+test('rescale: 縦横の比が違う時、大きさは小さい方に合わせる', () => {
+  // 1920×1080 → 1080×1920（縦動画）。横は 0.5625 倍、縦は 1.777 倍
+  const p = P.rescale(sample(), 1080 / 1920, 1920 / 1080);
+  assert.equal(p.telops[0].box.x, 90);
+  assert.equal(Math.round(p.telops[0].rows[0].size), 54, '文字が縦に合わせて膨らむと画面から溢れる');
+});
+
+test('rescale: ぼかしの強さはスライダーの範囲に収める', () => {
+  const p = P.rescale(sample(), 4, 4);
+  assert.equal(p.blurs[0].strength, 120);
+  const q = P.rescale(sample(), 0.01, 0.01);
+  assert.equal(q.blurs[0].strength, 4);
+});
+
+test('rescale: プリセットも一緒に直る', () => {
+  const p = P.rescale(sample(), 2, 2);
+  assert.deepEqual(p.telopPresets[0].style.box, { x: 320, y: 1640, w: 3200, h: 400 });
+  assert.equal(p.telopPresets[0].style.size, 184);
+});
+
+test('rescale: 倍率が 1 なら何も変えない', () => {
+  const before = JSON.stringify(sample());
+  assert.equal(JSON.stringify(P.rescale(sample(), 1, 1)), before);
+});
+
+test('rescale: 中身が足りなくても落ちない', () => {
+  assert.doesNotThrow(() => P.rescale({}, 2, 2));
+  assert.doesNotThrow(() => P.rescale(P.createProject(), 2, 2));
+});

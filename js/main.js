@@ -114,7 +114,29 @@ const selectedBlur = () => S.project.blurs.find((b) => b.id === S.selectedBlurId
 const selectedAudio = () => S.project.audioClips.find((a) => a.id === S.selectedAudioId) || null;
 const selectedImage = () => S.project.images.find((i) => i.id === S.selectedImageId) || null;
 const selectedMarker = () => S.project.markers.find((m) => m.id === S.selectedMarkerId) || null;
-const presets = () => S.project.telopPresets ?? T.DEFAULT_PRESETS;
+/** 書式の中の「大きさを持つ値」を引き伸ばす（枠と文字まわり） */
+function scaleStyle(style, sx, sy) {
+  if (!style) return style;
+  const s = Math.min(sx, sy);
+  if (style.box) {
+    style.box = { x: style.box.x * sx, y: style.box.y * sy, w: style.box.w * sx, h: style.box.h * sy };
+  }
+  for (const k of ['size', 'strokeWidth', 'letterSpacing']) {
+    if (typeof style[k] === 'number') style[k] *= s;
+  }
+  return style;
+}
+
+/** 1920×1080 を基準に書かれた既定値を、いまの出力の大きさに直す */
+function toOutputScale(style) {
+  const out = S.project.output;
+  return scaleStyle({ ...style, box: style.box ? { ...style.box } : undefined },
+    out.width / 1920, out.height / 1080);
+}
+
+// 既定プリセットは 1920×1080 で書いてあるので、出力に合わせてから見せる。
+// 保存済み（プロジェクトの中）のものは、その時の出力の大きさで入っているのでそのまま
+const presets = () => S.project.telopPresets ?? T.DEFAULT_PRESETS.map((p) => ({ ...p, style: toOutputScale(p.style) }));
 
 // ---------------------------------------------------------------- 履歴（アンドゥ / リドゥ）
 
@@ -964,7 +986,9 @@ function addTelop() {
   const t0 = Math.min(currentTimelineTime(), Math.max(0, total - 0.5));
   const t1 = Math.min(total, t0 + 3);
   commit('テロップ追加');
-  const tel = T.createTelop(t0, t1, S.telopStyle, 'テロップ');
+  // 枠の指定が無ければ既定の枠（1920×1080 基準）を出力の大きさに直して使う
+  const style = S.telopStyle.box ? S.telopStyle : { ...S.telopStyle, box: toOutputScale({ box: T.DEFAULT_BOX }).box };
+  const tel = T.createTelop(t0, t1, style, 'テロップ');
   tel.z = zRange()[1] + 1;
   // 同じ時間に既にテロップがあるトラックは避けて、空いている所へ置く
   tel.track = 0;
@@ -5193,8 +5217,14 @@ $('btnZoneClear').onclick = clearZone;
 $('optRes').onchange = (e) => {
   commit('出力解像度を変更');
   const [w, h] = e.target.value.split('x').map(Number);
-  S.project.output.width = w; S.project.output.height = h;
-  renderOverlay();
+  const out = S.project.output;
+  // 置いてあるものを新しい大きさに合わせ直す（そのままだと左上に寄ってしまう）
+  const sx = w / (out.width || w), sy = h / (out.height || h);
+  P.rescale(S.project, sx, sy);
+  scaleStyle(S.telopStyle, sx, sy);   // 次に足すテロップの既定も合わせる
+  out.width = w; out.height = h;
+  renderAll(); renderTelopForm(true); renderFxForm(true);
+  status(`出力を ${w} × ${h} にしました（置いてあるものの位置と大きさも合わせました）`);
 };
 
 $('fileInput').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; };

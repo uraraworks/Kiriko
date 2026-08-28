@@ -83,3 +83,55 @@ export function sliverClips(project, minLen) {
   });
   return out;
 }
+
+/**
+ * 出力の大きさが変わった時に、置いてあるものの位置と大きさを合わせ直す。
+ *
+ * FHD で作ったものを 4K にすると、座標をそのままにしては画面の左上へ寄ってしまう。
+ * 見た目の割合を保つため、横は sx、縦は sy で引き伸ばす。
+ *
+ * 文字の大きさ・縁の太さ・ぼかしの強さのように「向きを持たない量」は、
+ * 縦横で比が違う時（16:9 → 9:16 など）にはみ出さないよう、**小さい方**に合わせる。
+ *
+ * 画像の `crop` は素材側の画素なので触らない（出力の大きさとは無関係）。
+ *
+ * @param {object} project 中身を書き換える
+ */
+export function rescale(project, sx, sy) {
+  if (!(sx > 0) || !(sy > 0) || (sx === 1 && sy === 1)) return project;
+  const s = Math.min(sx, sy);
+  const box = (b) => { if (!b) return; b.x *= sx; b.y *= sy; b.w *= sx; b.h *= sy; };
+  const styleSizes = (o) => {
+    if (!o) return;
+    if (typeof o.size === 'number') o.size *= s;
+    if (typeof o.strokeWidth === 'number') o.strokeWidth *= s;
+    if (typeof o.letterSpacing === 'number') o.letterSpacing *= s;
+  };
+
+  for (const t of project.telops ?? []) {
+    box(t.box);
+    box(t.bgBox);
+    if (typeof t.textX === 'number') t.textX *= sx;
+    if (typeof t.textY === 'number') t.textY *= sy;
+    if (typeof t.rowGap === 'number') t.rowGap *= s;
+    if (t.icon) {
+      if (typeof t.icon.size === 'number') t.icon.size *= s;
+      if (typeof t.icon.gap === 'number') t.icon.gap *= s;
+      if (typeof t.icon.x === 'number') t.icon.x *= sx;
+      if (typeof t.icon.y === 'number') t.icon.y *= sy;
+    }
+    for (const r of t.rows ?? []) styleSizes(r);
+  }
+  for (const im of project.images ?? []) box(im.box);
+  for (const b of project.blurs ?? []) {
+    box(b.rect);
+    for (const k of b.keys ?? []) box(k);
+    // 強さはスライダーの範囲（4〜120）に収める
+    if (typeof b.strength === 'number') b.strength = Math.max(4, Math.min(120, b.strength * s));
+  }
+  for (const p of project.telopPresets ?? []) {
+    box(p.style?.box);
+    styleSizes(p.style);
+  }
+  return project;
+}
