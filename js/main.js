@@ -3969,14 +3969,22 @@ function snapTargets(includePlayhead = true) {
   return list;
 }
 
+/** 置いてあるもの（テロップ・画像・音源・ぼかし）の先頭 */
+function elementStarts() {
+  const P0 = S.project;
+  return [...P0.telops, ...P0.images, ...P0.audioClips, ...P0.blurs].map((x) => x.start);
+}
+
 /**
  * 再生位置のドラッグも区切りに吸着させる。
  * 画像やテロップをカットの頭に合わせたい時、まずカーソルをそこへ置くので効いてくる。
+ * 置いてあるものの先頭にも吸わせる（そこの絵を確かめたり、頭を揃えたりするため）。
+ * ここだけの吸着先で、ものを動かす時には使わない（自分自身の先頭に吸い付いてしまうため）。
  */
 function snapPlayhead(sec, alt) {
   S.snapLine = null;
   if (alt) return sec;
-  const targets = snapTargets(false);
+  const targets = [...snapTargets(false), ...elementStarts()];
   if (S.zoneIn !== null) targets.push(S.zoneIn);
   if (S.zoneOut !== null) targets.push(S.zoneOut);
   const hit = snapOne(sec, targets);
