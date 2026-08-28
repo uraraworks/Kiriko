@@ -48,7 +48,26 @@ function buildSamples() {
       '-f', 'lavfi', '-i', 'color=c=0x2f6fd0@1:size=420x140,format=rgba',
       '-frames:v', '1', png]);
   }
-  return { mp4: 'public/help/_sample/sample.mp4', mp3: 'public/help/_sample/bgm.mp3', png: 'public/help/_sample/logo.png' };
+  // 「使う範囲」の説明用。1 枚の中に区画が分かれていないと、切り出す意味が伝わらない
+  const shot = join(SAMPLE_DIR, 'screenshot.png');
+  if (!existsSync(shot)) {
+    execFileSync('ffmpeg', ['-v', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=0x1b1f27:size=960x640',
+      '-vf', [
+        'drawbox=x=0:y=0:w=960:h=64:color=0x2f6fd0@1:t=fill',
+        'drawbox=x=24:y=96:w=430:h=230:color=0x3a4250@1:t=fill',
+        'drawbox=x=500:y=96:w=430:h=230:color=0x4a3a28@1:t=fill',
+        'drawbox=x=24:y=360:w=430:h=230:color=0x2a4a38@1:t=fill',
+        'drawbox=x=500:y=360:w=430:h=230:color=0x4a2a38@1:t=fill',
+      ].join(','),
+      '-frames:v', '1', shot]);
+  }
+  return {
+    mp4: 'public/help/_sample/sample.mp4',
+    mp3: 'public/help/_sample/bgm.mp3',
+    png: 'public/help/_sample/logo.png',
+    shot: 'public/help/_sample/screenshot.png',
+  };
 }
 
 /** ページ内で素材を読み込む（fetch → File にして bme.addFiles） */
@@ -125,6 +144,26 @@ async function main() {
     await sleep(800);
     await shot('04-cut');
 
+    // 4b) 切りすぎた所を戻す（カットの継ぎ目に印が出ている状態）
+    await run(`(() => {
+      // 範囲を切ってから、その継ぎ目へカーソルを合わせる
+      document.getElementById('btnExtract').click();
+    })()`);
+    await sleep(800);
+    await run(`(() => {
+      // 頭に戻してから継ぎ目へ送る（「継ぎ目へ移動しました」の案内を出すため）
+      window.bme.state.programTime = 0;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '>', bubbles: true }));
+    })()`);
+    await sleep(600);
+    await shot('11-restore');
+
+    // 戻して元の尺に近づけてから、続きを撮る
+    await run(`(() => {
+      document.getElementById('btnUndo').click();
+    })()`);
+    await sleep(600);
+
     // 5) テロップ編集
     await run(`(() => {
       const S = window.bme.state;
@@ -161,6 +200,39 @@ async function main() {
     })()`);
     await sleep(1200);
     await shot('06-image-audio');
+
+    // 6b) 画像の「使う範囲」（元画像を切り出さずに一部だけ使う）
+    await run(loadFiles([S.shot]));
+    await page.waitForFunction('window.bme.project.imageAssets.length > 1', { timeout: 60000 });
+    await run(`(() => {
+      const P = window.bme.project, St = window.bme.state;
+      const a = P.imageAssets.find((x) => x.name === 'screenshot.png');
+      St.programTime = 10;
+      window.bme.placeImage(a.id, 'center');
+      const im = P.images[P.images.length - 1];
+      // 右上の区画だけを使っている状態（元画像を切り出さずに一部を見せる例）
+      im.crop = { x: 490, y: 86, w: 450, h: 250 };
+      im.box = { x: 560, y: 240, w: 800, h: 450 };
+      Object.assign(St, { selectedMarkerId: null, selectedBlurId: null,
+        selectedAudioId: null, selectedTelopId: null, selectedImageId: im.id });
+      window.bme.render();
+      document.getElementById('imCrop')?.scrollIntoView({ block: 'center' });
+    })()`);
+    await sleep(1000);
+    await shot('12-crop');
+
+    // 続きの撮影に影響しないよう、置いた画像は外しておく
+    await run(`(() => {
+      const P = window.bme.project;
+      P.images = P.images.filter((im) => {
+        const a = P.imageAssets.find((x) => x.id === im.assetId);
+        return a && a.name !== 'screenshot.png';
+      });
+      window.bme.state.selectedImageId = null;
+      window.bme.state.programTime = 2;
+      window.bme.render();
+    })()`);
+    await sleep(400);
 
     // 7) マーカー
     await run(`(async () => {

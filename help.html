@@ -188,6 +188,41 @@
   何段でも戻せるので、思い切って進めて大丈夫です。</p>
 </div>
 
+<h3>切りすぎた所を、後から少しだけ戻す</h3>
+<p><b>カットで消した分は捨てていません。</b>
+語尾が切れた、話し始めが欠けた、という時は、その場で少しだけ返せます。</p>
+
+<figure>
+  <img src="public/help/11-restore.png" alt="カットの継ぎ目から戻す">
+  <figcaption>戻せる分が残っている継ぎ目には印が出ます。
+  カーソルを合わせると、あと何秒戻せるかが出ます。</figcaption>
+</figure>
+
+<ol class="steps">
+  <li>
+    <h3><kbd>&lt;</kbd> <kbd>&gt;</kbd> で継ぎ目へ移動</h3>
+    <p>カットした場所を順に送ります。タイムラインの印をたよりに探しても構いません。</p>
+  </li>
+  <li>
+    <h3><kbd>[</kbd> で前を、<kbd>]</kbd> で後ろを 0.5 秒戻す</h3>
+    <p>語尾が切れていたら <kbd>[</kbd>、話し始めが切れていたら <kbd>]</kbd>。
+    聞きながら足りない方に足していきます。押すたびに 0.5 秒ずつ戻ります。</p>
+  </li>
+  <li>
+    <h3>戻しすぎたら <kbd>{</kbd> <kbd>}</kbd> で削り直す</h3>
+    <p>同じ場所で行ったり来たりできます。タイムライン上のボタンからも操作できます。</p>
+  </li>
+</ol>
+
+<div class="note">
+  <p><strong><kbd>⌘Z</kbd> との違い。</strong>
+  <kbd>⌘Z</kbd> は「直前の操作をまるごと取り消す」ものなので、
+  カットの後に別の作業をしてしまうと、そのカットだけを戻すことはできません。
+  こちらは<b>いつでも、その箇所だけを、秒単位で</b>返せます。</p>
+  <p>そのため、<b>迷ったら少し多めに切ってしまって構いません。</b>
+  後から聞き直して、足りない所だけ返す方が速く進みます。</p>
+</div>
+
 <h3>使いたい所だけを拾っていく方法</h3>
 <p>長い素材から短い場面をたくさん集めたい時は、逆のやり方もできます。
 再生画面の <b>ソース</b> タブに切り替えて <kbd>I</kbd> <kbd>O</kbd> で範囲を決め、
@@ -288,6 +323,12 @@
 <figure>
   <img src="public/help/06-image-audio.png" alt="画像と音源を置いたところ">
   <figcaption>画像は IM、効果音や BGM は A2 から下に並びます。</figcaption>
+</figure>
+
+<figure>
+  <img src="public/help/12-crop.png" alt="画像の使う範囲を指定しているところ">
+  <figcaption>プロパティの <b>使う範囲</b>。使わない所が暗くなります。
+  ドラッグで範囲指定、中をドラッグで移動、四隅で拡大縮小。</figcaption>
 </figure>
 
 <div class="cards">
@@ -459,6 +500,11 @@ YouTube にそのまま上げられる形式（H.264 + AAC）です。</p>
   <tr><td><kbd>Delete</kbd></td><td>範囲を切り取る（範囲が無い時は選択中のものを削除）</td></tr>
   <tr><td><kbd>Esc</kbd></td><td>範囲の選択をやめる</td></tr>
   <tr><td><kbd>Enter</kbd></td><td>ソースの範囲をクリップとして追加</td></tr>
+
+  <tr><th colspan="2">切りすぎた所を戻す</th></tr>
+  <tr><td><kbd>&lt;</kbd> / <kbd>&gt;</kbd></td><td>前／次のカットの継ぎ目へ</td></tr>
+  <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>継ぎ目の前／後ろを 0.5 秒戻す</td></tr>
+  <tr><td><kbd>{</kbd> / <kbd>}</kbd></td><td>継ぎ目の前／後ろを 0.5 秒削る</td></tr>
 
   <tr><th colspan="2">重ねるもの</th></tr>
   <tr><td><kbd>T</kbd> / <kbd>B</kbd></td><td>テロップ／ぼかしを追加</td></tr>
