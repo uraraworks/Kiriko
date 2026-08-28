@@ -355,6 +355,7 @@ server.registerTool('kiriko_transcribe', {
   return asText({
     model: model.name,
     transcribedSec: +total.toFixed(1),
+    droppedAsNoise: segments.dropped ?? 0,
     segments,
     markers,
     note: 'sourceFrom / sourceTo は素材の時刻。timeAtStart は書き起こし開始時点の'
