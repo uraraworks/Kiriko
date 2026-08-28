@@ -436,12 +436,33 @@ describe('ブラウザ結合', { skip }, () => {
       await new Promise((r2) => setTimeout(r2, 200));
       const moved = { textX: tel.textX, textY: tel.textY };
 
+      // カーソルの形。動かせるものの上でだけ変わること
+      const probe = (x, y, meta) => {
+        ov.dispatchEvent(new PointerEvent('pointermove', {
+          ...at(x, y), bubbles: true, pointerId: 1, ...(meta ? { metaKey: true } : {}) }));
+        return ov.style.cursor;
+      };
       reset();
-      return { untouched, moved };
+      await new Promise((r2) => setTimeout(r2, 200));
+      const far2 = { x: box.x + 250, y: box.y + box.h / 2 };   // 枠の中、文字もハンドルも無い所
+      const cursor = {
+        inBoxPlain: probe(far2.x, far2.y, false),
+        inBoxMeta: probe(far2.x, far2.y, true),
+        onTextMeta: probe(cx, cy, true),
+        onTextPlain: probe(cx, cy, false),
+      };
+
+      reset();
+      return { untouched, moved, cursor };
     })()`);
     assert.equal(r.untouched.textFree, false, '背景だけの所を掴んで文字が動いている');
     assert.equal(r.untouched.textX, 0, '背景だけの所を掴んで文字が動いている');
     assert.ok(Math.abs(r.moved.textX - 100) < 3, `文字が動いていない: ${r.moved.textX}`);
+    // 動かせるものが下に無い時は、カーソルを変えない（変えると掴めそうに見えて嘘になる）
+    assert.equal(r.cursor.inBoxMeta, r.cursor.inBoxPlain,
+      `動かせないのにカーソルが変わる: ${r.cursor.inBoxMeta}`);
+    assert.equal(r.cursor.onTextMeta, 'move', '文字の上でカーソルが変わらない');
+    assert.notEqual(r.cursor.onTextPlain, 'move', '⌘なしで動かせるように見えている');
   });
 
   test('テロップダイアログの中身がダイアログの外へはみ出さない', async () => {

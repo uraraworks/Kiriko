@@ -1556,8 +1556,11 @@ overlay.addEventListener('pointermove', (e) => {
     }
     const under = cur === 'default' ? pickBox(p, currentTimelineTime()) : null;
     if (under) cur = 'grab';
-    // ⌘ / Ctrl を押している間は「中身を動かす」。押した時点で分かるようにする
-    if (under?.kind === 'telop' && (e.metaKey || e.ctrlKey)) cur = 'move';
+    // ⌘ / Ctrl を押している間は「中身を動かす」。押した時点で分かるようにする。
+    // ただし動かせるものが下に無い時は変えない（変えると掴めそうに見えて嘘になる）
+    if (under?.kind === 'telop' && (e.metaKey || e.ctrlKey) && telopPartAt(under.item, p)) {
+      cur = 'move';
+    }
     overlay.style.cursor = cur;
     return;
   }
