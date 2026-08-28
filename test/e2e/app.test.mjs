@@ -42,6 +42,39 @@ describe('ブラウザ結合', { skip }, () => {
     assert.equal(await ev(`document.getElementById('workDirName').textContent`), 'work');
   });
 
+  test('「素材のフォルダを選ぶ」は保存先を変えない', async () => {
+    // 素材を別フォルダにまとめている人の保存先を、黙って移してしまわないこと。
+    // 作業フォルダがまだ無い時だけ、選んだフォルダをそのまま保存先にする
+    const r = await ev(`(() => {
+      const S = bme.state;
+      const orig = window.showDirectoryPicker;
+      const keep = { workDir: S.workDir, ready: S.workDirReady };
+      const run = (name) => new Promise((res) => {
+        let asked = null;
+        window.showDirectoryPicker = async (opt) => { asked = opt; return { name }; };
+        document.getElementById('mbFolder').click();
+        setTimeout(() => res({ asked, workDir: S.workDir?.name ?? null }), 400);
+      });
+
+      return (async () => {
+        // ① 作業フォルダがある時 … 保存先は変えず、読み取りだけ求める
+        S.workDir = { name: '作業フォルダ' }; S.workDirReady = true;
+        const withWork = await run('素材フォルダ');
+        // ② まだ無い時 … そのまま作業フォルダにする（書き込みも求める）
+        S.workDir = null; S.workDirReady = false;
+        const noWork = await run('初回フォルダ');
+        window.showDirectoryPicker = orig;
+        S.workDir = keep.workDir; S.workDirReady = keep.ready;
+        return { withWork, noWork, label: document.getElementById('mbFolder').textContent };
+      })();
+    })()`);
+    assert.equal(r.withWork.workDir, '作業フォルダ', '保存先が勝手に変わっている');
+    assert.equal(r.withWork.asked.mode, 'read', '要らない書き込み許可を求めている');
+    assert.equal(r.noWork.workDir, '初回フォルダ', '作業フォルダが無い時に決まらない');
+    assert.equal(r.noWork.asked.mode, 'readwrite', '保存先にするのに書き込みを求めていない');
+    assert.ok(r.label.includes('素材'), `ボタンの文言が紛らわしい: ${r.label}`);
+  });
+
   test('タイムラインとフッターの高さが正しい', async () => {
     // グリッドの行がずれると、タイムラインが数 px に潰れてフッターが伸びる
     const r = await ev(`(() => {

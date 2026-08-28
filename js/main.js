@@ -4860,16 +4860,23 @@ $('mbFind').onclick = async () => {
 
 $('mbFolder').onclick = async () => {
   if (!('showDirectoryPicker' in window)) return status('このブラウザはフォルダ選択に対応していません', true);
+  // 作業フォルダが既にあるなら、そちらは動かさない。
+  // ここで選ぶのは「素材を探しに行く場所」であって、保存先ではない。
+  // 素材を別フォルダにまとめている人の保存先を、黙って移してしまわないため
+  const asWork = !(S.workDir && S.workDirReady);
   try {
-    // 書き込みも許してもらう。作業フォルダとして保存先にもするため
-    // （断られても読み取りだけで動く）
-    const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
-    S.workDir = dir;
-    S.workDirReady = true;
-    await FS.setWorkDir(dir);
+    const dir = await window.showDirectoryPicker({ mode: asWork ? 'readwrite' : 'read' });
     await FS.rememberDir(dir);
-    renderWorkDir();
-    status(`${dir.name} を作業フォルダにしました。素材を探しています…`);
+    if (asWork) {
+      // まだ作業フォルダが無い時だけ、そのまま保存先にもする
+      S.workDir = dir;
+      S.workDirReady = true;
+      await FS.setWorkDir(dir);
+      renderWorkDir();
+      status(`${dir.name} を作業フォルダにしました。素材を探しています…`);
+    } else {
+      status(`${dir.name} を素材の置き場所として覚えました（保存先は「${S.workDir.name}」のままです）`);
+    }
     await reloadMissingAssets(true);
   } catch (e) { if (e.name !== 'AbortError') status(e.message, true); }
 };
