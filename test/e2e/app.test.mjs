@@ -428,6 +428,41 @@ describe('ブラウザ結合', { skip }, () => {
     await ev(`document.getElementById('telopDialogClose').click()`);
   });
 
+  test('コマ送りしたら、ぼかしもそのフレームに合わせて描き直される', async () => {
+    // 部分ぼかしは <video> の絵を写して作るので、シーク完了後に描き直さないと
+    // 前のフレームのぼかしが残り、コマ送りのたびにちらついて見える
+    const at0 = await ev(`bme.state.programTime`);
+    await ev(`(() => {
+      bme.addBlur();
+      const b = bme.project.blurs[bme.project.blurs.length - 1];
+      b.shape = 'rect'; b.start = 0; b.end = 100; b.strength = 30;
+      b.rect = { x: 40, y: 40, w: 400, h: 200 }; b.keys = [];
+      bme.render();
+    })()`);
+    await wait(400);
+    // renderOverlay は必ず clearRect から始まるので、その回数で描き直しを数える
+    const n = await ev(`(async () => {
+      const g = document.getElementById('overlay').getContext('2d');
+      const orig = g.clearRect.bind(g);
+      let n = 0;
+      g.clearRect = (...a) => { n++; return orig(...a); };
+      document.getElementById('btnFwd1').click();
+      await new Promise((r) => setTimeout(r, 120));   // timeupdate（約250ms）より短く見る
+      g.clearRect = orig;
+      return n;
+    })()`);
+    assert.ok(n >= 2, `シーク後に描き直していない（描画 ${n} 回）`);
+
+    // 後のテストに影響しないよう、ぼかしと再生位置を戻す
+    await ev(`(() => {
+      bme.project.blurs = bme.project.blurs.filter((b) => b.shape !== 'rect');
+      bme.state.selectedBlurId = null;
+      bme.render();
+    })()`);
+    await ev(`bme.call('seek', { time: ${at0} })`);
+    await wait(300);
+  });
+
   test('画像と効果音を置ける', async () => {
     await dropFiles(page, [F.image, F.audio]);
     await page.waitForFunction('window.bme.project.audioAssets.length > 0 && window.bme.project.imageAssets.length > 0',

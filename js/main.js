@@ -4911,9 +4911,45 @@ function step(d) {
   renderTransport(); renderScrub(); renderTimeline(); renderOverlay();
 }
 
+/**
+ * 新しいフレームが出た直後に重ね物を描き直す。
+ *
+ * 部分ぼかしは <video> の絵をキャンバスに写して作るので、シークの完了前に描くと
+ * 前のフレームのぼかしが残る。そのまま新しいフレームが表示されるため、
+ * コマ送りのたびに「ぼかしが乗っていない絵」が一瞬見えていた。
+ * requestVideoFrameCallback はフレームが出た直後に呼ばれるので、ここで描き直す。
+ */
+let frameCb = null;
+function redrawOnNextFrame() {
+  if (typeof video.requestVideoFrameCallback !== 'function') { renderOverlay(); return; }
+  if (frameCb !== null) video.cancelVideoFrameCallback(frameCb);
+  frameCb = video.requestVideoFrameCallback(() => { frameCb = null; renderOverlay(); });
+}
+
+/** 部分ぼかしがある間は、再生中も毎フレーム描き直す（顔から遅れないように）*/
+function frameLoop() {
+  if (video.paused) { frameCb = null; return; }
+  renderOverlay();
+  frameCb = video.requestVideoFrameCallback(frameLoop);
+}
+function startFrameLoop() {
+  if (typeof video.requestVideoFrameCallback !== 'function') return;
+  if (frameCb !== null) { video.cancelVideoFrameCallback(frameCb); frameCb = null; }
+  // 毎フレーム描き直すのは部分ぼかしがある時だけ。他は timeupdate で足りる
+  if (!(S.project.blurs ?? []).some((b) => b.shape === 'rect')) return;
+  frameCb = video.requestVideoFrameCallback(frameLoop);
+}
+
 video.addEventListener('timeupdate', () => { programTick(); renderTransport(); renderScrub(); if (S.mode === 'program') { renderTimeline(); syncAudioPreview(); } renderOverlay(); });
-video.addEventListener('seeked', () => { renderTransport(); renderScrub(); syncAudioPreview(); });
-video.addEventListener('play', () => { renderTransport(); syncAudioPreview(); });
+video.addEventListener('seeked', () => {
+  renderTransport(); renderScrub(); syncAudioPreview();
+  // seeked の時点で新しいフレームはデコード済みなので、まずここで描き直す。
+  // requestVideoFrameCallback は「実際に表示された瞬間」に更に描き直すためのもので、
+  // 環境によっては呼ばれない（headless 等）ので、こちらを頼りにはしない
+  renderOverlay();
+  redrawOnNextFrame();
+});
+video.addEventListener('play', () => { renderTransport(); syncAudioPreview(); startFrameLoop(); });
 video.addEventListener('pause', () => { renderTransport(); S.audioPreview?.stop(); });
 video.addEventListener('loadedmetadata', () => { renderTransport(); renderScrub(); });
 
