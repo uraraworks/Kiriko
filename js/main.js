@@ -1959,7 +1959,7 @@ function renderMediaBin() {
     const el = document.createElement('div');
     el.className = 'bin-item image' + (ok ? '' : ' missing');
     // 画像が増えると配置ボタンで埋まるので、既定では畳んでおく。
-    // 名前とサムネイルが見えれば見分けは付くし、置くだけなら ＋ で足りる
+    // 名前とサムネイルが見えれば見分けは付くし、置くだけなら行のクリックか ＋ で足りる
     const open = S.binOpen.has(a.id);
     el.innerHTML = `<div class="row"><div class="n">▣ ${esc(a.name)}</div>`
       + (ok ? `<button class="bin-add" title="再生位置に置く（大きさは自動）">＋</button>`
@@ -1990,6 +1990,8 @@ function renderMediaBin() {
     }
     if (ok) {
       el.querySelector('.bin-add').onclick = (e) => { e.stopPropagation(); placeImage(a.id); };
+      // 音源・テロップ・エフェクトと同じく、行のクリックでも置けるようにする
+      el.onclick = () => placeImage(a.id);
       el.querySelector('.bin-more').onclick = (e) => {
         e.stopPropagation();
         if (!S.binOpen.delete(a.id)) S.binOpen.add(a.id);
