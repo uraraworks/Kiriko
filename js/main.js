@@ -1374,6 +1374,56 @@ function pickBox(p, t) {
 
 let boxDrag = null;
 
+/**
+ * テロップの中身のうち、その点にあるものを返す。
+ *
+ * 背景画像は枠いっぱいのことが多く、先に見ると他を全部飲み込んでしまう。
+ * 小さいもの（アイコン）から順に見て、背景画像は最後にする。
+ */
+function telopPartAt(tel, p) {
+  const ctx = overlay.getContext('2d');
+  const inside = (r) => r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+  const { icon } = T.layoutTelop(ctx, tel, S.imageLib);
+  if (inside(icon)) return 'icon';
+  if (inside(T.textBounds(ctx, tel, S.imageLib))) return 'text';
+  const bmp = S.imageLib.get(tel.bgAssetId);
+  if (bmp && inside(T.bgRect(tel, bmp))) return 'bg';
+  return null;
+}
+
+/**
+ * 中身を掴む下ごしらえ。
+ * 「自由に決める」が入っていなければ、**今見えている位置のまま**入れる。
+ * そうしないと掴んだ瞬間に飛んでしまい、狙って動かせない。
+ */
+function beginInnerDrag(tel, part) {
+  const ctx = overlay.getContext('2d');
+  if (part === 'icon') {
+    const { icon } = T.layoutTelop(ctx, tel, S.imageLib);
+    if (!tel.icon.free && icon) {
+      tel.icon.free = true;
+      tel.icon.x = icon.x - tel.box.x;
+      tel.icon.y = icon.y - tel.box.y;
+    }
+    return { x: tel.icon.x ?? 0, y: tel.icon.y ?? 0 };
+  }
+  if (part === 'bg') {
+    const bmp = S.imageLib.get(tel.bgAssetId);
+    if (!tel.bgFree && bmp) {
+      const r = T.bgRect(tel, bmp);
+      tel.bgFree = true;
+      tel.bgBox = { x: r.x - tel.box.x, y: r.y - tel.box.y, w: r.w, h: r.h };
+    }
+    tel.bgBox = tel.bgBox ?? { x: 0, y: 0, w: 0, h: 0 };
+    return { x: tel.bgBox.x, y: tel.bgBox.y };
+  }
+  // 文字は textX / textY が「自動の位置からのずれ」なので、入れても飛ばない
+  tel.textFree = true;
+  return { x: tel.textX ?? 0, y: tel.textY ?? 0 };
+}
+
+const PART_NAME = { icon: 'アイコン', text: '文字', bg: '背景画像' };
+
 overlay.addEventListener('pointerdown', (e) => {
   const p = stagePoint(e);
   const t = currentTimelineTime();
@@ -1401,6 +1451,21 @@ overlay.addEventListener('pointerdown', (e) => {
   try { overlay.setPointerCapture(e.pointerId); } catch {}
   const changed = hit.item.id !== (sel?.item.id ?? null);
   select(hit.kind, hit.item.id);
+
+  // ⌘ / Ctrl を押しながらなら、テロップの「中身」だけを動かす。
+  // 枠ごとの移動と取り違えないよう、修飾キーで分ける
+  if (hit.kind === 'telop' && (e.metaKey || e.ctrlKey)) {
+    const part = telopPartAt(hit.item, p) ?? 'text';   // どれにも当たらなければ文字
+    const orig = beginInnerDrag(hit.item, part);
+    boxDrag = {
+      ...hit, mode: 'inner', part, startX: p.x, startY: p.y, orig,
+      guides: [], committed: false, label: `${PART_NAME[part]}の位置を変更`,
+    };
+    overlay.classList.add('grabbing');
+    renderAll(); renderTelopForm(true);
+    status(`${PART_NAME[part]}を動かしています（離すと確定）`);
+    return;
+  }
   if (hit.kind === 'blur') S.inspTab = 'props';
   boxDrag = {
     ...hit, mode: 'move', startX: p.x, startY: p.y,
@@ -1411,6 +1476,15 @@ overlay.addEventListener('pointerdown', (e) => {
   renderAll();
   if (changed) { renderTelopForm(true); renderFxForm(true); }
 });
+
+/**
+ * 画面外防止。ただし **ぼかしには掛けない**。
+ * 人が画面の外へ歩いて消えていく時、枠も外へ送れないと最後まで追えないため。
+ * テロップや画像は、外に出すと見失うので従来どおり中に留める。
+ */
+function clampFor(kind, box, W, H) {
+  return kind === 'blur' ? box : B.clampBox(box, W, H);
+}
 
 overlay.addEventListener('pointermove', (e) => {
   const p = stagePoint(e);
@@ -1424,7 +1498,10 @@ overlay.addEventListener('pointermove', (e) => {
       const h = B.hitHandle(sel.item.box, p.x, p.y, 9 * stageScale());
       if (h) cur = B.handleCursor(h);
     }
-    if (cur === 'default' && pickBox(p, currentTimelineTime())) cur = 'grab';
+    const under = cur === 'default' ? pickBox(p, currentTimelineTime()) : null;
+    if (under) cur = 'grab';
+    // ⌘ / Ctrl を押している間は「中身を動かす」。押した時点で分かるようにする
+    if (under?.kind === 'telop' && (e.metaKey || e.ctrlKey)) cur = 'move';
     overlay.style.cursor = cur;
     return;
   }
@@ -1435,6 +1512,14 @@ overlay.addEventListener('pointermove', (e) => {
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return; // クリックだけでは履歴に積まない
     commit(boxDrag.label, `box:${item.id}`);
     boxDrag.committed = true;
+  }
+  if (boxDrag.mode === 'inner') {
+    const x = Math.round(boxDrag.orig.x + dx), y = Math.round(boxDrag.orig.y + dy);
+    if (boxDrag.part === 'icon') { item.icon.x = x; item.icon.y = y; }
+    else if (boxDrag.part === 'bg') { item.bgBox.x = x; item.bgBox.y = y; }
+    else { item.textX = x; item.textY = y; }
+    renderOverlay();
+    return;
   }
   if (boxDrag.mode === 'resize') {
     const asset = boxDrag.kind === 'image' && e.shiftKey
@@ -1452,7 +1537,7 @@ overlay.addEventListener('pointermove', (e) => {
     } else {
       boxDrag.guides = [];
     }
-    item.box = B.clampBox(box, W, H);
+    item.box = clampFor(boxDrag.kind, box, W, H);
   } else {
     let box = { ...boxDrag.orig, x: boxDrag.orig.x + dx, y: boxDrag.orig.y + dy };
     if (!e.altKey) {
@@ -1462,7 +1547,7 @@ overlay.addEventListener('pointermove', (e) => {
     } else {
       boxDrag.guides = [];
     }
-    item.box = B.clampBox(box, W, H);          // 画面外へは出さない
+    item.box = clampFor(boxDrag.kind, box, W, H);   // ぼかし以外は画面外へ出さない
   }
   renderOverlay();
   syncBoxNumbers();
@@ -1470,9 +1555,11 @@ overlay.addEventListener('pointermove', (e) => {
 
 overlay.addEventListener('pointerup', () => {
   if (!boxDrag) return;
+  const inner = boxDrag.mode === 'inner';
   boxDrag = null;
   overlay.classList.remove('grabbing');
   renderOverlay();
+  if (inner) renderTelopForm(true);   // 数値欄も動かした値に合わせる
 });
 
 // --- ショートカット一覧（フローティング）---
@@ -1709,7 +1796,7 @@ function nudgeBox(dx, dy) {
   if (!sel) return false;
   commit(sel.kind === 'image' ? '画像を移動' : sel.kind === 'blur' ? 'ぼかし範囲を移動' : 'テロップを移動', `nudge:${sel.item.id}`);
   const b = sel.item.box;
-  sel.item.box = B.clampBox({ ...b, x: b.x + dx, y: b.y + dy }, overlay.width, overlay.height);
+  sel.item.box = clampFor(sel.kind, { ...b, x: b.x + dx, y: b.y + dy }, overlay.width, overlay.height);
   renderOverlay();
   syncBoxNumbers();
   return true;
@@ -2274,6 +2361,9 @@ function renderTelopForm(force = false) {
     <label>縦の寄せ
       <div class="align-grid">${['top', 'middle', 'bottom'].map((a) =>
         `<button data-v="${a}" class="${tel.vAlign === a ? 'on' : ''}" title="${a}">${VA[a]}</button>`).join('')}</div></label>
+    <div class="sub-label">プレビュー上で <b>⌘（Windows は Ctrl）＋ドラッグ</b> すると、
+      枠は動かさずに<b>文字・背景画像・アイコンだけ</b>を動かせます
+      （掴んだものが対象。何も無い所なら文字）。</div>
     <label class="chk"><input type="checkbox" id="telTextFree" ${tel.textFree ? 'checked' : ''}> 文字の位置を自由に決める</label>
     ${tel.textFree ? `
     <div class="grid2">

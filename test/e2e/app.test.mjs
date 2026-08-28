@@ -263,6 +263,72 @@ describe('ブラウザ結合', { skip }, () => {
       m => m.text !== '待たされる'); bme.render(); })()`);
   });
 
+  test('ぼかしは画面外まで動かせる（テロップは画面内に留まる）', async () => {
+    // 人が画面の外へ歩いて消えていく時、枠も外へ送れないと最後まで追えない
+    const r = await ev(`(async () => {
+      const ov = document.getElementById('overlay');
+      const rc = ov.getBoundingClientRect();
+      const at = (x, y) => ({ clientX: rc.left + (x / ov.width) * rc.width,
+                              clientY: rc.top + (y / ov.height) * rc.height });
+      const ev2 = (t, x, y, o = {}) => ov.dispatchEvent(new PointerEvent(t,
+        { ...at(x, y), bubbles: true, pointerId: 1, button: 0, buttons: 1, ...o }));
+
+      bme.addBlur();
+      const bl = bme.project.blurs[bme.project.blurs.length - 1];
+      bl.shape = 'rect'; bl.start = 0; bl.end = 100; bl.keys = [];
+      bl.rect = { x: 1400, y: 400, w: 300, h: 300 };
+      Object.assign(bme.state, { selectedTelopId: null, selectedImageId: null,
+        selectedBlurId: bl.id });
+      bme.render();
+      await new Promise((r2) => setTimeout(r2, 200));
+      ev2('pointerdown', 1550, 550);
+      ev2('pointermove', 2600, 550, { altKey: true });   // Alt で吸着を切る
+      ev2('pointerup', 2600, 550);
+      await new Promise((r2) => setTimeout(r2, 150));
+      const blurX = bme.project.blurs[bme.project.blurs.length - 1].rect.x;
+
+      bme.project.blurs = bme.project.blurs.filter((b) => b.shape !== 'rect');
+      bme.state.selectedBlurId = null;
+      bme.render();
+      return { blurX, W: ov.width };
+    })()`);
+    assert.ok(r.blurX > r.W, `ぼかしが画面外へ出せない: x=${r.blurX}（画面幅 ${r.W}）`);
+  });
+
+  test('⌘ドラッグでテロップの中身だけを動かせる', async () => {
+    const r = await ev(`(async () => {
+      const tel = bme.project.telops[0];
+      tel.textFree = false; tel.textX = 0; tel.textY = 0;
+      Object.assign(bme.state, { selectedBlurId: null, selectedImageId: null,
+        selectedMarkerId: null, selectedTelopId: tel.id });
+      await bme.call('seek', { time: (tel.start + tel.end) / 2 });
+      bme.render();
+      await new Promise((r2) => setTimeout(r2, 200));
+
+      const ov = document.getElementById('overlay');
+      const rc = ov.getBoundingClientRect();
+      const at = (x, y) => ({ clientX: rc.left + (x / ov.width) * rc.width,
+                              clientY: rc.top + (y / ov.height) * rc.height });
+      const ev2 = (t, x, y, o = {}) => ov.dispatchEvent(new PointerEvent(t,
+        { ...at(x, y), bubbles: true, pointerId: 1, button: 0, buttons: 1, ...o }));
+      const box0 = { ...tel.box };
+      const cx = box0.x + box0.w / 2, cy = box0.y + box0.h / 2;
+      ev2('pointerdown', cx, cy, { metaKey: true });
+      ev2('pointermove', cx + 120, cy - 40, { metaKey: true });
+      ev2('pointerup', cx + 120, cy - 40, { metaKey: true });
+      await new Promise((r2) => setTimeout(r2, 200));
+      return { box0, box: { ...tel.box }, textFree: tel.textFree,
+               textX: tel.textX, textY: tel.textY };
+    })()`);
+    assert.equal(r.textFree, true, '「自由に決める」が入っていない');
+    assert.ok(Math.abs(r.textX - 120) < 2, `文字が横に動いていない: ${r.textX}`);
+    assert.ok(Math.abs(r.textY + 40) < 2, `文字が縦に動いていない: ${r.textY}`);
+    assert.deepEqual(r.box, r.box0, '枠まで動いてしまっている');
+
+    await ev(`(() => { const t = bme.project.telops[0];
+      t.textFree = false; t.textX = 0; t.textY = 0; bme.render(); })()`);
+  });
+
   test('テロップダイアログの中身がダイアログの外へはみ出さない', async () => {
     await ev(`(() => {
       bme.state.selectedTelopId = bme.project.telops[0].id;
