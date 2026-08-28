@@ -58,6 +58,7 @@ const S = {
   focusArea: 'timeline',   // 'preview' ならカーソルキーで枠を動かす
   binTab: 'media',
   libSets: [],             // 保存済みテロップセット（プロジェクトをまたいで使える）
+  libDragId: null,         // 並べ替えで掴んでいるセット
   telopRow: 0,             // テロップのどの行を編集中か
   snapLine: null,          // タイムラインで吸着中の位置（秒）
   showThumbs: true,
@@ -2126,7 +2127,14 @@ async function saveTelopToLibrary() {
   // 画像を使っているセットだけ、置き場所を先に確かめる
   const usesImages = [tel.bgAssetId, tel.icon?.assetId].some(Boolean);
   if (usesImages && !(await ensureLibDir())) return;
-  const name = prompt('セット名', Lib.setLabel({ telop: tel }).slice(0, 30));
+
+  // ライブラリから置いたテロップなら、直した中身を元のセットへ戻せるようにする。
+  // 「新規」を選べば今までどおり別のセットとして増える
+  const from = S.libSets.find((e) => e.id === tel.libSetId);
+  const overwrite = from
+    && confirm(`「${from.name}」を、いま選んでいるテロップの中身で上書きしますか？\n\n`
+      + '［キャンセル］を選ぶと、別のセットとして新しく保存します');
+  const name = prompt('セット名', overwrite ? from.name : Lib.setLabel({ telop: tel }).slice(0, 30));
   if (!name) return;
 
   // 使っている画像も一緒に保存する（別プロジェクトでもそのまま出せるように）。
@@ -2146,12 +2154,16 @@ async function saveTelopToLibrary() {
       assets.push({ id, name: iname, dataUrl: await Lib.bitmapToDataURL(bmp) });
     }
   }
-  const { id, start, end, track, z, ...body } = tel;
+  const { id, start, end, track, z, libSetId, ...body } = tel;
   try {
-    await Lib.putSet({ id: P.newId('set'), name, savedAt: Date.now(), telop: body, assets });
+    const saved = overwrite
+      ? { ...from, name, savedAt: Date.now(), telop: body, assets }
+      : { id: P.newId('set'), name, savedAt: Date.now(), order: Lib.headOrder(S.libSets), telop: body, assets };
+    await Lib.putSet(saved);
+    tel.libSetId = saved.id;   // 次に保存する時は、このセットへの上書きを勧める
     await reloadLibrary();
     const inBrowser = assets.length - stashed;
-    status(`「${name}」をライブラリに保存しました`
+    status(`「${name}」をライブラリに${overwrite ? '上書き保存' : '保存'}しました`
       + (stashed ? `（画像 ${stashed} 件は ${S.libDir?.name ?? 'ライブラリフォルダ'} に置きました）` : '')
       + (inBrowser ? `（画像 ${inBrowser} 件はブラウザの中に取り込みました）` : ''));
   } catch (e) {
@@ -2192,6 +2204,7 @@ async function placeLibrarySet(entry) {
   if (tel.bgAssetId) tel.bgAssetId = remap.get(tel.bgAssetId) ?? null;
   if (tel.icon?.assetId) tel.icon.assetId = remap.get(tel.icon.assetId) ?? null;
   tel.z = zRange()[1] + 1;
+  tel.libSetId = entry.id;   // 直した後に、同じセットへ上書き保存できるように覚えておく
   tel.track = 0;
   while (S.project.telops.some((o) => (o.track ?? 0) === tel.track && tel.start < o.end && tel.end > o.start)) tel.track++;
   S.project.telops.push(tel);
@@ -2216,11 +2229,23 @@ function renderLibraryBin() {
   for (const e of S.libSets) {
     const el = document.createElement('div');
     el.className = 'bin-item lib';
+    el.draggable = true;
+    el.dataset.id = e.id;
     el.innerHTML = `<div class="row"><div class="n">${esc(e.name)}</div>`
+      + `<button class="bin-edit" title="名前を変える">✎</button>`
       + `<button class="bin-add" title="再生位置に置く">＋</button>`
       + `<button class="bin-del" title="ライブラリから削除">×</button></div>`
       + `<div class="m">${esc(Lib.setLabel(e).slice(0, 40))}</div>`;
+    for (const b of el.querySelectorAll('button')) b.draggable = false;   // ボタンからは掴ませない
     el.querySelector('.bin-add').onclick = (ev) => { ev.stopPropagation(); placeLibrarySet(e); };
+    el.querySelector('.bin-edit').onclick = async (ev) => {
+      ev.stopPropagation();
+      const name = prompt('セット名', e.name);
+      if (!name || name === e.name) return;
+      await Lib.updateSet(e.id, { name });
+      await reloadLibrary();
+      status(`「${name}」に名前を変えました`);
+    };
     el.querySelector('.bin-del').onclick = async (ev) => {
       ev.stopPropagation();
       if (!confirm(`「${e.name}」をライブラリから削除しますか？`)) return;
@@ -2228,8 +2253,49 @@ function renderLibraryBin() {
       await reloadLibrary();
     };
     el.onclick = () => placeLibrarySet(e);
+    bindLibDrag(el, list);
     list.appendChild(el);
   }
+}
+
+/**
+ * ライブラリの並べ替え（掴んで上下に動かす）。
+ * 掴んでいる間は入る場所に線を出し、離した所へ入れる。
+ * ドラッグの後にクリックは飛ばないので、クリックで置く操作とはぶつからない。
+ */
+function bindLibDrag(el, list) {
+  el.ondragstart = (ev) => {
+    S.libDragId = el.dataset.id;
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.dataTransfer.setData('text/plain', el.dataset.id);   // Firefox はこれが無いと始まらない
+    el.classList.add('dragging');
+  };
+  el.ondragend = () => {
+    S.libDragId = null;
+    for (const x of list.children) x.classList.remove('dragging', 'drop-before', 'drop-after');
+  };
+  el.ondragover = (ev) => {
+    if (!S.libDragId || S.libDragId === el.dataset.id) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'move';
+    const r = el.getBoundingClientRect();
+    const after = ev.clientY > r.top + r.height / 2;
+    el.classList.toggle('drop-before', !after);
+    el.classList.toggle('drop-after', after);
+  };
+  el.ondragleave = () => el.classList.remove('drop-before', 'drop-after');
+  el.ondrop = async (ev) => {
+    ev.preventDefault();
+    const from = S.libDragId;
+    const after = el.classList.contains('drop-after');
+    el.classList.remove('drop-before', 'drop-after');
+    if (!from || from === el.dataset.id) return;
+    const ids = S.libSets.map((x) => x.id).filter((x) => x !== from);
+    const at = ids.indexOf(el.dataset.id);
+    ids.splice(at + (after ? 1 : 0), 0, from);
+    await Lib.reorderSets(ids);
+    await reloadLibrary();
+  };
 }
 
 function renderEffectBin() {

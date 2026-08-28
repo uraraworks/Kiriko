@@ -12,16 +12,58 @@ import * as FS from './filestore.js';
 const open = openDB;
 const tx = (db, mode, fn) => withStore(db, STORE.telopSets, mode, fn);
 
+/**
+ * 一覧の並び。
+ * 手で並べ替えた順（order）を優先し、まだ並べ替えていないものは保存日時の新しい順。
+ * order を持つものと持たないものが混ざるのは、並べ替える前に保存したセットがあるため。
+ */
+export function sortSets(sets) {
+  return [...(sets ?? [])].sort((a, b) => {
+    const ao = a.order ?? null, bo = b.order ?? null;
+    if (ao !== null && bo !== null) return ao - bo;
+    if (ao !== null) return -1;     // 並べ替え済みのものが先
+    if (bo !== null) return 1;
+    return b.savedAt - a.savedAt;
+  });
+}
+
+/** 新しく保存するセットを先頭に置くための order */
+export function headOrder(sets) {
+  const min = Math.min(...(sets ?? []).map((e) => e.order ?? 0), 0);
+  return min - 1;
+}
+
 export async function listSets() {
   const db = await open();
   const all = await tx(db, 'readonly', (st) => st.getAll());
   db.close();
-  return (all ?? []).sort((a, b) => b.savedAt - a.savedAt);
+  return sortSets(all);
 }
 
 export async function putSet(entry) {
   const db = await open();
   await tx(db, 'readwrite', (st) => st.put(entry));
+  db.close();
+}
+
+/** 1 件だけ書き換える（名前の変更など）。見つからなければ何もしない */
+export async function updateSet(id, patch) {
+  const db = await open();
+  const cur = await tx(db, 'readonly', (st) => st.get(id));
+  if (cur) await tx(db, 'readwrite', (st) => st.put({ ...cur, ...patch, id }));
+  db.close();
+  return !!cur;
+}
+
+/** 渡された id の並びで order を振り直す。一覧に出ていないものは触らない */
+export async function reorderSets(ids) {
+  const db = await open();
+  const all = await tx(db, 'readonly', (st) => st.getAll());
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  for (const e of all ?? []) {
+    const i = rank.get(e.id);
+    if (i !== undefined && e.order !== i) await tx(db, 'readwrite', (st) => st.put({ ...e, order: i }));
+  }
   db.close();
 }
 

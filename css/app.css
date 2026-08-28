@@ -465,6 +465,15 @@ kbd {
 
 /* テロップセットのライブラリ */
 .bin-item.lib { box-shadow: inset 3px 0 0 #d9c07a; }
+/* 並べ替え。掴んでいる本人は薄く、入る場所には線を出す */
+.bin-item.lib.dragging { opacity: .45; }
+.bin-item.lib.drop-before { box-shadow: inset 3px 0 0 #d9c07a, inset 0 2px 0 var(--accent); }
+.bin-item.lib.drop-after { box-shadow: inset 3px 0 0 #d9c07a, inset 0 -2px 0 var(--accent); }
+.bin-edit {
+  background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 4px;
+  font-size: 11px; line-height: 1; padding: 3px 6px; cursor: pointer; flex: none;
+}
+.bin-edit:hover { color: var(--text); border-color: #6b6f7d; }
 .bin-del {
   background: #43303a; border: 1px solid #6b4550; color: #e6b8c2; border-radius: 4px;
   font-size: 11px; line-height: 1; padding: 3px 6px; cursor: pointer; flex: none;
