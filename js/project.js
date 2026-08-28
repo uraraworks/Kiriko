@@ -64,3 +64,22 @@ export function deserialize(text) {
   }
   return { ...createProject(), ...p };
 }
+
+/**
+ * 1 フレームに満たない「かけら」クリップ。
+ *
+ * カットの切り残しでできる。まったく別の場所の映像が一瞬だけ挟まって見えるうえ、
+ * 短すぎてタイムラインを拡大しないと見つけられないので、まとめて知らせる。
+ *
+ * @returns {Array<{index:number, startSec:number, durationSec:number, clip:object}>}
+ */
+export function sliverClips(project, minLen) {
+  const out = [];
+  let t = 0;
+  (project.clips ?? []).forEach((clip, index) => {
+    const d = clipDuration(clip);
+    if (d < minLen) out.push({ index, startSec: t, durationSec: d, clip });
+    t += d;
+  });
+  return out;
+}

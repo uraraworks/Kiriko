@@ -177,7 +177,7 @@ export function mergeTrim(trims, clips, entry, before = false) {
  * 切り取る範囲の中に既にある継ぎ目は、そのトリムを取り込んで 1 件にまとめる。
  * そうしないと同じ場所にトリムが 2 つ並んで、どちらを戻すのか決められなくなる。
  */
-export function cut(project, a, b, { label = '', group = null } = {}) {
+export function cut(project, a, b, { label = '', group = null, minLen = 0 } = {}) {
   const clips = project.clips ?? [];
   const off = offsetsOf(clips);
   const total = off.length ? off.at(-1) + clipDuration(clips.at(-1)) : 0;
@@ -212,15 +212,20 @@ export function cut(project, a, b, { label = '', group = null } = {}) {
       if (e0 <= lo) insertIndex = kept.length;
       continue;
     }
-    if (s0 < lo) {                      // 前半を残す
-      kept.push({ ...c, out: c.in + (lo - s0) });
+    // 1 フレームに満たないかけらは残さない。残すと、まったく別の場所の映像が
+    // 一瞬だけ挟まって見え、しかも短すぎて画面上で見つけられない
+    const headLen = lo - s0, tailLen = e0 - hi;
+    const keepHead = s0 < lo && headLen > minLen;
+    const keepTail = e0 > hi && tailLen > minLen;
+    if (keepHead) {
+      kept.push({ ...c, out: c.in + headLen });
       insertIndex = kept.length;
     }
-    // 消える部分（このクリップが範囲と重なっている所）
-    const from = c.in + Math.max(0, lo - s0);
-    const to = c.in + Math.min(clipDuration(c), hi - s0);
+    // 消える部分。残さなかったかけらもここに含めるので、後から戻せる
+    const from = keepHead ? c.in + headLen : c.in;
+    const to = keepTail ? c.in + Math.min(clipDuration(c), hi - s0) : c.out;
     if (to - from > EPS) segments.push(segOf(c, from, to));
-    if (e0 > hi) {                      // 後半を残す
+    if (keepTail) {                     // 後半を残す
       const tail = { ...c, id: newId('clip'), in: c.in + (hi - s0) };
       kept.push(tail);
       splitTail.set(c.id, tail.id);

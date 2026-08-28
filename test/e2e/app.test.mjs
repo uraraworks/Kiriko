@@ -529,6 +529,63 @@ describe('ブラウザ結合', { skip }, () => {
     await wait(300);
   });
 
+  test('ぼかしの端をまたぐコマ送りで、絵と表示がずれない', async () => {
+    // 画面にはまだ前のフレームが映っているのに、新しい時刻の表示を先に当てると
+    // 「ぼかしの無い絵」が一瞬見える。全画面ぼかしは映像を 1 割ほど拡大するので特に目立つ
+    const r = await ev(`(async () => {
+      const dur = bme.project.clips.reduce((a, c) => a + (c.out - c.in), 0);
+      const end = Math.min(6.8, dur - 1);
+      bme.project.blurs = [{ id: 'bTest', shape: 'full', start: 0, end, strength: 40, keys: [] }];
+      bme.render();
+      await bme.call('seek', { time: end - 0.02 });
+      await new Promise((r2) => setTimeout(r2, 500));
+      const v = document.getElementById('video');
+      const before = v.style.filter;
+      document.getElementById('btnFwd1').click();
+      const justAfter = v.style.filter;              // 押した直後（前のフレームがまだ映っている）
+      await new Promise((r2) => setTimeout(r2, 700));
+      const settled = v.style.filter;                // 新しいフレームが出た後
+      bme.project.blurs = [];
+      bme.render();
+      return { before, justAfter, settled, t: bme.state.programTime, end };
+    })()`);
+    assert.ok(r.before.includes('blur'), 'そもそもぼかしが掛かっていない');
+    assert.ok(r.t > r.end, `ぼかしの端をまたげていない: ${r.t} <= ${r.end}`);
+    assert.equal(r.justAfter, r.before, '前のフレームが映ったままぼかしが外れている（ちらつく）');
+    assert.equal(r.settled, '', '新しいフレームが出てもぼかしが外れない');
+  });
+
+  test('1 フレームに満たないクリップを知らせて取り除ける', async () => {
+    const r = await ev(`(async () => {
+      const P = bme.project;
+      const sid = P.sources[0].id;
+      const before = P.clips.map((c) => ({ ...c }));
+      const fps = P.output.fps;
+      // 実際のプロジェクトで見つかった形：まったく別の場所の 1 フレームが挟まっている
+      P.clips = [
+        { id: 'sv1', sourceId: sid, in: 3.0, out: 9.8, volume: 1 },
+        { id: 'sv2', sourceId: sid, in: 16.5, out: 16.5 + 0.9 / fps, volume: 1 },
+        { id: 'sv3', sourceId: sid, in: 16.6, out: 19.6, volume: 1 },
+      ];
+      P.trims = [];
+      bme.render();
+      await new Promise((r2) => setTimeout(r2, 300));
+      const bar = document.getElementById('sliverBar');
+      const shown = !bar.classList.contains('hidden');
+      const text = bar.querySelector('.sv-text').textContent;
+      document.getElementById('svFix').click();
+      await new Promise((r2) => setTimeout(r2, 400));
+      const after = bme.project.clips.length;
+      const shownAfter = !document.getElementById('sliverBar').classList.contains('hidden');
+      bme.project.clips = before; bme.project.trims = []; bme.render();
+      return { shown, text, after, shownAfter };
+    })()`);
+    assert.ok(r.shown, 'かけらがあるのに知らせていない');
+    assert.ok(r.text.includes('1 個'), `件数が出ていない: ${r.text}`);
+    assert.equal(r.after, 2, `取り除けていない（クリップ ${r.after} 個）`);
+    assert.equal(r.shownAfter, false, '取り除いたのに案内が残っている');
+  });
+
   test('画像と効果音を置ける', async () => {
     await dropFiles(page, [F.image, F.audio]);
     await page.waitForFunction('window.bme.project.audioAssets.length > 0 && window.bme.project.imageAssets.length > 0',

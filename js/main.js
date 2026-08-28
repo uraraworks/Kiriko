@@ -429,7 +429,10 @@ function seekProgram(t, force = false) {
   // 0.05 秒固定だと 30fps の 1 フレーム（0.033 秒）が下回ってしまい、
   // 1 フレーム送りが 2 回に 1 回しか効かなかった（タイムコードだけ進んで絵が止まる）
   const eps = Math.min(0.005, 1 / fps() / 4);
-  if (Math.abs(video.currentTime - loc.localTime) > eps) video.currentTime = loc.localTime;
+  if (Math.abs(video.currentTime - loc.localTime) > eps) {
+    beginSeek();
+    video.currentTime = loc.localTime;
+  }
   video.volume = Math.min(1, Math.max(0, loc.clip.volume ?? 1));
 }
 
@@ -588,7 +591,8 @@ function extractZone() {
  * 後から「あの箇所だけ 1 秒返す」はこちらでしかできない。
  */
 function extractRange(a, b, label = '', group = null) {
-  const r = TR.cut(S.project, a, b, { label, group });
+  // 1 フレームに満たないかけらは残さない（別の場面が一瞬挟まって見えるため）
+  const r = TR.cut(S.project, a, b, { label, group, minLen: 1 / fps() });
   S.project.clips = r.clips;
   S.project.trims = r.trims;
   rippleAfter(a, b);
@@ -1308,7 +1312,31 @@ function activeBox() {
   return null;
 }
 
+/**
+ * シークの結果が出るまでの間、重ね物の描き直しを止める。
+ *
+ * 画面にはまだ**前のフレーム**が映っている。そこへ新しい時刻の表示
+ * （ぼかしの有無・テロップ）を先に当ててしまうと、絵と合っていない状態が
+ * 一瞬見える。ぼかしの区間の端をまたぐ時にいちばん目立つ
+ * （全画面ぼかしは映像を 1 割ほど拡大するので、外れた瞬間に絵が飛ぶ）。
+ *
+ * seeked が来なかった時のために、少し待って強制的に描き直す。
+ */
+let seekPending = false;
+let seekGuard = null;
+function beginSeek() {
+  seekPending = true;
+  clearTimeout(seekGuard);
+  seekGuard = setTimeout(() => { if (seekPending) { seekPending = false; renderOverlay(); } }, 300);
+}
+function endSeek() {
+  if (!seekPending) return;
+  seekPending = false;
+  clearTimeout(seekGuard);
+}
+
 function renderOverlay() {
+  if (seekPending) return;   // 新しいフレームが出るまで、いま映っている絵に合った表示を保つ
   fitStage();
   const ctx = overlay.getContext('2d');
   const W = overlay.width, H = overlay.height;
@@ -4633,6 +4661,44 @@ async function reloadMissingAssets(ask = false) {
 }
 
 /** 足りない素材があることを知らせる帯 */
+/**
+ * 1 フレームに満たない「かけら」クリップの案内。
+ *
+ * カットの切り残しでできる。まったく別の場所の映像が一瞬だけ挟まって見えるのに、
+ * 短すぎてタイムラインを拡大しないと見つけられない。放っておくと書き出しにも残る。
+ * いまのカットは作らないようにしてあるが、既にあるプロジェクトを救うためにこれを出す。
+ */
+function renderSliverBar() {
+  const bar = $('sliverBar');
+  if (!bar) return;
+  const list = P.sliverClips(S.project, 1 / fps());
+  bar.classList.toggle('hidden', !list.length);
+  if (!list.length) return;
+  const first = list[0];
+  bar.querySelector('.sv-text').textContent =
+    `1 フレームに満たないクリップが ${list.length} 個あります`
+    + `（最初は ${tc(first.startSec, false)}・${Math.round(first.durationSec * 1000)}ms）`
+    + ' — 別の場面が一瞬だけ挟まって見えます';
+  $('svGo').onclick = () => {
+    setMode('program');
+    seekProgram(Math.max(0, first.startSec), true);
+    renderAll();
+  };
+  $('svFix').onclick = () => {
+    const items = P.sliverClips(S.project, 1 / fps());
+    if (!items.length) return;
+    const total = items.reduce((a, x) => a + x.durationSec, 0);
+    commit(`かけらを ${items.length} 個取り除く`);
+    // 後ろから消す（前を消すと、後ろの位置がずれるため）
+    for (const it of [...items].reverse()) {
+      extractRange(it.startSec, it.startSec + it.durationSec, 'かけら');
+    }
+    renderAll();
+    status(`1 フレームに満たないクリップを ${items.length} 個取り除きました`
+      + `（合計 ${Math.round(total * 1000)}ms。⌘Z で戻せます）`);
+  };
+}
+
 function renderMissingBar() {
   const bar = $('missingBar');
   const want = missingAssets();
@@ -5032,6 +5098,7 @@ function startFrameLoop() {
 
 video.addEventListener('timeupdate', () => { programTick(); renderTransport(); renderScrub(); if (S.mode === 'program') { renderTimeline(); syncAudioPreview(); } renderOverlay(); });
 video.addEventListener('seeked', () => {
+  endSeek();
   renderTransport(); renderScrub(); syncAudioPreview();
   // seeked の時点で新しいフレームはデコード済みなので、まずここで描き直す。
   // requestVideoFrameCallback は「実際に表示された瞬間」に更に描き直すためのもので、
@@ -5152,6 +5219,7 @@ new ResizeObserver(() => { renderTimeline(); renderScrub(); renderOverlay(); }).
 
 function renderAll() {
   renderNoMedia();
+  renderSliverBar();
   renderBin();
   renderInspTabs();
   renderInspector();
