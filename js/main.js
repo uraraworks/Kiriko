@@ -424,7 +424,11 @@ function seekProgram(t, force = false) {
     S.programIndex = loc.index;
     setVideoSource(loc.clip.sourceId);
   }
-  if (Math.abs(video.currentTime - loc.localTime) > 0.05) video.currentTime = loc.localTime;
+  // 同じ位置への無駄なシークだけを弾く。閾値はフレーム間隔より細かくすること。
+  // 0.05 秒固定だと 30fps の 1 フレーム（0.033 秒）が下回ってしまい、
+  // 1 フレーム送りが 2 回に 1 回しか効かなかった（タイムコードだけ進んで絵が止まる）
+  const eps = Math.min(0.005, 1 / fps() / 4);
+  if (Math.abs(video.currentTime - loc.localTime) > eps) video.currentTime = loc.localTime;
   video.volume = Math.min(1, Math.max(0, loc.clip.volume ?? 1));
 }
 

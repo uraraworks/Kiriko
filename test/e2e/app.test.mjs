@@ -69,6 +69,32 @@ describe('ブラウザ結合', { skip }, () => {
     assert.ok(Math.abs(p.dur - 20) < 0.2, `尺が合わない: ${p.dur}`);
   });
 
+  test('1 フレーム送りで毎回きちんと絵が動く', async () => {
+    // タイムコードだけ進んで映像が取り残される、という退行を捕まえる。
+    // seekProgram の「同じ位置なら飛ばす」閾値がフレーム間隔より粗いと、
+    // 1 フレーム送りが 2 回に 1 回しか効かなくなる
+    await ev(`(() => { bme.state.programTime = 0; })()`);
+    await ev(`document.getElementById('btnHome').click()`);
+    await wait(400);
+    const seen = [];
+    for (let i = 0; i < 6; i++) {
+      await ev(`document.getElementById('btnFwd1').click()`);
+      await wait(250);
+      seen.push(await ev(`document.getElementById('video').currentTime`));
+    }
+    const stuck = seen.filter((v, i) => i > 0 && Math.abs(v - seen[i - 1]) < 0.001);
+    assert.equal(stuck.length, 0,
+      `絵が動かなかった回がある: ${seen.map((v) => v.toFixed(4)).join(', ')}`);
+    // 1 フレームぶんずつ進んでいる
+    const fps = await ev(`bme.project.output.fps`);
+    for (let i = 1; i < seen.length; i++) {
+      assert.ok(Math.abs((seen[i] - seen[i - 1]) - 1 / fps) < 0.01,
+        `送り幅がおかしい: ${seen.join(', ')}`);
+    }
+    await ev(`document.getElementById('btnHome').click()`);
+    await wait(300);
+  });
+
   test('範囲を切り取ると後ろが詰まり、テロップも一緒に動く', async () => {
     await ev(`(() => {
       const S = bme.state;
