@@ -234,6 +234,8 @@ kbd {
   padding: 8px; height: 150px; overflow: auto; font-size: 11px; color: #9aa2b0;
   white-space: pre-wrap; user-select: text;
 }
+/* 中断は箱いっぱいに広がらず、真ん中に置く（縦並びの既定では横いっぱいに伸びてしまう）*/
+#btnCancel { align-self: center; padding: 6px 24px; }
 
 /* ---------- Phase 2: テロップ ---------- */
 .hidden { display: none !important; }
