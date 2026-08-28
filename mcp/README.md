@@ -69,7 +69,7 @@ MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1
 | `kiriko_get_markers` | マーカー一覧を取得する |
 | `kiriko_find_silence` | 無音／有音の区間を調べる。カットの下ごしらえの起点 |
 | `kiriko_get_audio_levels` | 音量エンベロープを取得する |
-| `kiriko_add_markers` | マーカーを一括で立てる |
+| `kiriko_add_markers` | マーカーを一括で立てる（素材の時刻でも渡せる／のりしろ指定可）|
 | `kiriko_add_telops` | テロップを一括で追加する |
 | `kiriko_get_frame` | 指定時刻のフレームを画像で取得する（映っているものを確かめたい時） |
 | `kiriko_get_project` | 編集内容の JSON を丸ごと取得する |
@@ -102,6 +102,10 @@ brew install whisper-cpp ffmpeg
 
 長い素材は時間が掛かります（M2 で実時間の 1〜1.5 倍）。まず `from` / `to` で
 短く試すのがおすすめです。
+
+**書き起こしの最中も編集を続けられます。** 結果は素材の時刻で返し、タイムライン時刻への
+変換はマーカーを立てる直前に行うので、その間に人間がカットを進めていても着地位置がずれません
+（切られてしまった箇所のマーカーは落ちます）。`pad` でセリフの前後にのりしろを付けられます。
 
 ## 方針
 

@@ -210,6 +210,10 @@ server.registerTool('kiriko_transcribe', {
     + '処理時間も喋っていない分だけ減る。\n\n'
     + 'sourcePaths に素材の絶対パスを渡すこと（ブラウザ側はファイルの場所を知らないため）。\n'
     + 'addMarkers: true にすると、そのまま「残す」区間マーカーとして立てる。\n\n'
+    + '**結果は素材の時刻で返す**ので、書き起こしの最中に人間がカットを進めていても、'
+    + 'マーカーはずれた場所に着地しない（タイムライン時刻への変換は立てる直前に行う）。'
+    + '素材が切られてしまった箇所のマーカーは落ちる。\n\n'
+    + 'pad を渡すと、セリフの前後にのりしろを付けた区間マーカーになる（語頭・語尾の切れ対策）。\n\n'
     + '**長い素材は時間が掛かる**（M2 で実時間の 1〜1.5 倍）。'
     + 'まず from / to で短く試してから範囲を広げるとよい。',
   inputSchema: {
@@ -221,6 +225,7 @@ server.registerTool('kiriko_transcribe', {
     threshold: z.number().min(0).max(1).optional().describe('音があるとみなす音量（既定 0.06）'),
     minSec: z.number().min(0).optional().describe('これより短い静かさは区切りにしない（既定 0.6）'),
     addMarkers: z.boolean().optional().describe('true なら結果をそのまま区間マーカーにする'),
+    pad: z.number().min(0).max(30).optional().describe('マーカーの前後に付けるのりしろ秒（既定 0）'),
     markerKind: z.enum(['keep', 'cut', 'note']).optional().describe("マーカーの種別（既定 'keep'）"),
   },
 }, async (a) => {
@@ -277,10 +282,13 @@ server.registerTool('kiriko_transcribe', {
 
   let markers = null;
   if (a.addMarkers && segments.length) {
+    // 素材の時刻のまま渡す。タイムライン時刻への変換はブラウザ側が今の並びで行う
     markers = await call('add_markers', {
       markers: segments.map((s) => ({
-        time: s.time, duration: s.duration, text: s.text, kind: a.markerKind ?? 'keep',
+        source: s.source, sourceFrom: s.sourceFrom, sourceTo: s.sourceTo,
+        text: s.text, kind: a.markerKind ?? 'keep',
       })),
+      pad: a.pad ?? 0,
     });
   }
 
@@ -289,7 +297,8 @@ server.registerTool('kiriko_transcribe', {
     transcribedSec: +total.toFixed(1),
     segments,
     markers,
-    note: '時刻はタイムライン基準。区間はあとから Kiriko 側で詰められる',
+    note: 'sourceFrom / sourceTo は素材の時刻。timeAtStart は書き起こし開始時点の'
+      + 'タイムライン時刻で、その後の編集で動くので当てにしないこと',
   });
 });
 

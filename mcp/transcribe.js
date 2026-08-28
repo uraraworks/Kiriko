@@ -83,8 +83,13 @@ async function transcribeRange(file, srcFrom, srcTo, model, language, threads) {
 
 /**
  * タイムライン上の「音がある区間」を書き起こす。
+ *
+ * 返す時刻は **素材の時刻**。タイムライン時刻に直すのは、マーカーを立てる直前に
+ * ブラウザ側で行う。書き起こしは長い（実時間の 1〜1.5 倍）ので、その間に人間が
+ * カットを進めていても結果がずれた場所に着地しないようにするため。
+ *
  * @param {Array<{path:string, srcFrom:number, srcTo:number, tlFrom:number}>} pieces
- * @returns {Promise<Array<{time:number,duration:number,text:string}>>} タイムライン秒
+ * @returns {Promise<Array<{source:string,sourceFrom:number,sourceTo:number,text:string,timeAtStart:number}>>}
  */
 async function transcribePieces(pieces, { model, language = 'ja', threads = 8, onProgress = () => {} } = {}) {
   const out = [];
@@ -104,13 +109,16 @@ async function transcribePieces(pieces, { model, language = 'ja', threads = 8, o
       const to = Math.max(from, Math.min(len, s.to));
       if (to - from < 0.05) continue;
       out.push({
-        time: +(p.tlFrom + from).toFixed(2),
-        duration: +(to - from).toFixed(2),
+        source: path.basename(p.path),
+        sourceFrom: +(p.srcFrom + from).toFixed(2),
+        sourceTo: +(p.srcFrom + to).toFixed(2),
         text: s.text,
+        // 参考値。書き起こしを始めた時点のタイムライン時刻（その後の編集で動く）
+        timeAtStart: +(p.tlFrom + from).toFixed(2),
       });
     }
   }
-  return out.sort((a, b) => a.time - b.time);
+  return out.sort((a, b) => a.timeAtStart - b.timeAtStart);
 }
 
 module.exports = { findModels, pickModel, transcribePieces, MODEL_DIR };
