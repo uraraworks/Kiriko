@@ -137,3 +137,35 @@ test('rescale: 中身が足りなくても落ちない', () => {
   assert.doesNotThrow(() => P.rescale({}, 2, 2));
   assert.doesNotThrow(() => P.rescale(P.createProject(), 2, 2));
 });
+
+// --- 空いたトラックを詰める ---
+
+test('compactTracks: 間が空いた行を上から詰める', () => {
+  const list = [{ track: 0 }, { track: 4 }, { track: 7 }];
+  P.compactTracks(list);
+  assert.deepEqual(list.map((x) => x.track), [0, 1, 2]);
+});
+
+test('compactTracks: 同じ行のものは同じ行のまま（重ならない）', () => {
+  const list = [{ id: 'a', track: 5 }, { id: 'b', track: 5 }, { id: 'c', track: 2 }];
+  P.compactTracks(list);
+  assert.deepEqual(list.map((x) => x.track), [1, 1, 0]);
+});
+
+test('compactTracks: 上下の並びは変わらない', () => {
+  const list = [{ id: '下', track: 9 }, { id: '上', track: 1 }];
+  P.compactTracks(list);
+  assert.equal(list.find((x) => x.id === '上').track, 0);
+  assert.equal(list.find((x) => x.id === '下').track, 1);
+});
+
+test('compactTracks: track を持たないものは 0 とみなす', () => {
+  const list = [{}, { track: 3 }];
+  P.compactTracks(list);
+  assert.deepEqual(list.map((x) => x.track), [0, 1]);
+});
+
+test('compactTracks: 空でも落ちない', () => {
+  assert.doesNotThrow(() => P.compactTracks([]));
+  assert.doesNotThrow(() => P.compactTracks(undefined));
+});

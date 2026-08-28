@@ -243,6 +243,9 @@ function normalizeProject() {
   p.audioAssets = p.audioAssets ?? [];
   p.mix = { se: 1, bgm: 1, ...(p.mix ?? {}) };
   p.trims = (p.trims ?? []).filter((t) => (t.segments ?? []).length);
+  // 途中の行が空いたまま保存されたものも、ここで詰めておく
+  compactTracks(p.telops);
+  compactTracks(p.audioClips);
 }
 
 function status(msg, isErr = false) {
@@ -654,6 +657,9 @@ function rippleAfter(a, b) {
       return { ...x, start: s0, duration: e0 - s0, offset: (x.offset ?? 0) + trimmed };
     })
     .filter((x) => x.duration > 0.05);
+  // まるごと消えたものがあると行が空くので詰める
+  compactTelopTracks();
+  compactAudioTracks();
 }
 
 /**
@@ -794,19 +800,20 @@ function placeWholeSource(sourceId) {
   status(`${src.name} 全体（${tc(src.duration, false)}）をタイムラインに配置しました`);
 }
 
-/** 使われていないテロップトラックを詰める（T1 が空で T2 だけ残る、を避ける） */
-/** 使われていない音源トラックを詰める */
-function compactAudioTracks() {
-  const used = [...new Set(S.project.audioClips.map((a) => a.track ?? 0))].sort((a, b) => a - b);
-  const map = new Map(used.map((v, i) => [v, i]));
-  for (const a of S.project.audioClips) a.track = map.get(a.track ?? 0) ?? 0;
-}
-
-function compactTelopTracks() {
-  const used = [...new Set(S.project.telops.map((t) => t.track ?? 0))].sort((a, b) => a - b);
-  const map = new Map(used.map((v, i) => [v, i]));
-  for (const t of S.project.telops) t.track = map.get(t.track ?? 0) ?? 0;
-}
+/**
+ * 使われていないトラックを詰める。
+ *
+ * トラックの本数は「使っている一番下＋空き 1 本」で決まるので、
+ * 間の行が空くと**その行を消すすべが無くなる**（T2〜T5 が空なのに T6 まで並ぶ、など）。
+ * ものを消した後にここを通して、上から順に詰め直す。
+ *
+ * 並び順は変えない（上にあったものは上のまま）。番号の付け替えだけなので、
+ * 同じ行にあったものは同じ行のまま、重なりも起きない。
+ * 掴んで動かしている最中には呼ばない（空いている行へ運ぶ途中で引き戻されてしまう）。
+ */
+const compactTracks = P.compactTracks;
+const compactAudioTracks = () => compactTracks(S.project.audioClips);
+const compactTelopTracks = () => compactTracks(S.project.telops);
 
 function deleteSelected() {
   // プログラムモニターで範囲が選ばれていれば「切り取って詰める」を優先する
@@ -2083,6 +2090,7 @@ function removeAsset(kind, id, name) {
   } else if (kind === 'audio') {
     P0.audioClips = P0.audioClips.filter((c) => c.assetId !== id);
     P0.audioAssets = P0.audioAssets.filter((x) => x.id !== id);
+    compactAudioTracks();
   } else {
     P0.images = P0.images.filter((im) => im.assetId !== id);
     for (const tl of P0.telops) {
@@ -5704,7 +5712,7 @@ window.bme = {
   addAudioAssets,
   placeAudio,
   telop: T,
-  loadProjectJSON(text) { S.project = P.deserialize(text); zoomFit(); renderAll(); },
+  loadProjectJSON(text) { S.project = P.deserialize(text); normalizeProject(); zoomFit(); renderAll(); },
   exportProjectJSON() { return P.serialize(S.project); },
   render: renderAll,
   bridge,

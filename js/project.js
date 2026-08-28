@@ -135,3 +135,21 @@ export function rescale(project, sx, sy) {
   }
   return project;
 }
+
+/**
+ * 使われていないトラックを詰める（`track` を 0 から順に振り直す）。
+ *
+ * トラックの本数は「使っている一番下＋空き 1 本」で決まるので、間の行が空くと
+ * **その行を消すすべが無くなる**（T2〜T5 が空なのに T6 まで並ぶ、など）。
+ * ものを消した後にここを通す。
+ *
+ * 並び順は変えない（上にあったものは上のまま）。番号の付け替えだけなので、
+ * 同じ行にあったものは同じ行のまま残り、重なりも起きない。
+ * 掴んで動かしている最中には呼ばないこと（空いている行へ運ぶ途中で引き戻されてしまう）。
+ */
+export function compactTracks(list) {
+  const used = [...new Set((list ?? []).map((x) => x.track ?? 0))].sort((a, b) => a - b);
+  const map = new Map(used.map((v, i) => [v, i]));
+  for (const x of list ?? []) x.track = map.get(x.track ?? 0) ?? 0;
+  return list;
+}
