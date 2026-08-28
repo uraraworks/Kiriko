@@ -71,7 +71,6 @@ export const PLACEMENTS = [
  * 素材が出力と同じアスペクト比なら全画面がぴったり合う（テロップ用 PNG がこれ）。
  */
 export function placementBox(placement, asset, W, H) {
-  const ar = asset.width / asset.height;
   if (placement === 'full') return { x: 0, y: 0, w: W, h: H };
 
   // 画面の 1/3 の帯に収める（中央は 60% の高さ）
@@ -102,15 +101,35 @@ export function createImageClip(assetId, start, end, box, opacity = 1) {
     box: { ...box },
     opacity,
     fit: 'contain', // contain | stretch
+    crop: null,     // 素材のどこを使うか（画素単位）。null なら画像全体
   };
+}
+
+/**
+ * 素材のどこを使うか（画素単位）。null / はみ出しは画像の中に丸める。
+ *
+ * 元画像を画像編集ソフトで切り出しておく手間を無くすためのもの。
+ * 素材は 1 枚のまま登録しておき、置くときに「この範囲だけ」と指定する。
+ * 同じ画像から別の範囲を何度でも取れる。
+ */
+export function srcRect(im, bmp) {
+  const full = { x: 0, y: 0, w: bmp.width, h: bmp.height };
+  const c = im?.crop;
+  if (!c) return full;
+  const x = Math.max(0, Math.min(bmp.width - 1, Number(c.x) || 0));
+  const y = Math.max(0, Math.min(bmp.height - 1, Number(c.y) || 0));
+  const w = Math.max(1, Math.min(bmp.width - x, Number(c.w) || 0));
+  const h = Math.max(1, Math.min(bmp.height - y, Number(c.h) || 0));
+  return { x, y, w, h };
 }
 
 /** 枠の中で画像が実際に描かれる矩形（contain のときは余白ができる） */
 export function drawnRect(im, bmp) {
   const b = im.box;
   if (im.fit === 'stretch' || !bmp) return { ...b };
-  const s = Math.min(b.w / bmp.width, b.h / bmp.height);
-  const w = bmp.width * s, h = bmp.height * s;
+  const src = srcRect(im, bmp);   // 切り出した範囲の比率で収める
+  const s = Math.min(b.w / src.w, b.h / src.h);
+  const w = src.w * s, h = src.h * s;
   return { x: b.x + (b.w - w) / 2, y: b.y + (b.h - h) / 2, w, h };
 }
 
@@ -118,9 +137,10 @@ export function drawImageClip(ctx, im, library) {
   const bmp = library?.get(im.assetId);
   if (!bmp) return;
   const r = drawnRect(im, bmp);
+  const s = srcRect(im, bmp);
   ctx.save();
   ctx.globalAlpha = im.opacity ?? 1;
-  ctx.drawImage(bmp, r.x, r.y, r.w, r.h);
+  ctx.drawImage(bmp, s.x, s.y, s.w, s.h, r.x, r.y, r.w, r.h);
   ctx.restore();
 }
 

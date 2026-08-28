@@ -691,3 +691,11 @@ body.exporting .statusbar > .progress { display: block; }
 .manual-note { font-size: 10.5px; margin-top: 4px; min-height: 1em; }
 .manual-note.ok { color: var(--audio-sel); }
 .manual-note.bad { color: #ff9f9f; }
+
+/* 画像の「使う範囲」ピッカー。元画像を切り出さずに、ここで範囲を決める */
+.crop-sec { border-top: 1px solid #333944; margin-top: 8px; padding-top: 8px; }
+.crop-canvas {
+  width: 100%; display: block; margin: 4px 0 6px;
+  background: #12151a; border: 1px solid #3c424e; border-radius: 4px;
+  cursor: crosshair; touch-action: none;
+}

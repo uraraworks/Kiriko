@@ -58,3 +58,34 @@ test('drawnRect: contain は余白ができ、stretch は枠いっぱい', () =>
   assert.deepEqual(I.drawnRect({ ...im, fit: 'stretch' }, bmp), im.box);
   assert.deepEqual(I.drawnRect(im, null), im.box, '画像が無い時は枠をそのまま');
 });
+
+test('切り出し範囲（crop）を指定できる', () => {
+  const bmp = { width: 1000, height: 800 };
+
+  // 指定なしなら画像全体
+  assert.deepEqual(I.srcRect({ crop: null }, bmp), { x: 0, y: 0, w: 1000, h: 800 });
+
+  // 指定した範囲をそのまま返す
+  assert.deepEqual(I.srcRect({ crop: { x: 100, y: 50, w: 400, h: 300 } }, bmp),
+    { x: 100, y: 50, w: 400, h: 300 });
+
+  // 画像からはみ出したら中に丸める（外を読んで透明にならないように）
+  assert.deepEqual(I.srcRect({ crop: { x: 900, y: 700, w: 500, h: 500 } }, bmp),
+    { x: 900, y: 700, w: 100, h: 100 });
+  assert.deepEqual(I.srcRect({ crop: { x: -50, y: -50, w: 200, h: 200 } }, bmp),
+    { x: 0, y: 0, w: 200, h: 200 });
+
+  // contain の比率は「切り出した範囲」で決まる。
+  // 正方形に切り出したなら、横長の枠に置いても正方形のまま
+  const im = { box: { x: 0, y: 0, w: 400, h: 200 }, fit: 'contain',
+    crop: { x: 0, y: 0, w: 300, h: 300 } };
+  const r = I.drawnRect(im, bmp);
+  assert.ok(Math.abs(r.w - r.h) < 0.01, `正方形にならない: ${r.w}×${r.h}`);
+  assert.ok(Math.abs(r.h - 200) < 0.01, '枠の高さに収まっていない');
+  assert.ok(Math.abs(r.x - 100) < 0.01, '横方向で中央に来ていない');
+
+  // 切り出さない場合は従来どおり画像全体の比率
+  const im2 = { box: { x: 0, y: 0, w: 400, h: 200 }, fit: 'contain', crop: null };
+  const r2 = I.drawnRect(im2, bmp);
+  assert.ok(Math.abs(r2.w / r2.h - 1000 / 800) < 0.01, '元の比率が保たれていない');
+});

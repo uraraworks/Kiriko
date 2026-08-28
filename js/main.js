@@ -16,7 +16,7 @@ import { WaveformCache, BINS_PER_SEC, bufferPeaks } from './waveform.js';
 import * as B from './boxes.js';
 import { dropIndex, rippleTime, insertTime, trimShift } from './edit.js';
 import * as TR from './trims.js';
-import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageClip, drawImageClip, drawnRect } from './images.js';
+import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageClip, drawImageClip, drawnRect, srcRect } from './images.js';
 
 // ---------------------------------------------------------------- 状態
 
@@ -1681,11 +1681,14 @@ overlay.addEventListener('dblclick', (e) => {
     commit('画像を等倍に戻す');
     const b = sel.item.box;
     const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-    const full = { x: cx - asset.width / 2, y: cy - asset.height / 2, w: asset.width, h: asset.height };
+    // 切り出している場合は、その範囲の画素数が等倍
+    const bmp2 = S.imageLib.get(sel.item.assetId);
+    const src = bmp2 ? srcRect(sel.item, bmp2) : { w: asset.width, h: asset.height };
+    const full = { x: cx - src.w / 2, y: cy - src.h / 2, w: src.w, h: src.h };
     const fitted = B.fitInto(full, W, H); // 画面より大きければ収まるところまで縮める
     sel.item.box = fitted;
-    status(fitted.w < asset.width
-      ? `等倍だと画面からはみ出すため ${Math.round((fitted.w / asset.width) * 100)}% にしました`
+    status(fitted.w < src.w
+      ? `等倍だと画面からはみ出すため ${Math.round((fitted.w / src.w) * 100)}% にしました`
       : '画像を等倍（100%）に戻しました');
   } else {
     return;
@@ -2647,6 +2650,133 @@ function syncBoxNumbers() {
 let fxFormKey = null;
 
 /** ぼかし・音源・画像のプロパティ（インスペクタ側） */
+/**
+ * 「使う範囲」を選ぶピッカー。
+ *
+ * 元画像を画像編集ソフトで切り出してから読み込む、という手間を無くすためのもの。
+ * 素材は 1 枚のまま登録しておき、置くときに範囲を指定する。
+ * 同じ画像から別の範囲を何度でも取れるし、後から取り直せる。
+ */
+/** いま出ている切り出しピッカーを描き直す手（画面外から範囲が変わった時用）*/
+let cropRedraw = null;
+
+function setupCropPicker(im) {
+  cropRedraw = null;
+  const cv = $('imCrop');
+  if (!cv) return;
+  const bmp = S.imageLib.get(im.assetId);
+  if (!bmp) { cv.classList.add('hidden'); return; }
+
+  const CW = 260;                                   // 論理幅（CSS で欄の幅に伸びる）
+  const k = CW / bmp.width;                         // 画像画素 → キャンバス
+  cv.width = CW;
+  cv.height = Math.max(40, Math.round(bmp.height * k));
+
+  const nums = { x: $('cropX'), y: $('cropY'), w: $('cropW'), h: $('cropH') };
+  const g = cv.getContext('2d');
+
+  const draw = () => {
+    const s = srcRect(im, bmp);
+    g.clearRect(0, 0, cv.width, cv.height);
+    g.drawImage(bmp, 0, 0, cv.width, cv.height);
+    const rx = s.x * k, ry = s.y * k, rw = s.w * k, rh = s.h * k;
+    g.fillStyle = 'rgba(0,0,0,.55)';                // 使わない所を暗く
+    g.fillRect(0, 0, cv.width, ry);
+    g.fillRect(0, ry + rh, cv.width, cv.height - (ry + rh));
+    g.fillRect(0, ry, rx, rh);
+    g.fillRect(rx + rw, ry, cv.width - (rx + rw), rh);
+    g.strokeStyle = '#ffd479'; g.lineWidth = 1.5;
+    g.strokeRect(rx + 0.5, ry + 0.5, Math.max(1, rw - 1), Math.max(1, rh - 1));
+    g.fillStyle = '#ffd479';
+    for (const [cx, cy] of [[rx, ry], [rx + rw, ry], [rx, ry + rh], [rx + rw, ry + rh]]) {
+      g.fillRect(cx - 3, cy - 3, 6, 6);
+    }
+    for (const [key, el] of Object.entries(nums)) {
+      if (el && document.activeElement !== el) el.value = Math.round(s[key]);
+    }
+  };
+  cropRedraw = draw;
+
+  /** キャンバス上の位置 → 画像の画素 */
+  const pt = (e) => {
+    const r = cv.getBoundingClientRect();
+    return {
+      x: ((e.clientX - r.left) / r.width) * bmp.width,
+      y: ((e.clientY - r.top) / r.height) * bmp.height,
+    };
+  };
+  const clampRect = (r) => {
+    const w = Math.max(8, Math.min(bmp.width, r.w));
+    const h = Math.max(8, Math.min(bmp.height, r.h));
+    return {
+      x: Math.max(0, Math.min(bmp.width - w, r.x)),
+      y: Math.max(0, Math.min(bmp.height - h, r.y)), w, h,
+    };
+  };
+  const apply = (r) => { im.crop = clampRect(r); draw(); renderOverlay(); renderTimeline(); };
+
+  let d = null;
+  cv.addEventListener('pointerdown', (e) => {
+    const p = pt(e);
+    const s = srcRect(im, bmp);
+    const near = 10 / k;   // 四隅の当たり（画素に直す）
+    const cx = Math.abs(p.x - s.x) < near ? 'x' : Math.abs(p.x - (s.x + s.w)) < near ? 'r' : null;
+    const cy = Math.abs(p.y - s.y) < near ? 'y' : Math.abs(p.y - (s.y + s.h)) < near ? 'b' : null;
+    commit('使う範囲を変更', `crop:${im.id}`);
+    if (im.crop && cx && cy) {
+      // 掴んだ角の反対側を固定する
+      d = { mode: 'resize', fx: cx === 'x' ? s.x + s.w : s.x, fy: cy === 'y' ? s.y + s.h : s.y };
+    } else if (im.crop && p.x > s.x && p.x < s.x + s.w && p.y > s.y && p.y < s.y + s.h) {
+      d = { mode: 'move', dx: p.x - s.x, dy: p.y - s.y, w: s.w, h: s.h };
+    } else {
+      d = { mode: 'new', ox: p.x, oy: p.y };
+    }
+    cv.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (!d) return;
+    const p = pt(e);
+    if (d.mode === 'move') apply({ x: p.x - d.dx, y: p.y - d.dy, w: d.w, h: d.h });
+    else {
+      const ax = d.mode === 'new' ? d.ox : d.fx, ay = d.mode === 'new' ? d.oy : d.fy;
+      apply({ x: Math.min(ax, p.x), y: Math.min(ay, p.y),
+        w: Math.abs(p.x - ax), h: Math.abs(p.y - ay) });
+    }
+  });
+  const end = () => { if (d) { d = null; history.endGroup(); } };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);
+
+  for (const [key, el] of Object.entries(nums)) {
+    if (!el) continue;
+    el.addEventListener('input', (e) => {
+      commit('使う範囲を変更', `cropN:${im.id}:${key}`);
+      apply({ ...srcRect(im, bmp), [key]: +e.target.value || 0 });
+    });
+  }
+  $('cropAll').onclick = () => {
+    commit('使う範囲を全体に戻す'); im.crop = null; draw(); renderAll();
+    status('画像全体を使うようにしました');
+  };
+  $('cropContent').onclick = () => {
+    const c = S.imageLib.content(im.assetId);
+    if (!c) return;
+    commit('使う範囲を中身に合わせる'); apply(c); renderAll();
+    status(`透明な余白を除いた ${Math.round(c.w)}×${Math.round(c.h)} に合わせました`);
+  };
+  $('cropToBox').onclick = () => {
+    const s = srcRect(im, bmp);
+    commit('枠を範囲の比率に合わせる');
+    const b = im.box, cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    const w = b.h * (s.w / s.h);
+    im.box = B.clampBox({ x: cx - w / 2, y: cy - b.h / 2, w, h: b.h }, overlay.width, overlay.height);
+    renderAll(); renderFxForm(true);
+    status('枠を、使う範囲と同じ縦横比にしました');
+  };
+  draw();
+}
+
 function renderFxForm(force = false) {
   const form = $('fxForm');
   const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage(), mk = selectedMarker();
@@ -2813,7 +2943,23 @@ function renderFxForm(force = false) {
       <div class="sub-label">プレビュー上で枠をドラッグして移動、四隅・辺で拡大縮小。<br>
         移動もリサイズも端と中央に吸着（Alt で解除）。Shift ＋ 角のドラッグで比率を保つ。<br>
         カーソルキーで 1px（Shift で 10px）。<br>
-        <b>つまみをダブルクリック</b>＝枠を画像に合わせる／<b>画像をダブルクリック</b>＝等倍に戻す。</div>`;
+        <b>つまみをダブルクリック</b>＝枠を画像に合わせる／<b>画像をダブルクリック</b>＝等倍に戻す。</div>
+      <div class="crop-sec">
+        <div class="sub-label"><b>使う範囲</b> — 元画像を切り出しておかなくても、ここで指定できます。<br>
+          下の画像をドラッグで範囲指定。中をドラッグで移動、四隅で拡大縮小。</div>
+        <canvas id="imCrop" class="crop-canvas"></canvas>
+        <div class="place-row">
+          <button id="cropAll">全体</button>
+          <button id="cropContent" title="透明な余白を除いた範囲に合わせる">中身に合わせる</button>
+          <button id="cropToBox" title="切り出した範囲の縦横比に、枠の形を合わせる">枠を比率に合わせる</button>
+        </div>
+        <div class="grid2">
+          <label>範囲 X <input class="num" type="number" id="cropX" value="0"></label>
+          <label>範囲 Y <input class="num" type="number" id="cropY" value="0"></label>
+          <label>範囲 幅 <input class="num" type="number" id="cropW" value="0"></label>
+          <label>範囲 高さ <input class="num" type="number" id="cropH" value="0"></label>
+        </div>
+      </div>`;
     const b = (id, fn) => $(id).addEventListener('input', (e) => {
       commit('画像を編集', `imF:${im.id}:${id}`); fn(e.target.value); live();
     });
@@ -2829,7 +2975,8 @@ function renderFxForm(force = false) {
     $('imStretch').addEventListener('change', (e) => {
       commit('画像の伸縮を切り替え'); im.fit = e.target.checked ? 'stretch' : 'contain'; live();
     });
-    for (const btn of form.querySelectorAll('.place-row button')) {
+    setupCropPicker(im);
+    for (const btn of form.querySelectorAll('.place-row button[data-p]')) {
       btn.onclick = () => {
         const a2 = S.project.imageAssets.find((x) => x.id === im.assetId);
         if (!a2) return;
@@ -2878,7 +3025,11 @@ function syncFxNumbers() {
   if (mk) { set('mkTime', mk.time.toFixed(2)); set('mkDur', (mk.duration ?? 0).toFixed(2)); }
   else if (blur) { set('fxStart', blur.start.toFixed(2)); set('fxEnd', blur.end.toFixed(2)); }
   else if (ac) { set('fxStart', ac.start.toFixed(2)); set('fxDur', ac.duration.toFixed(2)); }
-  else if (im) { set('imStart', im.start.toFixed(2)); set('imEnd', im.end.toFixed(2)); }
+  else if (im) {
+    set('imStart', im.start.toFixed(2)); set('imEnd', im.end.toFixed(2));
+    // 切り出し範囲は ⌘Z や MCP からも変わるので、ピッカーも描き直す
+    cropRedraw?.();
+  }
 }
 
 function renderTransport() {

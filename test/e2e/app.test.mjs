@@ -416,6 +416,59 @@ describe('ブラウザ結合', { skip }, () => {
     assert.equal(await ev(`bme.project.audioClips.length`), 1);
   });
 
+  test('画像は元ファイルを切り出さずに、使う範囲を指定できる', async () => {
+    const a = await ev(`bme.project.imageAssets[0]`);
+    // 右下の 1/4 だけを使う
+    const r = await ev(`(async () => {
+      const I = await import('./js/images.js');
+      const im = bme.project.images[0];
+      const a = bme.project.imageAssets[0];
+      im.crop = { x: a.width / 2, y: a.height / 2, w: a.width / 2, h: a.height / 2 };
+      im.box = { x: 100, y: 100, w: 600, h: 600 };
+      im.fit = 'contain';
+      const bmp = bme.state.imageLib.get(im.assetId);
+      return { src: I.srcRect(im, bmp), drawn: I.drawnRect(im, bmp) };
+    })()`);
+    assert.ok(Math.abs(r.src.w - a.width / 2) < 0.01, '切り出し幅が違う');
+    assert.ok(Math.abs(r.src.x - a.width / 2) < 0.01, '切り出し位置が違う');
+    // 枠は正方形。切り出した範囲の比率で収まる
+    const ar = (a.width / 2) / (a.height / 2);
+    assert.ok(Math.abs(r.drawn.w / r.drawn.h - ar) < 0.02,
+      `切り出した範囲の比率になっていない: ${r.drawn.w}×${r.drawn.h}`);
+
+    // 実際に描くと、切り出した範囲の画素だけが出る
+    const same = await ev(`(async () => {
+      const I = await import('./js/images.js');
+      const im = bme.project.images[0];
+      const bmp = bme.state.imageLib.get(im.assetId);
+      const cv = new OffscreenCanvas(1920, 1080);
+      const g = cv.getContext('2d');
+      I.drawImageClip(g, im, bme.state.imageLib);
+      const d = I.drawnRect(im, bmp);
+      // 描画先の中の 1 点と、元画像の対応する画素を比べる
+      const px = g.getImageData(Math.round(d.x + d.w * 0.5), Math.round(d.y + d.h * 0.5), 1, 1).data;
+      const src = I.srcRect(im, bmp);
+      const cv2 = new OffscreenCanvas(bmp.width, bmp.height);
+      const g2 = cv2.getContext('2d');
+      g2.drawImage(bmp, 0, 0);
+      const px2 = g2.getImageData(Math.round(src.x + src.w * 0.5), Math.round(src.y + src.h * 0.5), 1, 1).data;
+      return [[...px].slice(0, 3), [...px2].slice(0, 3)];
+    })()`);
+    const dist = Math.abs(same[0][0] - same[1][0]) + Math.abs(same[0][1] - same[1][1])
+      + Math.abs(same[0][2] - same[1][2]);
+    assert.ok(dist < 30, `切り出した所と違う画素が出ている: ${JSON.stringify(same)}`);
+
+    // 全体に戻せる
+    await ev(`(() => { bme.project.images[0].crop = null; bme.render(); })()`);
+    const full = await ev(`(async () => {
+      const I = await import('./js/images.js');
+      const im = bme.project.images[0];
+      return I.srcRect(im, bme.state.imageLib.get(im.assetId));
+    })()`);
+    assert.equal(full.x, 0);
+    assert.equal(full.w, a.width);
+  });
+
   test('範囲でまとめてコピーし、間隔を保って貼り付けられる', async () => {
     const r = await ev(`(async () => {
       const S = bme.state, P = bme.project;
