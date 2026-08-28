@@ -699,3 +699,10 @@ body.exporting .statusbar > .progress { display: block; }
   background: #12151a; border: 1px solid #3c424e; border-radius: 4px;
   cursor: crosshair; touch-action: none;
 }
+
+/* メディア一覧の画像。配置ボタンは既定で畳む（増えると埋まるため） */
+.bin-more {
+  background: none; border: none; color: var(--dim); cursor: pointer;
+  font-size: 11px; padding: 0 4px; line-height: 1; flex: none;
+}
+.bin-more:hover { color: var(--text); }

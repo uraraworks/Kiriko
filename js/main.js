@@ -24,6 +24,7 @@ const S = {
   project: P.createProject(),
   sources: new Map(),      // sourceId -> Mp4Source
   mediaFilter: 'all',      // メディア一覧の絞り込み（all / video / audio / image）
+  binOpen: new Set(),      // メディア一覧で配置ボタンを開いている画像素材の id
   clipboard: null,         // コピーしたテロップ / 音源 / 画像 / ぼかし
   projectFile: null,       // 開いている .kiriko の { name, handle }。保存先に使う
   workDir: null,           // 作業フォルダ（FileSystemDirectoryHandle）
@@ -1798,23 +1799,43 @@ function renderMediaBin() {
     const ok = !!S.imageLib.get(a.id);
     const el = document.createElement('div');
     el.className = 'bin-item image' + (ok ? '' : ' missing');
-    el.innerHTML = `<div class="row"><div class="n">▣ ${esc(a.name)}</div></div>`
+    // 画像が増えると配置ボタンで埋まるので、既定では畳んでおく。
+    // 名前とサムネイルが見えれば見分けは付くし、置くだけなら ＋ で足りる
+    const open = S.binOpen.has(a.id);
+    el.innerHTML = `<div class="row"><div class="n">▣ ${esc(a.name)}</div>`
+      + (ok ? `<button class="bin-add" title="再生位置に置く（大きさは自動）">＋</button>`
+            + `<button class="bin-more" title="${open ? '配置の選択を閉じる' : '置き場所を選ぶ'}"`
+            + ` aria-expanded="${open}">${open ? '▾' : '▸'}</button>` : '')
+      + `</div>`
       + (ok ? `<div class="m">${a.width}×${a.height}</div>`
-            : `<div class="m warnline">未接続 — このファイルをドロップするとつながります</div>`)
-      + (ok ? `<div class="place-row">${PLACEMENTS.map((pl) => `<button data-p="${pl.id}">${pl.name}</button>`).join('')}</div>` : '');
+            : `<div class="m warnline">未接続 — このファイルをドロップするとつながります</div>`);
     el.querySelector('.row').appendChild(assetDelButton('image', a.id, a.name));
     const bmp = S.imageLib.get(a.id);
-    if (bmp && el.querySelector('.place-row')) {
+    if (bmp) {
       const cv = document.createElement('canvas');
       const s2 = Math.min(200 / bmp.width, 54 / bmp.height);
       cv.width = Math.max(1, Math.round(bmp.width * s2));
       cv.height = Math.max(1, Math.round(bmp.height * s2));
       cv.className = 'thumb';
       cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
-      el.insertBefore(cv, el.querySelector('.place-row'));
+      el.appendChild(cv);
     }
-    for (const b of el.querySelectorAll('.place-row button')) {
-      b.onclick = (e) => { e.stopPropagation(); placeImage(a.id, b.dataset.p); };
+    if (ok && open) {
+      const pr = document.createElement('div');
+      pr.className = 'place-row';
+      pr.innerHTML = PLACEMENTS.map((pl) => `<button data-p="${pl.id}">${pl.name}</button>`).join('');
+      el.appendChild(pr);
+      for (const b of pr.querySelectorAll('button')) {
+        b.onclick = (e) => { e.stopPropagation(); placeImage(a.id, b.dataset.p); };
+      }
+    }
+    if (ok) {
+      el.querySelector('.bin-add').onclick = (e) => { e.stopPropagation(); placeImage(a.id); };
+      el.querySelector('.bin-more').onclick = (e) => {
+        e.stopPropagation();
+        if (!S.binOpen.delete(a.id)) S.binOpen.add(a.id);
+        renderBin();
+      };
     }
     if (!ok) el.onclick = () => status(`${a.name} を開くと、この画像がつながります`);
     list.appendChild(el);
@@ -2719,28 +2740,48 @@ function setupCropPicker(im) {
   };
   const apply = (r) => { im.crop = clampRect(r); draw(); renderOverlay(); renderTimeline(); };
 
+  /** カーソルの下に何があるか。掴む処理とカーソルの形で同じ判定を使う */
+  const hit = (p) => {
+    const s = srcRect(im, bmp);
+    const near = 10 / k;   // 四隅の当たり（画面 10px を画素に直す）
+    const cx = Math.abs(p.x - s.x) < near ? 'x' : Math.abs(p.x - (s.x + s.w)) < near ? 'r' : null;
+    const cy = Math.abs(p.y - s.y) < near ? 'y' : Math.abs(p.y - (s.y + s.h)) < near ? 'b' : null;
+    if (im.crop && cx && cy) return { mode: 'resize', cx, cy, s };
+    if (im.crop && p.x > s.x && p.x < s.x + s.w && p.y > s.y && p.y < s.y + s.h) {
+      return { mode: 'move', s };
+    }
+    return { mode: 'new', s };
+  };
+  const cursorFor = (h, dragging = false) => {
+    if (h.mode === 'resize') {
+      // 左上・右下は ↘、右上・左下は ↗
+      return (h.cx === 'x') === (h.cy === 'y') ? 'nwse-resize' : 'nesw-resize';
+    }
+    if (h.mode === 'move') return dragging ? 'grabbing' : 'grab';
+    return 'crosshair';
+  };
+
   let d = null;
   cv.addEventListener('pointerdown', (e) => {
     const p = pt(e);
-    const s = srcRect(im, bmp);
-    const near = 10 / k;   // 四隅の当たり（画素に直す）
-    const cx = Math.abs(p.x - s.x) < near ? 'x' : Math.abs(p.x - (s.x + s.w)) < near ? 'r' : null;
-    const cy = Math.abs(p.y - s.y) < near ? 'y' : Math.abs(p.y - (s.y + s.h)) < near ? 'b' : null;
+    const h = hit(p);
     commit('使う範囲を変更', `crop:${im.id}`);
-    if (im.crop && cx && cy) {
+    if (h.mode === 'resize') {
       // 掴んだ角の反対側を固定する
-      d = { mode: 'resize', fx: cx === 'x' ? s.x + s.w : s.x, fy: cy === 'y' ? s.y + s.h : s.y };
-    } else if (im.crop && p.x > s.x && p.x < s.x + s.w && p.y > s.y && p.y < s.y + s.h) {
-      d = { mode: 'move', dx: p.x - s.x, dy: p.y - s.y, w: s.w, h: s.h };
+      d = { mode: 'resize', cx: h.cx, cy: h.cy,
+        fx: h.cx === 'x' ? h.s.x + h.s.w : h.s.x, fy: h.cy === 'y' ? h.s.y + h.s.h : h.s.y };
+    } else if (h.mode === 'move') {
+      d = { mode: 'move', dx: p.x - h.s.x, dy: p.y - h.s.y, w: h.s.w, h: h.s.h };
     } else {
       d = { mode: 'new', ox: p.x, oy: p.y };
     }
+    cv.style.cursor = cursorFor(d, true);
     cv.setPointerCapture(e.pointerId);
     e.preventDefault();
   });
   cv.addEventListener('pointermove', (e) => {
-    if (!d) return;
     const p = pt(e);
+    if (!d) { cv.style.cursor = cursorFor(hit(p)); return; }
     if (d.mode === 'move') apply({ x: p.x - d.dx, y: p.y - d.dy, w: d.w, h: d.h });
     else {
       const ax = d.mode === 'new' ? d.ox : d.fx, ay = d.mode === 'new' ? d.oy : d.fy;
@@ -2748,9 +2789,15 @@ function setupCropPicker(im) {
         w: Math.abs(p.x - ax), h: Math.abs(p.y - ay) });
     }
   });
-  const end = () => { if (d) { d = null; history.endGroup(); } };
+  const end = (e) => {
+    if (!d) return;
+    d = null;
+    history.endGroup();
+    if (e) cv.style.cursor = cursorFor(hit(pt(e)));
+  };
   cv.addEventListener('pointerup', end);
   cv.addEventListener('pointercancel', end);
+  cv.addEventListener('pointerleave', () => { if (!d) cv.style.cursor = ''; });
 
   for (const [key, el] of Object.entries(nums)) {
     if (!el) continue;
@@ -2950,7 +2997,7 @@ function renderFxForm(force = false) {
         <b>つまみをダブルクリック</b>＝枠を画像に合わせる／<b>画像をダブルクリック</b>＝等倍に戻す。</div>
       <div class="crop-sec">
         <div class="sub-label"><b>使う範囲</b> — 元画像を切り出しておかなくても、ここで指定できます。<br>
-          下の画像をドラッグで範囲指定。中をドラッグで移動、四隅で拡大縮小。</div>
+          下の画像をドラッグで範囲指定。中をドラッグで移動（✋）、四隅で拡大縮小（⤢）。</div>
         <canvas id="imCrop" class="crop-canvas"></canvas>
         <div class="place-row">
           <button id="cropAll">全体</button>

@@ -495,6 +495,84 @@ describe('ブラウザ結合', { skip }, () => {
     assert.equal(full.w, a.width);
   });
 
+  test('使う範囲のピッカーは、カーソルの形で操作が分かる', async () => {
+    const cur = await ev(`(() => {
+      const im = bme.project.images[0];
+      const a = bme.project.imageAssets[0];
+      im.crop = { x: a.width * 0.25, y: a.height * 0.25, w: a.width * 0.5, h: a.height * 0.5 };
+      // renderFxForm はマーカー・ぼかし・音源を先に見るので、まとめて外す
+      Object.assign(bme.state, { selectedMarkerId: null, selectedBlurId: null,
+        selectedAudioId: null, selectedTelopId: null, selectedImageId: im.id });
+      bme.render();
+      const cv = document.getElementById('imCrop');
+      const r = cv.getBoundingClientRect();
+      const at = (px, py) => ({
+        clientX: r.left + (px / a.width) * r.width,
+        clientY: r.top + (py / a.height) * r.height,
+      });
+      const probe = (px, py) => {
+        cv.dispatchEvent(new PointerEvent('pointermove', { ...at(px, py), bubbles: true, pointerId: 1 }));
+        return cv.style.cursor;
+      };
+      const c = im.crop;
+      const out = {
+        tl: probe(c.x, c.y),
+        tr: probe(c.x + c.w, c.y),
+        bl: probe(c.x, c.y + c.h),
+        br: probe(c.x + c.w, c.y + c.h),
+        inside: probe(c.x + c.w / 2, c.y + c.h / 2),
+        outside: probe(2, 2),
+      };
+      cv.dispatchEvent(new PointerEvent('pointerdown', {
+        ...at(c.x + c.w / 2, c.y + c.h / 2), bubbles: true, pointerId: 1, button: 0, buttons: 1 }));
+      out.dragging = cv.style.cursor;
+      cv.dispatchEvent(new PointerEvent('pointerup', {
+        ...at(c.x + c.w / 2, c.y + c.h / 2), bubbles: true, pointerId: 1 }));
+      return out;
+    })()`);
+    assert.equal(cur.tl, 'nwse-resize', '左上が斜めのリサイズになっていない');
+    assert.equal(cur.br, 'nwse-resize', '右下が斜めのリサイズになっていない');
+    assert.equal(cur.tr, 'nesw-resize', '右上の向きが逆');
+    assert.equal(cur.bl, 'nesw-resize', '左下の向きが逆');
+    assert.equal(cur.inside, 'grab', '内側が手のひらになっていない');
+    assert.equal(cur.dragging, 'grabbing', '掴んでいる間の形が変わらない');
+    assert.equal(cur.outside, 'crosshair', '範囲の外が十字になっていない');
+
+    await ev(`(() => { bme.project.images[0].crop = null; bme.render(); })()`);
+  });
+
+  test('メディア欄の画像は既定で畳まれていて、開くと配置ボタンが出る', async () => {
+    const r = await ev(`(() => {
+      const el = [...document.querySelectorAll('.bin-item.image')][0];
+      const before = {
+        placeRows: el.querySelectorAll('.place-row').length,
+        thumb: !!el.querySelector('canvas.thumb'),
+        name: !!el.querySelector('.n'),
+        add: !!el.querySelector('.bin-add'),
+        caret: el.querySelector('.bin-more').textContent,
+      };
+      el.querySelector('.bin-more').click();
+      const el2 = [...document.querySelectorAll('.bin-item.image')][0];
+      const after = {
+        placeRows: el2.querySelectorAll('.place-row').length,
+        caret: el2.querySelector('.bin-more').textContent,
+        thumb: !!el2.querySelector('canvas.thumb'),
+      };
+      el2.querySelector('.bin-more').click();
+      const closed = [...document.querySelectorAll('.bin-item.image')][0]
+        .querySelectorAll('.place-row').length;
+      return { before, after, closed };
+    })()`);
+    assert.equal(r.before.placeRows, 0, '既定で配置ボタンが出てしまっている');
+    assert.ok(r.before.thumb, 'サムネイルが出ていない');
+    assert.ok(r.before.name, 'ファイル名が出ていない');
+    assert.ok(r.before.add, '置くボタン（＋）が無い');
+    assert.equal(r.after.placeRows, 1, '開いても配置ボタンが出ない');
+    assert.ok(r.after.thumb, '開いたらサムネイルが消えた');
+    assert.notEqual(r.before.caret, r.after.caret, '開閉の印が変わらない');
+    assert.equal(r.closed, 0, '閉じられない');
+  });
+
   test('範囲でまとめてコピーし、間隔を保って貼り付けられる', async () => {
     const r = await ev(`(async () => {
       const S = bme.state, P = bme.project;
