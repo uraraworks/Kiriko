@@ -112,3 +112,56 @@ test('テロップの中身は枠の端と中央に吸着する', () => {
   assert.equal(far.dx, 0);
   assert.equal(far.guides.length, 0);
 });
+
+// --- 近くの別の枠に揃える（移動中の吸着）---
+
+const other = { x: 100, y: 100, w: 200, h: 80 };   // 揃える相手
+
+test('snapToBoxes: 左端どうし・上端どうしで揃う', () => {
+  const r = B.snapToBoxes({ x: 106, y: 94, w: 60, h: 40 }, [other]);
+  assert.equal(r.box.x, 100);
+  assert.equal(r.box.y, 100);
+  assert.deepEqual(r.guides.map((g) => g.at), [100, 100]);
+});
+
+test('snapToBoxes: 右端どうし・下端どうしで揃う', () => {
+  const r = B.snapToBoxes({ x: 244, y: 142, w: 60, h: 40 }, [other]);
+  assert.equal(r.box.x + 60, 300);   // 相手の右端
+  assert.equal(r.box.y + 40, 180);   // 相手の下端
+});
+
+test('snapToBoxes: 中心どうしで揃う', () => {
+  const r = B.snapToBoxes({ x: 175, y: 125, w: 60, h: 40 }, [other]);
+  assert.equal(r.box.x + 30, 200);   // 相手の中心
+  assert.equal(r.box.y + 20, 140);
+});
+
+test('snapToBoxes: 相手の外側に接する位置にも吸く', () => {
+  const r = B.snapToBoxes({ x: 306, y: 300, w: 60, h: 40 }, [other]);
+  assert.equal(r.box.x, 300);        // 相手の右端にくっつく
+  assert.equal(r.box.y, 300, '遠い向きは動かさない');
+});
+
+test('snapToBoxes: 遠ければ動かさないし、目印も出ない', () => {
+  const r = B.snapToBoxes({ x: 500, y: 500, w: 60, h: 40 }, [other]);
+  assert.deepEqual(r.box, { x: 500, y: 500, w: 60, h: 40 });
+  assert.equal(r.guides.length, 0);
+});
+
+test('snapToBoxes: 画面端に吸着済みの向きは触らない', () => {
+  const r = B.snapToBoxes({ x: 106, y: 94, w: 60, h: 40 }, [other], 14, ['x']);
+  assert.equal(r.box.x, 106, 'x は画面端の吸着を優先する');
+  assert.equal(r.box.y, 100);
+});
+
+test('snapToBoxes: 候補が重なったら一番近いものを選ぶ', () => {
+  // 相手が 2 つあると候補も増える。ここでは near と中心を揃える 105 が一番近い
+  const near = { x: 110, y: 100, w: 50, h: 50 };
+  const r = B.snapToBoxes({ x: 106, y: 300, w: 60, h: 40 }, [other, near]);
+  assert.equal(r.box.x + 30, 135, '近い方の中心に揃う');
+});
+
+test('snapToBoxes: 相手がいなければ何もしない', () => {
+  const b = { x: 10, y: 20, w: 60, h: 40 };
+  assert.deepEqual(B.snapToBoxes(b, []).box, b);
+});

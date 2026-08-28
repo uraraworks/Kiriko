@@ -1412,6 +1412,16 @@ function pickBox(p, t) {
 
 let boxDrag = null;
 
+/** いま画面に出ている、自分以外の枠（揃える相手） */
+function otherBoxes(self) {
+  const t = currentTimelineTime();
+  const items = [
+    ...activeRectBlurs(S.project.blurs, t).map((b) => blurBoxProxy(b, t)),
+    ...overlaysAt(S.project, t).map((o) => o.item),
+  ];
+  return items.filter((x) => x.id !== self.id && x.box).map((x) => x.box);
+}
+
 /**
  * テロップの中身のうち、その点にあるものを返す。
  *
@@ -1617,6 +1627,10 @@ overlay.addEventListener('pointermove', (e) => {
       const snapped = B.snapBox(box, W, H);   // 端・中央に吸着（Alt で解除）
       box = snapped.box;
       boxDrag.guides = snapped.guides;
+      // 画面端に吸わなかった向きだけ、近くの別の要素の端に揃える
+      const near = B.snapToBoxes(box, otherBoxes(item), 14, boxDrag.guides.map((g) => g.axis));
+      box = near.box;
+      boxDrag.guides = [...boxDrag.guides, ...near.guides];
     } else {
       boxDrag.guides = [];
     }

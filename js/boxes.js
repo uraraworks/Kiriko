@@ -99,6 +99,62 @@ export function snapBox(b, W, H, tol = 14, margin = 60) {
 }
 
 /**
+ * 近くにある別の枠へ揃える吸着（移動中だけ）。
+ *
+ * 縦や横の位置を揃えたい時のためのもので、次の 4 通りに吸わせる。
+ *  - 同じ側の端どうし（左と左、右と右／上と上、下と下）
+ *  - 中心どうし
+ *  - 相手のすぐ外側に接する位置（右端に左端をぴったり付ける、など）
+ * どれも一番近いものを 1 つだけ選ぶ。
+ *
+ * @param {{x,y,w,h}} b 動かしている枠
+ * @param {Array<{x,y,w,h}>} others 他の枠（自分は入れない）
+ * @param {number} tol 吸着する距離
+ * @param {Array<'x'|'y'>} skip 既に画面端へ吸着した軸（そちらを優先して触らない）
+ * @returns {{ box, guides:Array<{axis:'x'|'y', at:number}> }}
+ */
+export function snapToBoxes(b, others, tol = 14, skip = []) {
+  const guides = [];
+  let { x, y, w, h } = b;
+
+  // [合わせる座標, 目印を出す位置]
+  const pick = (value, cands) => {
+    let best = null, bd = Infinity;
+    for (const [target, at] of cands) {
+      const d = Math.abs(value - target);
+      if (d <= tol && d < bd) { bd = d; best = [target, at]; }
+    }
+    return best;
+  };
+
+  if (!skip.includes('x')) {
+    const cands = [];
+    for (const o of others) {
+      cands.push([o.x, o.x]);                            // 左端をそろえる
+      cands.push([o.x + o.w - w, o.x + o.w]);            // 右端をそろえる
+      cands.push([o.x + o.w / 2 - w / 2, o.x + o.w / 2]); // 中心をそろえる
+      cands.push([o.x + o.w, o.x + o.w]);                // 相手の右にくっつける
+      cands.push([o.x - w, o.x]);                        // 相手の左にくっつける
+    }
+    const hit = pick(x, cands);
+    if (hit) { x = hit[0]; guides.push({ axis: 'x', at: hit[1] }); }
+  }
+  if (!skip.includes('y')) {
+    const cands = [];
+    for (const o of others) {
+      cands.push([o.y, o.y]);
+      cands.push([o.y + o.h - h, o.y + o.h]);
+      cands.push([o.y + o.h / 2 - h / 2, o.y + o.h / 2]);
+      cands.push([o.y + o.h, o.y + o.h]);
+      cands.push([o.y - h, o.y]);
+    }
+    const hit = pick(y, cands);
+    if (hit) { y = hit[0]; guides.push({ axis: 'y', at: hit[1] }); }
+  }
+  return { box: { x, y, w, h }, guides };
+}
+
+/**
  * リサイズ中の吸着。ドラッグしている辺だけを、画面端・中央・セーフマージンに合わせる。
  * @returns {{ box, guides }}
  */
