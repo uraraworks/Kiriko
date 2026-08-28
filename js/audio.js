@@ -71,12 +71,14 @@ export class AudioPreview {
     this.lib = library;
     this.nodes = [];
     this.anchor = null; // { t: タイムライン秒, at: AudioContext 時刻 }
+    this.sounding = new Map(); // ac.id -> { when: 鳴り始める AudioContext 時刻, skip: 頭から飛ばした秒数 }
   }
 
   stop() {
     for (const n of this.nodes) { try { n.stop(); } catch {} }
     this.nodes = [];
     this.anchor = null;
+    this.sounding = new Map();
   }
 
   /** いま鳴っている位置（タイムライン秒）。鳴っていなければ null */
@@ -87,6 +89,7 @@ export class AudioPreview {
 
   /** timelineSec の位置から再生を開始する */
   start(audioClips, timelineSec, mix = null) {
+    const prev = this.sounding;   // 鳴らし直す前に、いま鳴っているものを控えておく
     this.stop();
     const ctx = this.lib.ctx;
     if (ctx.state === 'suspended') ctx.resume();
@@ -99,8 +102,19 @@ export class AudioPreview {
       const end = ac.start + (ac.duration ?? buf.duration);
       if (end <= timelineSec) continue;
 
-      const when = t0 + Math.max(0, ac.start - timelineSec);
-      const skip = Math.max(0, timelineSec - ac.start);          // 途中から鳴らす分
+      let when = t0 + Math.max(0, ac.start - timelineSec);
+      let skip = Math.max(0, timelineSec - ac.start);            // 途中から鳴らす分
+
+      // すでに鳴り始めているものは、鳴っている続きから繋ぐ。
+      // カットの継ぎ目でシークが長引くと、音だけ実時間で先に進んでから鳴らし直しになるため、
+      // 素直にタイムライン位置で組み直すと「鳴り始めた SE がもう一度頭から鳴る」ことがあった。
+      // ただし本当のシーク（大きく戻った時）は鳴らし直す。
+      const was = prev.get(ac.id);
+      if (was && ctx.currentTime > was.when) {
+        const nowLocal = was.skip + (ctx.currentTime - was.when); // いま鳴っている素材内の位置
+        if (nowLocal > skip && nowLocal - skip < 0.35) { skip = nowLocal; when = t0; }
+      }
+
       const offset = (ac.offset ?? 0) + skip;
       const dur = (ac.duration ?? buf.duration) - skip;
       if (dur <= 0 || offset >= buf.duration) continue;
@@ -130,6 +144,7 @@ export class AudioPreview {
       const playDur = ac.loop ? dur : Math.min(dur, buf.duration - offset);
       src.start(when, startOffset, playDur);
       this.nodes.push(src);
+      this.sounding.set(ac.id, { when, skip });
     }
   }
 }
