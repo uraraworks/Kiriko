@@ -176,3 +176,34 @@ export function drawGuides(ctx, guides, W, H, scale = 1) {
   ctx.stroke();
   ctx.restore();
 }
+
+/**
+ * テロップの中身（文字・背景画像・アイコン）を、**枠の**端と中央に吸着させる。
+ *
+ * 枠の外へ出したい場合もあるので、吸着だけで押し込めはしない（clampBox は掛けない）。
+ *
+ * @param {{x,y,w,h}} r 中身の矩形（画面の座標）
+ * @param {{x,y,w,h}} box テロップの枠
+ * @returns {{dx:number, dy:number, guides:Array<{axis:'x'|'y', at:number}>}} 吸着で動かす量
+ */
+export function snapInside(r, box, tol = 12) {
+  const guides = [];
+  let dx = 0, dy = 0;
+  const xTargets = [
+    [box.x, box.x],                                   // 左端
+    [box.x + box.w / 2 - r.w / 2, box.x + box.w / 2], // 中央
+    [box.x + box.w - r.w, box.x + box.w],             // 右端
+  ];
+  const yTargets = [
+    [box.y, box.y],
+    [box.y + box.h / 2 - r.h / 2, box.y + box.h / 2],
+    [box.y + box.h - r.h, box.y + box.h],
+  ];
+  for (const [target, at] of xTargets) {
+    if (Math.abs(r.x - target) <= tol) { dx = target - r.x; guides.push({ axis: 'x', at }); break; }
+  }
+  for (const [target, at] of yTargets) {
+    if (Math.abs(r.y - target) <= tol) { dy = target - r.y; guides.push({ axis: 'y', at }); break; }
+  }
+  return { dx, dy, guides };
+}

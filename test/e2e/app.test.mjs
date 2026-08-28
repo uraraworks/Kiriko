@@ -400,6 +400,50 @@ describe('ブラウザ結合', { skip }, () => {
       t.textFree = false; t.textX = 0; t.textY = 0; bme.render(); })()`);
   });
 
+  test('中身のドラッグは、掴んだものだけを動かす', async () => {
+    const r = await ev(`(async () => {
+      const T = await import('./js/telop.js');
+      const tel = bme.project.telops[0];
+      const ov = document.getElementById('overlay');
+      const rc = ov.getBoundingClientRect();
+      const at = (x, y) => ({ clientX: rc.left + (x / ov.width) * rc.width,
+                              clientY: rc.top + (y / ov.height) * rc.height });
+      const ev2 = (t, x, y, o = {}) => ov.dispatchEvent(new PointerEvent(t,
+        { ...at(x, y), bubbles: true, pointerId: 1, button: 0, buttons: 1, ...o }));
+      const reset = () => { tel.textFree = false; tel.textX = 0; tel.textY = 0; bme.render(); };
+
+      Object.assign(bme.state, { selectedBlurId: null, selectedImageId: null,
+        selectedMarkerId: null, selectedTelopId: tel.id });
+      await bme.call('seek', { time: (tel.start + tel.end) / 2 });
+      reset();
+      await new Promise((r2) => setTimeout(r2, 250));
+
+      const box = tel.box;
+      const tb0 = T.textBounds(ov.getContext('2d'), tel, bme.state.imageLib);
+      // ① 文字からも画像からも離れた所（背景だけ）を掴んでも、何も動かない
+      const far = { x: box.x + 20, y: box.y + 12 };
+      ev2('pointerdown', far.x, far.y, { metaKey: true });
+      ev2('pointermove', far.x + 80, far.y + 20, { metaKey: true });
+      ev2('pointerup', far.x + 80, far.y + 20, { metaKey: true });
+      await new Promise((r2) => setTimeout(r2, 200));
+      const untouched = { textFree: tel.textFree, textX: tel.textX, textY: tel.textY };
+
+      // ② 文字の上を掴めば動く（Alt で吸着を切って、動かした分そのまま）
+      const cx = tb0.x + tb0.w / 2, cy = tb0.y + tb0.h / 2;
+      ev2('pointerdown', cx, cy, { metaKey: true });
+      ev2('pointermove', cx + 100, cy + 20, { metaKey: true, altKey: true });
+      ev2('pointerup', cx + 100, cy + 20, { metaKey: true, altKey: true });
+      await new Promise((r2) => setTimeout(r2, 200));
+      const moved = { textX: tel.textX, textY: tel.textY };
+
+      reset();
+      return { untouched, moved };
+    })()`);
+    assert.equal(r.untouched.textFree, false, '背景だけの所を掴んで文字が動いている');
+    assert.equal(r.untouched.textX, 0, '背景だけの所を掴んで文字が動いている');
+    assert.ok(Math.abs(r.moved.textX - 100) < 3, `文字が動いていない: ${r.moved.textX}`);
+  });
+
   test('テロップダイアログの中身がダイアログの外へはみ出さない', async () => {
     await ev(`(() => {
       bme.state.selectedTelopId = bme.project.telops[0].id;
@@ -586,15 +630,13 @@ describe('ブラウザ結合', { skip }, () => {
       let n = 0;
       g.clearRect = (...a) => { n++; return orig(...a); };
       document.getElementById('btnFwd1').click();
-      await new Promise((r) => setTimeout(r, 40));
-      const early = n;                                  // シークの途中では描かない
       await new Promise((r) => setTimeout(r, 800));
-      const after = n;                                  // 終わったら描く
       g.clearRect = orig;
-      return { early, after };
+      return n;
     })()`);
-    assert.equal(n.early, 0, `シークの途中で描いている（${n.early} 回）— 前のフレームにずれた表示が乗る`);
-    assert.ok(n.after >= 1, `シークが終わっても描き直していない（${n.after} 回）`);
+    // 「シークが終わる前に描かない」ことは、ぼかしの端をまたぐテストで見ている
+    // （こちらは環境によってシークが一瞬で終わるので、途中の状態を観測できない）
+    assert.ok(n >= 1, `シークが終わっても描き直していない（${n} 回）`);
 
     // 後のテストに影響しないよう、ぼかしと再生位置を戻す
     await ev(`(() => {

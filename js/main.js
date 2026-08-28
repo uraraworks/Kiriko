@@ -1415,13 +1415,28 @@ let boxDrag = null;
  */
 function telopPartAt(tel, p) {
   const ctx = overlay.getContext('2d');
-  const inside = (r) => r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+  // 文字は細いので、少しだけ外側も当たりにする。ただし枠いっぱいには広げない
+  // （広げると、背景色だけの所を掴んでも文字が動いて驚く）
+  const inside = (r, pad = 0) => r
+    && p.x >= r.x - pad && p.x <= r.x + r.w + pad
+    && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
   const { icon } = T.layoutTelop(ctx, tel, S.imageLib);
   if (inside(icon)) return 'icon';
-  if (inside(T.textBounds(ctx, tel, S.imageLib))) return 'text';
+  if (inside(T.textBounds(ctx, tel, S.imageLib), 24)) return 'text';
   const bmp = S.imageLib.get(tel.bgAssetId);
   if (bmp && inside(T.bgRect(tel, bmp))) return 'bg';
   return null;
+}
+
+/** 中身の矩形（吸着のために大きさが要る） */
+function telopPartRect(tel, part) {
+  const ctx = overlay.getContext('2d');
+  if (part === 'icon') return T.layoutTelop(ctx, tel, S.imageLib).icon;
+  if (part === 'bg') {
+    const bmp = S.imageLib.get(tel.bgAssetId);
+    return bmp ? T.bgRect(tel, bmp) : null;
+  }
+  return T.textBounds(ctx, tel, S.imageLib);
 }
 
 /**
@@ -1488,10 +1503,18 @@ overlay.addEventListener('pointerdown', (e) => {
   // ⌘ / Ctrl を押しながらなら、テロップの「中身」だけを動かす。
   // 枠ごとの移動と取り違えないよう、修飾キーで分ける
   if (hit.kind === 'telop' && (e.metaKey || e.ctrlKey)) {
-    const part = telopPartAt(hit.item, p) ?? 'text';   // どれにも当たらなければ文字
+    const part = telopPartAt(hit.item, p);
+    if (!part) {
+      // 何も無い所では動かさない。以前は文字に落としていたが、
+      // 背景色だけの所を掴んでも文字が動くので驚く
+      status('動かすもの（文字・画像・アイコン）の上で ⌘ を押しながらドラッグしてください');
+      renderAll();
+      return;
+    }
+    const rect0 = telopPartRect(hit.item, part);
     const orig = beginInnerDrag(hit.item, part);
     boxDrag = {
-      ...hit, mode: 'inner', part, startX: p.x, startY: p.y, orig,
+      ...hit, mode: 'inner', part, startX: p.x, startY: p.y, orig, rect0,
       guides: [], committed: false, label: `${PART_NAME[part]}の位置を変更`,
     };
     overlay.classList.add('grabbing');
@@ -1547,7 +1570,16 @@ overlay.addEventListener('pointermove', (e) => {
     boxDrag.committed = true;
   }
   if (boxDrag.mode === 'inner') {
-    const x = Math.round(boxDrag.orig.x + dx), y = Math.round(boxDrag.orig.y + dy);
+    // 枠の端と中央に吸着させる（Alt で解除）。枠の外へも出せるよう、押し込めはしない
+    let sx = 0, sy = 0;
+    boxDrag.guides = [];
+    if (!e.altKey && boxDrag.rect0) {
+      const r0 = boxDrag.rect0;
+      const moved = { x: r0.x + dx, y: r0.y + dy, w: r0.w, h: r0.h };
+      const snap = B.snapInside(moved, item.box);
+      sx = snap.dx; sy = snap.dy; boxDrag.guides = snap.guides;
+    }
+    const x = Math.round(boxDrag.orig.x + dx + sx), y = Math.round(boxDrag.orig.y + dy + sy);
     if (boxDrag.part === 'icon') { item.icon.x = x; item.icon.y = y; }
     else if (boxDrag.part === 'bg') { item.bgBox.x = x; item.bgBox.y = y; }
     else { item.textX = x; item.textY = y; }
@@ -2395,8 +2427,8 @@ function renderTelopForm(force = false) {
       <div class="align-grid">${['top', 'middle', 'bottom'].map((a) =>
         `<button data-v="${a}" class="${tel.vAlign === a ? 'on' : ''}" title="${a}">${VA[a]}</button>`).join('')}</div></label>
     <div class="sub-label">プレビュー上で <b>⌘（Windows は Ctrl）＋ドラッグ</b> すると、
-      枠は動かさずに<b>文字・背景画像・アイコンだけ</b>を動かせます
-      （掴んだものが対象。何も無い所なら文字）。</div>
+      枠は動かさずに<b>文字・背景画像・アイコンだけ</b>を動かせます（掴んだものが対象）。<br>
+      枠の端と中央に吸着します（Alt で解除）。枠の外へも出せます。</div>
     <label class="chk"><input type="checkbox" id="telTextFree" ${tel.textFree ? 'checked' : ''}> 文字の位置を自由に決める</label>
     ${tel.textFree ? `
     <div class="grid2">

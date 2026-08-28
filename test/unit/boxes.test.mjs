@@ -89,3 +89,26 @@ test('snapResize: 掴んだ辺だけが吸着する', () => {
   assert.equal(r.box.x, 0);
   assert.equal(r.box.y, 300, '掴んでいない辺は動かない');
 });
+
+test('テロップの中身は枠の端と中央に吸着する', () => {
+  const box = { x: 100, y: 100, w: 800, h: 400 };
+  const part = { w: 200, h: 100 };
+
+  // 中央（枠の中心 500 に、中身の中心を合わせる → x=400）
+  const near = B.snapInside({ x: 408, y: 300, ...part }, box);
+  assert.equal(near.dx, -8);
+  assert.ok(near.guides.some((g) => g.axis === 'x' && g.at === 500));
+
+  // 左端
+  assert.equal(B.snapInside({ x: 106, y: 300, ...part }, box).dx, -6);
+  // 右端（枠の右 900 に中身の右を合わせる → x=700）
+  assert.equal(B.snapInside({ x: 694, y: 300, ...part }, box).dx, 6);
+  // 上端・下端
+  assert.equal(B.snapInside({ x: 400, y: 105, ...part }, box).dy, -5);
+  assert.equal(B.snapInside({ x: 400, y: 396, ...part }, box).dy, 4);
+
+  // 離れていれば吸着しない（枠の外へも出せる）
+  const far = B.snapInside({ x: -300, y: 300, ...part }, box);
+  assert.equal(far.dx, 0);
+  assert.equal(far.guides.length, 0);
+});
