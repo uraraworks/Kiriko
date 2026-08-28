@@ -414,6 +414,8 @@ function refreshProgram() {
 }
 
 function seekProgram(t, force = false) {
+  // 継ぎ目の跨ぎ以外は「見たい所へ飛んだ」なので、SE は頭から鳴らし直してよい
+  if (!crossingSeam) S.audioPreview?.forget();
   S.programTime = Math.max(0, Math.min(t, P.totalDuration(S.project)));
   renderSeamUI();   // カーソルが継ぎ目に乗ったかどうかで表示が変わる
   const loc = locate(S.programTime);
@@ -437,6 +439,7 @@ function seekProgram(t, force = false) {
 }
 
 /** プログラム再生中のクリップ跨ぎ処理 */
+let crossingSeam = false;   // 継ぎ目を跨いだだけのシークか（鳴っている音は繋いだままにする）
 function programTick() {
   if (S.mode !== 'program' || video.paused) return;
   const loc = S.project.clips[S.programIndex];
@@ -445,7 +448,8 @@ function programTick() {
     const next = S.programIndex + 1;
     if (next >= S.project.clips.length) { video.pause(); return; }
     S.programTime = clipOffset(next);
-    seekProgram(S.programTime, true);
+    crossingSeam = true;
+    try { seekProgram(S.programTime, true); } finally { crossingSeam = false; }
     video.play().catch(() => {});
   } else {
     S.programTime = clipOffset(S.programIndex) + (video.currentTime - loc.in);

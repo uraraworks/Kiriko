@@ -81,6 +81,9 @@ export class AudioPreview {
     this.sounding = new Map();
   }
 
+  /** 鳴っている続きの記録だけ捨てる（頭から鳴らし直したいシークの時に呼ぶ）*/
+  forget() { this.sounding = new Map(); }
+
   /** いま鳴っている位置（タイムライン秒）。鳴っていなければ null */
   positionNow() {
     if (!this.anchor) return null;
@@ -105,14 +108,15 @@ export class AudioPreview {
       let when = t0 + Math.max(0, ac.start - timelineSec);
       let skip = Math.max(0, timelineSec - ac.start);            // 途中から鳴らす分
 
-      // すでに鳴り始めているものは、鳴っている続きから繋ぐ。
-      // カットの継ぎ目でシークが長引くと、音だけ実時間で先に進んでから鳴らし直しになるため、
-      // 素直にタイムライン位置で組み直すと「鳴り始めた SE がもう一度頭から鳴る」ことがあった。
-      // ただし本当のシーク（大きく戻った時）は鳴らし直す。
+      // すでに鳴り始めているものは、鳴っている続きから繋ぐ（頭には戻さない）。
+      // 音は実時間で進むのに映像はシークで待たされるので、継ぎ目のたびに音が先行する。
+      // それをタイムライン位置で素直に組み直すと、鳴り始めた SE がもう一度頭から鳴っていた。
+      // ずれの大きさでは判断しない（実測で 0.4 秒近く先行することがあった）。
+      // 頭から鳴らし直したい本当のシークは、呼ぶ側が forget() で断ち切る。
       const was = prev.get(ac.id);
       if (was && ctx.currentTime > was.when) {
         const nowLocal = was.skip + (ctx.currentTime - was.when); // いま鳴っている素材内の位置
-        if (nowLocal > skip && nowLocal - skip < 0.35) { skip = nowLocal; when = t0; }
+        if (nowLocal > skip) { skip = nowLocal; when = t0; }
       }
 
       const offset = (ac.offset ?? 0) + skip;
