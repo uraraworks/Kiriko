@@ -15,6 +15,7 @@ import { ThumbCache, THUMB_W, THUMB_H } from './thumbs.js';
 import { WaveformCache, BINS_PER_SEC, bufferPeaks } from './waveform.js';
 import * as B from './boxes.js';
 import { dropIndex, rippleTime, insertTime, trimShift } from './edit.js';
+import * as TR from './trims.js';
 import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageClip, drawImageClip, drawnRect } from './images.js';
 
 // ---------------------------------------------------------------- 状態
@@ -217,6 +218,7 @@ function normalizeProject() {
   p.audioClips.forEach((a) => { if (typeof a.track !== 'number') a.track = a.kind === 'bgm' ? 1 : 0; });
   p.audioAssets = p.audioAssets ?? [];
   p.mix = { se: 1, bgm: 1, ...(p.mix ?? {}) };
+  p.trims = (p.trims ?? []).filter((t) => (t.segments ?? []).length);
 }
 
 function status(msg, isErr = false) {
@@ -412,6 +414,7 @@ function refreshProgram() {
 
 function seekProgram(t, force = false) {
   S.programTime = Math.max(0, Math.min(t, P.totalDuration(S.project)));
+  renderSeamUI();   // カーソルが継ぎ目に乗ったかどうかで表示が変わる
   const loc = locate(S.programTime);
   if (!loc) return;
   const src = S.sources.get(loc.clip.sourceId);
@@ -528,6 +531,28 @@ function renderZoneInfo() {
   show('btnCopy', !!r || !!(S.selectedTelopId || S.selectedAudioId || S.selectedImageId || S.selectedBlurId));
   show('btnPaste', !!S.clipboard?.items?.length);
   $('btnExtract').disabled = !r;
+
+  renderSeamUI();
+}
+
+/**
+ * 切りすぎたカットを戻す操作の表示。
+ * 範囲選択中は使わないので、そこでは引っ込めて場所を譲る。
+ * カーソル位置で内容が変わるので、シークのたびに呼ぶ。
+ */
+function renderSeamUI() {
+  const show = (id, on) => $(id).classList.toggle('hidden', !on);
+  const busy = S.zoneIn !== null || !!zoneRange();
+  const list = TR.seams(S.project).filter((x) => x.atSec !== null);
+  const on = !!list.length && !busy;
+  for (const id of ['btnSeamPrev', 'btnRestoreHead', 'btnRestoreTail', 'btnSeamNext']) show(id, on);
+  show('seamInfo', on);
+  const near = on ? TR.seamNear(S.project, S.programTime, SEAM_TOL) : null;
+  $('btnRestoreHead').disabled = !near;
+  $('btnRestoreTail').disabled = !near;
+  $('seamInfo').textContent = !on ? ''
+    : near ? `${near.label || 'カット'}の継ぎ目 — あと ${near.remainingSec.toFixed(1)} 秒戻せます`
+      : `戻せるカット ${list.length} 箇所（継ぎ目へ移動すると戻せます）`;
 }
 
 function renderZoneUI() {
@@ -542,7 +567,7 @@ function extractZone() {
   if (!r) return status('先に範囲を選択してください（I / O）', true);
   const [a, b] = r;
   commit(`${tc(b - a, false)} をカット`);
-  extractRange(a, b);
+  extractRange(a, b, `カット ${tc(b - a, false)}`);
   S.selectedClipId = null;
   clearZone();
   seekProgram(a, true);
@@ -550,19 +575,17 @@ function extractZone() {
   status(`${tc(b - a, false)} を切り取りました（残り ${tc(P.totalDuration(S.project), false)}）`);
 }
 
-/** [a, b) を切り取って後ろを詰める（履歴は呼び出し側で積む） */
-function extractRange(a, b) {
-  const kept = [];
-  let t = 0;
-  for (const c of S.project.clips) {
-    const dur = P.clipDuration(c);
-    const s0 = t, e0 = t + dur;
-    t = e0;
-    if (e0 <= a || s0 >= b) { kept.push(c); continue; }   // 範囲外はそのまま
-    if (s0 < a) kept.push({ ...c, out: c.in + (a - s0) }); // 前半を残す
-    if (e0 > b) kept.push({ ...c, id: P.newId('clip'), in: c.in + (b - s0) }); // 後半を残す
-  }
-  S.project.clips = kept;
+/**
+ * [a, b) を切り取って後ろを詰める（履歴は呼び出し側で積む）。
+ *
+ * 消した区間は捨てずに project.trims へ残す。継ぎ目にカーソルを合わせて
+ * [ / ] で秒単位に戻せるようにするため（trims.js）。アンドゥは一本道なので、
+ * 後から「あの箇所だけ 1 秒返す」はこちらでしかできない。
+ */
+function extractRange(a, b, label = '', group = null) {
+  const r = TR.cut(S.project, a, b, { label, group });
+  S.project.clips = r.clips;
+  S.project.trims = r.trims;
   rippleAfter(a, b);
 }
 
@@ -618,6 +641,97 @@ function insertGapAt(t, len) {
     const s0 = push(x.start), e0 = push(x.start + x.duration);
     return { ...x, start: s0, duration: e0 - s0 };
   });
+}
+
+// ---------------------------------------------------------------- カットの復帰
+//
+// カットで消した分は project.trims に残してある（trims.js）。
+// 継ぎ目にカーソルを合わせて [ / ] を押すと、そこから秒単位で戻せる。
+// 「AI に無音カットを任せて、切りすぎた所だけ後で返す」ための操作。
+
+const SEAM_TOL = 0.5;        // カーソルがこの秒数以内なら、その継ぎ目のことだと解釈する
+const RESTORE_STEP = 0.5;    // [ / ] 一回分
+
+/** クリップの境目のうち、カーソルに近いもの（継ぎ目が無い所でも削れるように） */
+function boundaryNear(time, tol = SEAM_TOL) {
+  let best = null, t = 0;
+  const check = (v) => {
+    const d = Math.abs(v - time);
+    if (d <= tol && (best === null || d < Math.abs(best - time))) best = v;
+  };
+  for (const c of S.project.clips) { check(t); t += P.clipDuration(c); }
+  check(t);
+  return best;
+}
+
+/** 継ぎ目から seconds 秒だけ戻す（head=手前を伸ばす / tail=次の頭を戻す） */
+function restoreAtPlayhead(side, seconds = RESTORE_STEP) {
+  let r;
+  try {
+    r = TR.restore(S.project, { time: S.programTime, seconds, side, tolerance: SEAM_TOL });
+  } catch (e) { return status(e.message, true); }
+  commit(`カットを ${r.restoredSec.toFixed(1)} 秒戻す`);
+  S.project.clips = r.clips;
+  S.project.trims = r.trims;
+  insertGapAt(r.atSec, r.restoredSec);   // テロップ・ぼかし・音も戻した分だけ後ろへ
+  // 継ぎ目にカーソルを置いたままにする（続けて押せるように）
+  seekProgram(side === 'head' ? r.atSec + r.restoredSec : r.atSec, true);
+  renderAll();
+  const rest = r.remainingSec > TR.EPS ? `あと ${r.remainingSec.toFixed(1)} 秒戻せます` : 'ここは全部戻しました';
+  status(`${side === 'head' ? '前' : '後ろ'}を ${r.restoredSec.toFixed(1)} 秒戻しました（${rest}）`);
+}
+
+/** 継ぎ目から seconds 秒だけ削る（戻しすぎた時。継ぎ目が無い境目でも効く） */
+function recutAtPlayhead(side, seconds = RESTORE_STEP) {
+  const at = boundaryNear(S.programTime);
+  if (at === null) return status('その位置にクリップの継ぎ目がありません', true);
+  const total = P.totalDuration(S.project);
+  const a = side === 'head' ? Math.max(0, at - seconds) : at;
+  const b = side === 'head' ? at : Math.min(total, at + seconds);
+  if (b - a < 0.01) return status('これ以上削れません', true);
+  commit(`カットを ${(b - a).toFixed(1)} 秒削る`);
+  extractRange(a, b, '');   // 名前は既にある継ぎ目のものを引き継ぐ
+  seekProgram(a, true);
+  renderAll();
+  status(`${side === 'head' ? '前' : '後ろ'}を ${(b - a).toFixed(1)} 秒削りました`);
+}
+
+/** 戻せるカットの継ぎ目を順に送る */
+function jumpSeam(dir) {
+  const list = TR.seams(S.project).filter((x) => x.atSec !== null);
+  if (!list.length) return status('戻せるカットはありません', true);
+  const t = S.programTime;
+  const hit = dir > 0
+    ? list.find((x) => x.atSec > t + 0.01)
+    : [...list].reverse().find((x) => x.atSec < t - 0.01);
+  if (!hit) return status(dir > 0 ? 'これより後に継ぎ目はありません' : 'これより前に継ぎ目はありません');
+  seekProgram(hit.atSec, true);
+  renderAll();
+  status(`${hit.label || 'カット'}の継ぎ目 — あと ${hit.remainingSec.toFixed(1)} 秒戻せます（[ で前 / ] で後ろ）`);
+}
+
+/**
+ * クリップの端をドラッグした分をトリムに反映する。
+ * 縮めた分は在庫に足し、伸ばした分は在庫から引く。
+ * 引かないと同じ映像が在庫とタイムラインの両方にあることになり、二重に戻ってしまう。
+ */
+function syncTrimForDrag(d, delta) {
+  const idx = S.project.clips.findIndex((c) => c.id === d.clip.id);
+  if (idx < 0) return;
+  const clip = S.project.clips[idx];
+  if (delta > 0) {
+    S.project.trims = TR.consumeAt(S.project, clip.id, d.side, delta);
+    return;
+  }
+  const seg = d.side === 'out'
+    ? { sourceId: clip.sourceId, in: clip.out, out: d.orig.out, volume: clip.volume ?? 1 }
+    : { sourceId: clip.sourceId, in: d.orig.in, out: clip.in, volume: clip.volume ?? 1 };
+  if (seg.out - seg.in <= 0.0005) return;
+  const entry = d.side === 'out'
+    ? { prevClipId: clip.id, nextClipId: S.project.clips[idx + 1]?.id ?? null, segments: [seg], label: '端を詰めた分' }
+    : { prevClipId: S.project.clips[idx - 1]?.id ?? null, nextClipId: clip.id, segments: [seg], label: '端を詰めた分' };
+  // 後ろの端を詰めた分は、既にそこにある在庫より素材の時刻で手前にくる
+  S.project.trims = TR.mergeTrim(S.project.trims, S.project.clips, entry, d.side === 'out');
 }
 
 /** クリップの開始時刻（タイムライン上）。クリップは隙間なく並ぶ */
@@ -694,11 +808,11 @@ function deleteSelected() {
   const i = S.project.clips.findIndex((c) => c.id === S.selectedClipId);
   if (i < 0) return;
   commit('クリップを削除');
-  // 消した分だけ、テロップ・画像・音源・マーカーも前に詰める
+  // 消した分だけ、テロップ・画像・音源・マーカーも前に詰める。
+  // extractRange を通すので、消したクリップも継ぎ目から戻せる
   const a = clipStartSec(S.project.clips[i]);
   const b = a + P.clipDuration(S.project.clips[i]);
-  S.project.clips.splice(i, 1);
-  rippleAfter(a, b);
+  extractRange(a, b, 'クリップを削除');
   select('clip', S.project.clips[Math.min(i, S.project.clips.length - 1)]?.id ?? null);
   renderAll();
 }
@@ -1001,7 +1115,9 @@ function keepMarkedRangesOnly() {
   if (!confirm(`区間マーカーの外側 ${gaps.length} 箇所（合計 ${tc(removed, false)}）を切り取ります。よろしいですか？`)) return;
 
   commit('マーカー区間だけ残す');
-  for (const [a, b] of [...gaps].reverse()) extractRange(a, Math.min(b, P.totalDuration(S.project)));
+  for (const [a, b] of [...gaps].reverse()) {
+    extractRange(a, Math.min(b, P.totalDuration(S.project)), 'マーカー区間の外');
+  }
   clearZone();
   seekProgram(0, true);
   renderAll();
@@ -2771,7 +2887,7 @@ function renderTransport() {
   const cur = S.mode === 'program' ? S.programTime : video.currentTime;
   $('tcCur').textContent = tc(cur);
   $('tcDur').textContent = tc(dur);
-  $('btnPlay').textContent = video.paused ? '▶' : '❚❚';
+  $('btnPlay').querySelector('use').setAttribute('href', video.paused ? '#i-play' : '#i-pause');
   $('rateLabel').textContent = `×${video.playbackRate}`;
   const inV = S.mode === 'program' ? S.zoneIn : S.markIn;
   const outV = S.mode === 'program' ? S.zoneOut : S.markOut;
@@ -3089,6 +3205,31 @@ function renderTimeline() {
     const sel = clip.id === S.selectedClipId;
     drawClip(ctx, x, trackTop('video') + 2, cw, TRACK_H - 6, clip, sel, 'video');
     drawClip(ctx, x, trackTop('audio') + 2, cw, TRACK_H - 6, clip, sel, 'audio');
+  }
+
+  // --- カットの継ぎ目（戻せる分が残っている所）---
+  // どこを切ったかが見えないと「ここから 2 秒戻して」が狙えないので、印を出す
+  for (const sm of TR.seams(S.project)) {
+    if (sm.atSec === null) continue;
+    const x = secToX(sm.atSec);
+    if (x < -30 || x > w + 30) continue;
+    const hot = Math.abs(sm.atSec - S.programTime) <= SEAM_TOL;
+    const y = trackTop('video') + 2;
+    ctx.save();
+    ctx.fillStyle = hot ? '#ffd479' : '#7fb3ff';
+    ctx.beginPath();
+    ctx.moveTo(x - 5, y); ctx.lineTo(x + 5, y); ctx.lineTo(x, y + 9);
+    ctx.closePath(); ctx.fill();
+    if (hot) {   // 狙っている継ぎ目は、残り秒数まで出す
+      ctx.strokeStyle = '#ffd47966'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + 0.5, y); ctx.lineTo(x + 0.5, trackTop('audio') + TRACK_H);
+      ctx.stroke();
+      ctx.fillStyle = '#ffd479';
+      ctx.font = '10px ui-monospace, monospace'; ctx.textBaseline = 'top';
+      ctx.fillText(`${sm.remainingSec.toFixed(1)}s`, x + 7, y + 1);
+    }
+    ctx.restore();
   }
 
   // --- マーカー ---
@@ -3748,6 +3889,7 @@ tlCanvas.addEventListener('pointerup', () => {
     if (Math.abs(delta) > 0.0005) {
       if (delta < 0) rippleAfter(edge, edge - delta);
       else insertGapAt(edge, delta);
+      syncTrimForDrag(drag, delta);   // 詰めた分は戻せるように、伸ばした分は在庫から引く
     }
   }
   if (drag && drag.type === 'move' && !drag.moved) {
@@ -4514,6 +4656,10 @@ $('telSaveLib').onclick = () => saveTelopToLibrary();
 $('btnZoneIn').onclick = () => { setMode('program'); zoneIn(); };
 $('btnZoneOut').onclick = () => { setMode('program'); zoneOut(); };
 $('btnExtract').onclick = extractZone;
+$('btnSeamPrev').onclick = () => jumpSeam(-1);
+$('btnSeamNext').onclick = () => jumpSeam(1);
+$('btnRestoreHead').onclick = () => restoreAtPlayhead('head');
+$('btnRestoreTail').onclick = () => restoreAtPlayhead('tail');
 $('btnZoneClear').onclick = clearZone;
 $('optRes').onchange = (e) => {
   commit('出力解像度を変更');
@@ -4659,6 +4805,13 @@ document.addEventListener('keydown', (e) => {
       else if (k === 'arrowright') step(e.shiftKey ? 1 : 1 / fps());
       break;
     }
+    // カットの継ぎ目まわり。[ ] で戻す、{ } で削る、< > で継ぎ目送り
+    case '[': restoreAtPlayhead('head'); break;
+    case ']': restoreAtPlayhead('tail'); break;
+    case '{': recutAtPlayhead('head'); break;
+    case '}': recutAtPlayhead('tail'); break;
+    case '<': jumpSeam(-1); break;
+    case '>': jumpSeam(1); break;
     case 'home': $('btnHome').click(); break;
     case 'end': $('btnEnd').click(); break;
     case 'delete': case 'backspace': e.preventDefault(); deleteSelected(); break;
@@ -4723,6 +4876,9 @@ function applyProject(p) {
   }
   p.clips = (p.clips ?? []).map((c) => ({ ...c, sourceId: remap.get(c.sourceId) ?? c.sourceId }));
   p.sources = S.project.sources;
+  // カットの在庫は黙って捨てない。差し替え後のクリップに繋がらないものは
+  // 「戻せないカット」として残り、list_trims で分かるようにしてある
+  if (!p.trims) p.trims = S.project.trims ?? [];
   S.project = p;
   normalizeProject();
   select(null, null);
@@ -4809,11 +4965,42 @@ async function frameAt(time, width) {
   });
 }
 
+/** カット（MCP / ページ内 JS から）。範囲は後ろから順に処理する */
+function cutRanges(ranges, label, group) {
+  const sorted = [...ranges].sort((x, y) => y[0] - x[0]);
+  const total0 = P.totalDuration(S.project);
+  commit(`MCP: ${sorted.length} 箇所をカット`);
+  let removed = 0;
+  for (const [a, b] of sorted) {
+    const hi = Math.min(b, P.totalDuration(S.project));
+    if (hi - a <= 0.001) continue;
+    extractRange(a, hi, label, group);
+    removed += hi - a;
+  }
+  S.selectedClipId = null;
+  renderAll();
+  return { removedSec: +removed.toFixed(3), durationSec: +P.totalDuration(S.project).toFixed(3), beforeSec: +total0.toFixed(3) };
+}
+
+/** 継ぎ目から戻す（MCP / ページ内 JS から） */
+function restoreAt({ time, seconds = 0.5, side = 'head', tolerance = SEAM_TOL }) {
+  const t = time ?? S.programTime;
+  const r = TR.restore(S.project, { time: t, seconds, side, tolerance });
+  commit(`MCP: カットを ${r.restoredSec.toFixed(1)} 秒戻す`);
+  S.project.clips = r.clips;
+  S.project.trims = r.trims;
+  insertGapAt(r.atSec, r.restoredSec);
+  seekProgram(side === 'tail' ? r.atSec : r.atSec + r.restoredSec, true);
+  renderAll();
+  return r;
+}
+
 const mcpCommands = createCommands({
   S, P, T, MARKER_KINDS,
   commit, renderAll, status,
   applyProject, timelineLevels, frameAt, syncProjectUI,
   nextZ: () => zRange()[1] + 1,
+  TR, cutRanges, restoreAt,
   seekTo: (t) => { setMode('program'); seekProgram(t, true); renderAll(); },
 });
 

@@ -13,6 +13,35 @@ export function createCommands(ctx) {
   const { S, P, T, commit, renderAll, status } = ctx;
   const proj = () => S.project;
 
+  /**
+   * 素材の時刻 [from, to) が、いまのタイムラインのどこに当たるかを返す。
+   *
+   * MCP 側の重い処理（書き起こし等）は素材の時刻で結果を返し、変換はここで、
+   * マーカーを立てる直前に行う。そうすれば処理中に人間がタイムラインを
+   * 編集していても、結果がずれた場所に着地しない。
+   * 同じ素材を 2 度使っていれば複数に、切られていれば 0 個になる。
+   */
+  const sourceToTimeline = (sourceId, from, to) => {
+    const out = [];
+    let t = 0;
+    for (const c of proj().clips) {
+      const dur = P.clipDuration(c);
+      if (c.sourceId === sourceId) {
+        const a = Math.max(from, c.in), b = Math.min(to, c.out);
+        if (b - a > 0.02) out.push([t + (a - c.in), t + (b - c.in)]);
+      }
+      t += dur;
+    }
+    return out;
+  };
+
+  /** 素材を名前でも id でも引けるようにする（MCP 側は名前しか知らないことがある） */
+  const findSource = (key) => {
+    if (!key) return null;
+    const list = proj().sources;
+    return list.find((s) => s.id === key) ?? list.find((s) => s.name === key) ?? null;
+  };
+
   const clipTimeline = () => {
     let t = 0;
     return proj().clips.map((c) => {
@@ -71,26 +100,58 @@ export function createCommands(ctx) {
      * 「セリフの所に keep」でも「無音の所に cut」でも、同じ流れで消していける。
      * @param {Array<{time:number,duration?:number,text?:string,kind?:string}>} markers
      */
-    async add_markers({ markers, replace = false }) {
+    /**
+     * マーカーを一括で立てる。
+     *
+     * 時刻は 2 通りで渡せる:
+     *  - `time` / `duration` … タイムライン時刻。渡した時点の並びが前提
+     *  - `source` + `sourceFrom` / `sourceTo` … 素材の時刻。**立てる直前に変換する**ので、
+     *    書き起こしのような長い処理の最中に人間が編集していてもずれない。
+     *    素材が切られていればそのマーカーは落ちる（dropped で件数を返す）
+     */
+    async add_markers({ markers, replace = false, pad = 0 }) {
       if (!Array.isArray(markers)) throw new Error('markers は配列で渡してください');
       const total = P.totalDuration(proj());
-      commit(replace ? 'MCP: マーカーを置き換え' : `MCP: マーカーを ${markers.length} 件追加`);
-      if (replace) proj().markers = [];
-      const added = [];
+      const padSec = Math.max(0, Number(pad) || 0);
+
+      // 先に置き場所を決める。1 件も置けない時に履歴を汚さないため
+      const places = [];
+      let dropped = 0;
       for (const m of markers) {
-        const time = Math.max(0, Math.min(total, Number(m.time) || 0));
-        const dur = Math.max(0, Math.min(total - time, Number(m.duration) || 0));
-        const kind = ctx.MARKER_KINDS[m.kind] ? m.kind : (dur > 0 ? 'keep' : 'note');
+        const text = String(m.text ?? '');
+        const kind = m.kind;
+        if (m.source !== undefined && m.source !== null) {
+          const src = findSource(m.source);
+          if (!src) { dropped++; continue; }
+          const from = Number(m.sourceFrom) || 0;
+          const to = Number(m.sourceTo ?? m.sourceFrom) || from;
+          const spans = sourceToTimeline(src.id, from - padSec, to + padSec);
+          if (!spans.length) { dropped++; continue; }
+          for (const [a, b] of spans) places.push({ time: a, dur: b - a, text, kind });
+          continue;
+        }
+        const time = Math.max(0, Math.min(total, (Number(m.time) || 0) - padSec));
+        const dur = Math.max(0, Math.min(total - time, (Number(m.duration) || 0) + padSec * 2));
+        places.push({ time, dur, text, kind });
+      }
+      if (!places.length && !replace) {
+        return { added: 0, dropped, total: proj().markers.length,
+          note: dropped ? '素材のその範囲は、いまタイムラインに残っていません' : undefined };
+      }
+
+      commit(replace ? 'MCP: マーカーを置き換え' : `MCP: マーカーを ${places.length} 件追加`);
+      if (replace) proj().markers = [];
+      for (const p of places) {
+        const kind = ctx.MARKER_KINDS[p.kind] ? p.kind : (p.dur > 0 ? 'keep' : 'note');
         proj().markers.push({
-          id: P.newId('mk'), time, duration: dur, text: String(m.text ?? ''),
-          kind, color: ctx.MARKER_KINDS[kind].color,
+          id: P.newId('mk'), time: +p.time.toFixed(3), duration: +p.dur.toFixed(3),
+          text: p.text, kind, color: ctx.MARKER_KINDS[kind].color,
         });
-        added.push(1);
       }
       proj().markers.sort((a, b) => a.time - b.time);
       renderAll();
-      status(`MCP: マーカーを ${added.length} 件立てました`);
-      return { added: added.length, total: proj().markers.length };
+      status(`MCP: マーカーを ${places.length} 件立てました`);
+      return { added: places.length, dropped, total: proj().markers.length };
     },
 
     /**
@@ -121,6 +182,61 @@ export function createCommands(ctx) {
       renderAll();
       status(`MCP: テロップを ${added.length} 件追加しました`);
       return { added: added.length, total: proj().telops.length };
+    },
+
+    /**
+     * 範囲を切り取る。消した分は在庫（trims）に残るので、後から秒単位で戻せる。
+     * 無音カットのように何箇所もある時は ranges でまとめて渡す。
+     */
+    async cut_range({ ranges, from, to, label = '', group = null }) {
+      const list = Array.isArray(ranges) && ranges.length
+        ? ranges.map((r) => (Array.isArray(r) ? r : [r.from ?? r.start, r.to ?? r.end]))
+        : [[from, to]];
+      const clean = list
+        .map(([a, b]) => [Math.max(0, Number(a) || 0), Number(b) || 0])
+        .filter(([a, b]) => b - a > 0.001);
+      if (!clean.length) throw new Error('切り取る範囲がありません');
+      const r = ctx.cutRanges(clean, String(label ?? ''), group ? String(group) : null);
+      ctx.status(`MCP: ${clean.length} 箇所（${r.removedSec.toFixed(1)} 秒）を切り取りました`);
+      return { cut: clean.length, ...r, hint: '戻したい所は restore_at で秒単位に返せます' };
+    },
+
+    /** カットで消した区間の在庫。どこで何秒戻せるかを見るためのもの */
+    async list_trims() {
+      return {
+        trims: ctx.TR.seams(proj()).map((s) => ({
+          id: s.id,
+          atSec: s.atSec === null ? null : +s.atSec.toFixed(3),
+          remainingSec: +s.remainingSec.toFixed(3),
+          label: s.label,
+          group: s.group,
+          restorable: s.atSec !== null,
+        })),
+        note: 'atSec が null のものは前後のクリップを見失っていて戻せません',
+      };
+    },
+
+    /**
+     * 継ぎ目から seconds 秒だけ戻す。
+     * side='head' は手前のクリップを伸ばす（語尾が切れた時）、
+     * side='tail' は次のクリップの頭を戻す（話し始めが切れた時）。
+     */
+    async restore_at({ time, seconds = 0.5, side = 'head', tolerance = 0.5 }) {
+      const r = ctx.restoreAt({
+        time: time === undefined || time === null ? undefined : Number(time),
+        seconds: Number(seconds) || 0,
+        side: side === 'tail' ? 'tail' : 'head',
+        tolerance: Number(tolerance) || 0.5,
+      });
+      ctx.status(`MCP: ${r.side === 'head' ? '前' : '後ろ'}を ${r.restoredSec.toFixed(1)} 秒戻しました`);
+      return {
+        atSec: +r.atSec.toFixed(3),
+        restoredSec: +r.restoredSec.toFixed(3),
+        requestedSec: r.requestedSec,
+        remainingSec: +r.remainingSec.toFixed(3),
+        side: r.side,
+        durationSec: +P.totalDuration(proj()).toFixed(3),
+      };
     },
 
     /** 作業メモの読み書き */

@@ -113,6 +113,35 @@
   <symbol id="i-keep" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <rect x="8" y="6" width="8" height="12" rx="1.5"/><path d="M4 9v6M20 9v6"/><path d="M2 12h2M20 12h2"/>
   </symbol>
+  <symbol id="i-next" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 6l6 6-6 6"/><path d="M6 5v14"/>
+  </symbol>
+  <symbol id="i-first" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 5v14"/><path d="M12.5 6.5l-4.5 5.5 4.5 5.5"/><path d="M19 6.5l-4.5 5.5 4.5 5.5"/>
+  </symbol>
+  <symbol id="i-last" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 5v14"/><path d="M11.5 6.5l4.5 5.5-4.5 5.5"/><path d="M5 6.5l4.5 5.5L5 17.5"/>
+  </symbol>
+  <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M7.8 5.4v13.2L17.5 12z"/>
+  </symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24" fill="currentColor">
+    <rect x="7.5" y="5.4" width="3.6" height="13.2" rx="1.1"/><rect x="12.9" y="5.4" width="3.6" height="13.2" rx="1.1"/>
+  </symbol>
+  <!-- 継ぎ目送り。破線がカットの継ぎ目。「戻す」の実線と見分けが付くようにしている -->
+  <symbol id="i-seam-prev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 7l-4 5 4 5"/><path d="M17 4.5v3.5M17 10.5v3M17 16v3.5"/>
+  </symbol>
+  <symbol id="i-seam-next" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 7l4 5-4 5"/><path d="M7 4.5v3.5M7 10.5v3M7 16v3.5"/>
+  </symbol>
+  <!-- 継ぎ目（カットの跡）から映像を戻す。実線が継ぎ目、矢印が戻る向き -->
+  <symbol id="i-restore-head" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12.5 4v16"/><path d="M10 12H4"/><path d="M7 9l-3 3 3 3"/>
+  </symbol>
+  <symbol id="i-restore-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11.5 4v16"/><path d="M14 12h6"/><path d="M17 9l3 3-3 3"/>
+  </symbol>
   <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M12 6v12M6 12h12"/>
   </symbol>
@@ -219,11 +248,11 @@
       <div class="transport">
         <span class="tc" id="tcCur">00:00:00.00</span>
         <div class="tp-buttons">
-          <button id="btnHome" class="tp" title="先頭 (Home)">⏮</button>
-          <button id="btnBack1" class="tp" title="1フレーム戻る (←)">◀|</button>
-          <button id="btnPlay" class="tp play" title="再生／停止 (Space)">▶</button>
-          <button id="btnFwd1" class="tp" title="1フレーム進む (→)">|▶</button>
-          <button id="btnEnd" class="tp" title="末尾 (End)">⏭</button>
+          <button id="btnHome" class="tp" title="先頭 (Home)"><svg class="ic"><use href="#i-first"/></svg></button>
+          <button id="btnBack1" class="tp" title="1フレーム戻る (←)"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <button id="btnPlay" class="tp play" title="再生／停止 (Space)"><svg class="ic"><use href="#i-play"/></svg></button>
+          <button id="btnFwd1" class="tp" title="1フレーム進む (→)"><svg class="ic"><use href="#i-next"/></svg></button>
+          <button id="btnEnd" class="tp" title="末尾 (End)"><svg class="ic"><use href="#i-last"/></svg></button>
         </div>
         <span class="tc dim" id="tcDur">00:00:00.00</span>
         <span class="rate" id="rateLabel">×1</span>
@@ -322,6 +351,12 @@
         <button id="btnPaste" class="mini ico hidden" title="コピーしたものを再生位置に貼り付け　［ ⌘/Ctrl + V ］"><svg class="ic"><use href="#i-paste"/></svg></button>
         <button id="btnZoneClear" class="mini ico hidden" title="範囲選択を解除　［ Esc ］"><svg class="ic"><use href="#i-clear"/></svg></button>
         <span class="zone-info hidden" id="zoneInfo"></span>
+        <!-- 範囲選択していない時だけ出す。切りすぎたカットを継ぎ目から戻す操作 -->
+        <button id="btnSeamPrev" class="mini ico hidden" title="前のカットの継ぎ目へ　［ &lt; ］"><svg class="ic"><use href="#i-seam-prev"/></svg></button>
+        <button id="btnRestoreHead" class="mini ico hidden" title="継ぎ目の前を 0.5 秒戻す（切れた語尾を返す）　［ [ ］"><svg class="ic"><use href="#i-restore-head"/></svg></button>
+        <button id="btnRestoreTail" class="mini ico hidden" title="継ぎ目の後ろを 0.5 秒戻す（切れた話し始めを返す）　［ ] ］"><svg class="ic"><use href="#i-restore-tail"/></svg></button>
+        <button id="btnSeamNext" class="mini ico hidden" title="次のカットの継ぎ目へ　［ &gt; ］"><svg class="ic"><use href="#i-seam-next"/></svg></button>
+        <span class="zone-info hidden" id="seamInfo"></span>
         <span class="tl-sep"></span>
         <button id="btnDelete" class="mini ico" title="選択中のクリップ・テロップ・画像などを削除　［ Delete ］"><svg class="ic"><use href="#i-trash"/></svg></button>
       </span>
@@ -377,6 +412,11 @@
         <tr><td><kbd>Esc</kbd></td><td>範囲選択を解除</td></tr>
         <tr><td><kbd>⇧</kbd>+<kbd>I</kbd>/<kbd>O</kbd></td><td>範囲の端へ移動</td></tr>
         <tr><td><kbd>Enter</kbd></td><td>クリップ追加（ソースモニター）</td></tr>
+
+        <tr><th colspan="2">切りすぎた所を戻す</th></tr>
+        <tr><td><kbd>&lt;</kbd> / <kbd>&gt;</kbd></td><td>前／次のカットの継ぎ目へ<br><span class="dim">戻せる分が残っている所に印が出る</span></td></tr>
+        <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>継ぎ目の前／後ろを 0.5 秒戻す<br><span class="dim">語尾が切れたら <kbd>[</kbd>、話し始めが切れたら <kbd>]</kbd></span></td></tr>
+        <tr><td><kbd>{</kbd> / <kbd>}</kbd></td><td>継ぎ目の前／後ろを 0.5 秒削る（戻しすぎた時）</td></tr>
 
         <tr><th colspan="2">マーカー</th></tr>
         <tr><td><kbd>M</kbd></td><td>再生位置にマーカーを立てる</td></tr>

@@ -44,13 +44,55 @@ Chrome 系か Firefox を使うこと。
 | `get_clips` | タイムライン上のクリップの並び（どの素材のどこを使っているか）|
 | `get_markers` | マーカー一覧 |
 | `get_project` / `set_project` | 編集内容の JSON を丸ごと |
-| `add_markers` | マーカーを一括で立てる（`kind`: keep / cut / note）|
+| `add_markers` | マーカーを一括で立てる（`kind`: keep / cut / note、`pad` でのりしろ）|
 | `add_telops` | テロップを一括で追加（プリセット指定・複数行可）|
 | `find_silence` | 無音／有音の区間を音量から求める |
 | `get_audio_levels` | 音量エンベロープ（0〜1）|
 | `get_frame` | 指定時刻の完成フレームを PNG dataURL で |
+| `cut_range` | 範囲を切り取る（複数まとめて可）。消した分は在庫に残る |
+| `list_trims` | 切りすぎた分の在庫。どこで何秒戻せるか |
+| `restore_at` | 継ぎ目から秒単位で戻す（`side`: head / tail）|
 | `get_notes` / `set_notes` | 作業メモ |
 | `seek` | 再生位置を動かす |
+
+### 時間の掛かる処理は「素材の時刻」で持ち回る
+
+書き起こしのように何十分も掛かる処理は、その間に人間がカットを進めます。
+開始時点のタイムライン時刻で結果を返すと、**ずれた場所に着地して黙って壊れます**。
+
+そこで `add_markers` は素材の時刻でも受け取れるようにしてある。
+タイムライン時刻への変換は**マーカーを立てる直前**に行うので、途中の編集に影響されない。
+
+```js
+await bme.call('add_markers', {
+  markers: [{ source: 'PXL_0001.mp4', sourceFrom: 50, sourceTo: 54, text: 'セリフ' }],
+  pad: 2,   // 前後ののりしろ秒（語頭・語尾の切れ対策）
+});
+```
+
+素材のその範囲が既に切られていた場合は、変な所に置かず**落として `dropped` で件数を返す**。
+`kiriko_transcribe` は既にこの形で結果を渡している。
+
+### カットは非破壊
+
+`cut_range` で消した区間は捨てず、`project.trims` に在庫として残る。
+アンドゥは一本道なので、カットの後に別の作業をすると「あの箇所だけ 1 秒返す」ができない。
+在庫を持っておけば、**下ごしらえを受け入れた上で、後から必要な所だけ返せる**。
+
+```js
+// 無音を全部切ってから、切りすぎた 1 箇所だけ 1 秒返す
+await bme.call('cut_range', { ranges: silence.map(s => [s.start, s.end]), label: '無音' });
+const { trims } = await bme.call('list_trims');
+await bme.call('restore_at', { time: trims[3].atSec, seconds: 1, side: 'head' });
+```
+
+戻すと隣のクリップが伸びる（クリップは増えない）。`side: 'head'` は手前のクリップの終端を
+延ばす（語尾が切れた時）、`side: 'tail'` は次のクリップの頭を戻す（話し始めが切れた時）。
+在庫より多く頼まれた時は、あるだけ返して `restoredSec` で知らせる。
+
+画面では、戻せる分が残っている継ぎ目に印が出る。
+<kbd>&lt;</kbd> <kbd>&gt;</kbd> で継ぎ目送り、<kbd>[</kbd> <kbd>]</kbd> で 0.5 秒ずつ復帰、
+<kbd>{</kbd> <kbd>}</kbd> で削り直し。
 
 ```js
 // 例: 無音の所に「消す」マーカーを立てる
@@ -85,6 +127,9 @@ whisper に渡すために**素材の絶対パス**を別途伝える必要が�
 
 ## 注意
 
+- `set_project` で丸ごと差し替えると、渡した JSON に `trims` が無い場合は
+  **手元の在庫をそのまま引き継ぐ**（黙って捨てない）。ただし差し替え後のクリップと
+  繋がらなくなったものは「戻せないカット」として `list_trims` に出る
 - 時刻はすべて**出力タイムライン基準**（素材の時刻ではない）。`get_clips` で対応が取れる
 - 書き出し（`exportProject`）は重い処理なので、自動操作からは呼べるようにしていない
 - 動画・音声そのものは MCP に流れない。流れるのは編集内容の JSON と、

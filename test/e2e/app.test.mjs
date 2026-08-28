@@ -111,6 +111,74 @@ describe('ブラウザ結合', { skip }, () => {
     assert.ok(Math.abs(await ev(`bme.project.clips.reduce((a,c)=>a+(c.out-c.in),0)`) - before) < 0.01);
   });
 
+  test('切りすぎた分を継ぎ目から戻せる（[ で戻す / { で削り直す）', async () => {
+    const key = (k) => ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true }))`);
+    const snap = () => ev(`({
+      dur: bme.project.clips.reduce((a, c) => a + (c.out - c.in), 0),
+      telop: bme.project.telops[0].start,
+      trims: bme.project.trims.reduce((a, t) => a + t.segments.reduce((x, s) => x + (s.out - s.in), 0), 0),
+      clips: bme.project.clips.length,
+    })`);
+
+    const before = await snap();
+    assert.ok(Math.abs(before.trims - 4) < 0.05, `切った 4 秒が在庫に残っていない: ${before.trims}`);
+
+    // 継ぎ目送りで切った所へ飛ぶ
+    await ev(`bme.state.programTime = 0`);
+    await key('>');
+    await wait(300);
+    const at = await ev(`bme.state.programTime`);
+    assert.ok(Math.abs(at - 2) < 0.05, `継ぎ目へ飛べていない: ${at}`);
+
+    // 前を 0.5 秒戻す。尺が伸び、テロップも一緒に後ろへ動く
+    await key('[');
+    await wait(400);
+    const after = await snap();
+    assert.ok(Math.abs(after.dur - before.dur - 0.5) < 0.05, `0.5 秒戻っていない: ${after.dur}`);
+    assert.ok(Math.abs(after.telop - before.telop - 0.5) < 0.05, `テロップが動いていない: ${after.telop}`);
+    assert.ok(Math.abs(after.trims - 3.5) < 0.05, `在庫が減っていない: ${after.trims}`);
+    assert.equal(after.clips, before.clips, '戻してもクリップは増えない');
+
+    // 戻しすぎたら同じ場所で削り直せる
+    await key('{');
+    await wait(400);
+    const back = await snap();
+    assert.ok(Math.abs(back.dur - before.dur) < 0.05, `削り直せていない: ${back.dur}`);
+    assert.ok(Math.abs(back.telop - before.telop) < 0.05, `テロップが戻っていない: ${back.telop}`);
+    assert.ok(Math.abs(back.trims - 4) < 0.05, `削った分が在庫に戻っていない: ${back.trims}`);
+  });
+
+  test('マーカーを素材の時刻で立てられる（書き起こし中に編集してもずれない）', async () => {
+    // 2〜6 秒を切った後。素材 10 秒は、前が 4 秒詰まってタイムライン 6 秒になるはず
+    const r = await ev(`bme.call('add_markers', { markers: [
+      { source: 'clip.mp4', sourceFrom: 10, sourceTo: 12, text: '素材時刻' },
+    ] })`);
+    assert.equal(r.added, 1);
+    const m = await ev(`bme.project.markers.find(x => x.text === '素材時刻')`);
+    assert.ok(Math.abs(m.time - 6) < 0.1, `変換がずれている: ${m.time}`);
+    assert.ok(Math.abs(m.duration - 2) < 0.1, `長さがずれている: ${m.duration}`);
+
+    // のりしろを付けると前後に広がる
+    const r2 = await ev(`bme.call('add_markers', { markers: [
+      { source: 'clip.mp4', sourceFrom: 10, sourceTo: 12, text: 'のりしろ' },
+    ], pad: 1 })`);
+    assert.equal(r2.added, 1);
+    const m2 = await ev(`bme.project.markers.find(x => x.text === 'のりしろ')`);
+    assert.ok(Math.abs(m2.time - 5) < 0.1, `のりしろが効いていない: ${m2.time}`);
+    assert.ok(Math.abs(m2.duration - 4) < 0.1, `のりしろが効いていない: ${m2.duration}`);
+
+    // 切られてしまった範囲は、黙って変な所に置かず落とす
+    const r3 = await ev(`bme.call('add_markers', { markers: [
+      { source: 'clip.mp4', sourceFrom: 3, sourceTo: 5, text: '消えた所' },
+    ] })`);
+    assert.equal(r3.added, 0);
+    assert.equal(r3.dropped, 1);
+    assert.equal(await ev(`bme.project.markers.some(x => x.text === '消えた所')`), false);
+
+    await ev(`(() => { bme.project.markers = bme.project.markers.filter(
+      m => !['素材時刻','のりしろ'].includes(m.text)); bme.render(); })()`);
+  });
+
   test('テロップダイアログの中身がダイアログの外へはみ出さない', async () => {
     await ev(`(() => {
       bme.state.selectedTelopId = bme.project.telops[0].id;

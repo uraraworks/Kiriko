@@ -139,6 +139,7 @@ a.tb { text-decoration: none; }
 .tp {
   background: #30353f; border: 1px solid #3c424e; color: var(--text);
   border-radius: 4px; min-width: 34px; height: 26px; cursor: pointer; font-size: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .tp:hover { background: #3a404b; }
 .tp.play { min-width: 46px; background: #3b424f; }
