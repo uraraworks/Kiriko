@@ -120,11 +120,39 @@ function roundRectPath(ctx, x, y, w, h, r) {
  * filter を掛けたまま等倍で描くと画面のフチが透明を巻き込んで暗くなるので、
  * ぼかし半径のぶんだけ拡大して描いてから切り取る。
  */
+// 全画面ぼかし用の作業キャンバス（余白付き。使い回す）
+let padded = null;
+function paddedCtx(w, h) {
+  if (!padded || padded.canvas.width !== w || padded.canvas.height !== h) {
+    const cv = typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(w, h)
+      : Object.assign(document.createElement('canvas'), { width: w, height: h });
+    padded = cv.getContext('2d');
+  }
+  return padded;
+}
+
+/**
+ * 全画面ぼかし。**画角は変えない。**
+ *
+ * ぼかしは画像の外側まで滲むので、そのまま掛けると縁が透けて暗く落ちる。
+ * 以前はそれを隠すために映像を 1 割ほど拡大していたが、ぼかしが切れる瞬間に
+ * 画角が戻って「びくっ」と動いて見えた。書き出しにもその動きが入っていた。
+ *
+ * いまは、いったん余白付きのキャンバスへ「引き伸ばした絵（余白埋め）＋本来の絵」を
+ * 描いてからぼかし、中央を等倍で取り出す。滲みは余白の中に収まるので、
+ * 拡大しなくても縁が落ちない。
+ */
 export function drawBlurred(ctx, frame, w, h, px) {
-  const s = 1 + (px * 4) / Math.min(w, h);
-  const dw = w * s, dh = h * s;
+  const m = Math.ceil(px * 3);            // 滲みが収まるだけの余白
+  const pg = paddedCtx(w + m * 2, h + m * 2);
+  pg.filter = 'none';
+  pg.drawImage(frame, 0, 0, w + m * 2, h + m * 2);   // 余白を埋めるための引き伸ばし
+  pg.drawImage(frame, m, m, w, h);                    // 本来の絵を等倍で上に
+  // 余白ごと描いてぼかす。滲んで薄くなるのは余白の縁＝画面の外なので、見える所は濁らない。
+  // （先に切り出してからぼかすと、切り口が滲んで縁が透ける）
   ctx.filter = `blur(${px}px)`;
-  ctx.drawImage(frame, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  ctx.drawImage(pg.canvas, -m, -m);
   ctx.filter = 'none';
 }
 

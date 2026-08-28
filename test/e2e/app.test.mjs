@@ -541,18 +541,52 @@ describe('ブラウザ結合', { skip }, () => {
       await new Promise((r2) => setTimeout(r2, 500));
       const v = document.getElementById('video');
       const before = v.style.filter;
+      const transform = v.style.transform;
       document.getElementById('btnFwd1').click();
       const justAfter = v.style.filter;              // 押した直後（前のフレームがまだ映っている）
       await new Promise((r2) => setTimeout(r2, 700));
       const settled = v.style.filter;                // 新しいフレームが出た後
       bme.project.blurs = [];
       bme.render();
-      return { before, justAfter, settled, t: bme.state.programTime, end };
+      return { before, justAfter, settled, transform, t: bme.state.programTime, end };
     })()`);
     assert.ok(r.before.includes('blur'), 'そもそもぼかしが掛かっていない');
+    assert.equal(r.transform, '', '全画面ぼかしで映像を拡大している（切れる時に画角が飛ぶ）');
     assert.ok(r.t > r.end, `ぼかしの端をまたげていない: ${r.t} <= ${r.end}`);
     assert.equal(r.justAfter, r.before, '前のフレームが映ったままぼかしが外れている（ちらつく）');
     assert.equal(r.settled, '', '新しいフレームが出てもぼかしが外れない');
+  });
+
+  test('全画面ぼかしは画角を変えず、縁も透けない', async () => {
+    const r = await ev(`(async () => {
+      const { drawBlurred } = await import('./js/compose.js');
+      const v = document.getElementById('video');
+      const W = 640, H = 360;
+      const raw = new OffscreenCanvas(W, H).getContext('2d');
+      raw.drawImage(v, 0, 0, W, H);
+      const bl = new OffscreenCanvas(W, H).getContext('2d');
+      drawBlurred(bl, v, W, H, 20);
+      const col = (g, x) => {
+        const d = g.getImageData(x, 0, 1, H).data;
+        let r2 = 0, g2 = 0, b2 = 0, a2 = 0;
+        for (let i = 0; i < d.length; i += 4) { r2 += d[i]; g2 += d[i+1]; b2 += d[i+2]; a2 += d[i+3]; }
+        const n = d.length / 4;
+        return [r2/n, g2/n, b2/n, a2/n];
+      };
+      const xs = [0, 1, W - 2, W - 1];
+      return {
+        alpha: xs.map((x) => Math.round(col(bl, x)[3])),
+        // 画角がずれていれば、同じ x の色が大きく変わる
+        diff: xs.map((x) => {
+          const a = col(raw, x), b = col(bl, x);
+          return Math.round((Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]) + Math.abs(a[2]-b[2])) / 3);
+        }),
+      };
+    })()`);
+    for (const a of r.alpha) assert.equal(a, 255, `縁が透けている（不透明度 ${r.alpha}）`);
+    for (const d of r.diff) {
+      assert.ok(d < 25, `画角がずれている（端の色の差 ${r.diff}）`);
+    }
   });
 
   test('1 フレームに満たないクリップを知らせて取り除ける', async () => {

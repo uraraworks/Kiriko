@@ -4,7 +4,7 @@ import * as P from './project.js';
 import { exportProject } from './exporter.js';
 import { parseKdenlive, basename } from './kdenlive.js';
 import * as T from './telop.js';
-import { composeFrame, activeBlur, drawOverlaysAt, overlaysAt, blurRectAt, activeRectBlurs, drawRectBlur } from './compose.js';
+import { composeFrame, activeBlur, drawBlurred, drawOverlaysAt, overlaysAt, blurRectAt, activeRectBlurs, drawRectBlur } from './compose.js';
 import { AudioLibrary, AudioPreview, mixInto } from './audio.js';
 import { History } from './history.js';
 import * as Lib from './library.js';
@@ -1343,17 +1343,22 @@ function renderOverlay() {
   ctx.clearRect(0, 0, W, H);
   const t = currentTimelineTime();
 
-  // ぼかしは <video> 側に CSS filter で掛ける（表示サイズに合わせて半径を換算）
+  // 全画面ぼかしは、この後キャンバスに描いて重ねる（書き出しと同じ計算にするため）。
+  // <video> 側の CSS filter は、キャンバスが間に合わなかった時の保険として残す。
+  // 拡大はしない — 拡大するとぼかしが切れる瞬間に画角が戻って「びくっ」と動く
   const px = S.mode === 'program' ? activeBlur(S.project.blurs, t) : 0;
   const disp = stage.clientWidth / (S.project.output.width || 1920);
   video.style.filter = px > 0 ? `blur(${(px * disp).toFixed(2)}px)` : '';
-  video.style.transform = px > 0 ? `scale(${(1 + (px * 4) / Math.min(S.project.output.width, S.project.output.height)).toFixed(4)})` : '';
+  video.style.transform = '';
 
   const sel = activeBox();
   if (S.mode === 'program') {
     // 部分ぼかしは <video> の CSS filter では表現できないので、
     // その区間だけ映像をキャンバスに描き直して重ねる
     if (video.readyState >= 2) {
+      // 全画面ぼかしもここで描く。CSS filter だと縁の滲みを隠すのに拡大が要るが、
+      // キャンバスなら余白を使えるので画角を変えずに済む（書き出しと同じ絵になる）
+      if (px > 0) drawBlurred(ctx, video, W, H, px);
       for (const b of activeRectBlurs(S.project.blurs, t)) drawRectBlur(ctx, video, W, H, b, t);
     }
     drawOverlaysAt(ctx, S.project, t, S.imageLib);
@@ -5091,8 +5096,8 @@ function frameLoop() {
 function startFrameLoop() {
   if (typeof video.requestVideoFrameCallback !== 'function') return;
   if (frameCb !== null) { video.cancelVideoFrameCallback(frameCb); frameCb = null; }
-  // 毎フレーム描き直すのは部分ぼかしがある時だけ。他は timeupdate で足りる
-  if (!(S.project.blurs ?? []).some((b) => b.shape === 'rect')) return;
+  // 毎フレーム描き直すのはぼかしがある時だけ。他は timeupdate で足りる
+  if (!(S.project.blurs ?? []).length) return;
   frameCb = video.requestVideoFrameCallback(frameLoop);
 }
 
