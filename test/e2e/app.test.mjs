@@ -465,6 +465,39 @@ describe('ブラウザ結合', { skip }, () => {
     assert.notEqual(r.cursor.onTextPlain, 'move', '⌘なしで動かせるように見えている');
   });
 
+  test('中身を掴む時の文字の範囲は、アイコンも背景画像も含めない', async () => {
+    // textBounds は枠の当たり判定用で、アイコンを含み、背景画像があると枠そのものを返す。
+    // これを中身のドラッグに使うと「枠を掴んだ」ことになり、少し動かすたびに
+    // 枠の端へ吸着し直して動かせなくなる（補助線も出っぱなしになる）
+    const r = await ev(`(async () => {
+      const T = await import('./js/telop.js');
+      const tel = bme.project.telops[0];
+      const g = document.getElementById('overlay').getContext('2d');
+      const before = tel.bgAssetId;
+      const bg = bme.project.imageAssets[0];
+      tel.bgAssetId = bg ? bg.id : null;
+      bme.render();
+      const box = tel.box;
+      const withBg = {
+        bounds: T.textBounds(g, tel, bme.state.imageLib),
+        only: T.textOnlyBounds(g, tel, bme.state.imageLib),
+      };
+      tel.bgAssetId = before;
+      bme.render();
+      return {
+        box: { w: box.w, h: box.h },
+        boundsIsBox: Math.abs(withBg.bounds.w - box.w) < 1 && Math.abs(withBg.bounds.h - box.h) < 1,
+        only: withBg.only && { w: Math.round(withBg.only.w), h: Math.round(withBg.only.h) },
+        hadBg: !!bg,
+      };
+    })()`);
+    if (!r.hadBg) return;   // 画像素材が無い環境では確かめられない
+    assert.ok(r.boundsIsBox, 'textBounds が枠を返していない（前提が変わった）');
+    assert.ok(r.only, '文字だけの範囲が取れない');
+    assert.ok(r.only.w < r.box.w, `文字の範囲が枠と同じ幅になっている: ${r.only.w}`);
+    assert.ok(r.only.h < r.box.h, `文字の範囲が枠と同じ高さになっている: ${r.only.h}`);
+  });
+
   test('テロップダイアログの中身がダイアログの外へはみ出さない', async () => {
     await ev(`(() => {
       bme.state.selectedTelopId = bme.project.telops[0].id;

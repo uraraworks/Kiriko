@@ -430,9 +430,8 @@ export function drawTelopsAt(ctx, telops, t, imageLib = null) {
 }
 
 /** 実際に中身が占めている範囲（枠より狭いことがある。当たり判定の補助に使う） */
-export function textBounds(ctx, t, imageLib = null) {
-  ctx.save();
-  const { rows, icon } = layoutTelop(ctx, t, imageLib);
+/** 行の描画位置から、文字が占めている範囲を求める（アイコンも背景も含めない） */
+function rowsBounds(ctx, rows) {
   let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
   for (const r of rows) {
     applyFont(ctx, r.row);
@@ -446,14 +445,39 @@ export function textBounds(ctx, t, imageLib = null) {
     top = Math.min(top, r.firstY - r.row.size / 2 - pad);
     bottom = Math.max(bottom, r.firstY + (r.lines.length - 1) * r.lh + r.row.size / 2 + pad);
   }
+  if (!Number.isFinite(left)) return null;
+  return { x: left, y: top, w: right - left, h: bottom - top };
+}
+
+/**
+ * **文字だけ**の範囲。アイコンも背景画像も含めない。
+ *
+ * textBounds はアイコンを含み、背景画像があると枠そのものを返す（枠の当たり判定用）。
+ * 中身を掴んで動かす時にそれを使うと、文字ではなく枠全体を掴んだことになり、
+ * 掴んだ瞬間に枠の端へ吸着してしまう。
+ */
+export function textOnlyBounds(ctx, t, imageLib = null) {
+  ctx.save();
+  const { rows } = layoutTelop(ctx, t, imageLib);
+  const r = rowsBounds(ctx, rows);
+  ctx.restore();
+  return r;
+}
+
+export function textBounds(ctx, t, imageLib = null) {
+  ctx.save();
+  const { rows, icon } = layoutTelop(ctx, t, imageLib);
+  const b = rowsBounds(ctx, rows);
+  ctx.restore();
+  if (!b) return { ...t.box };
+  // 背景画像がある時は枠そのものが当たり判定になる
+  if (t.bgAssetId) return { ...t.box };
+  let { x: left, y: top } = b;
+  let right = b.x + b.w, bottom = b.y + b.h;
   if (icon) {
     left = Math.min(left, icon.x); right = Math.max(right, icon.x + icon.w);
     top = Math.min(top, icon.y); bottom = Math.max(bottom, icon.y + icon.h);
   }
-  ctx.restore();
-  if (!Number.isFinite(left)) return { ...t.box };
-  // 背景画像がある時は枠そのものが当たり判定になる
-  if (t.bgAssetId) return { ...t.box };
   return { x: left, y: top, w: right - left, h: bottom - top };
 }
 

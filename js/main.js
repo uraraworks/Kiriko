@@ -1422,7 +1422,7 @@ function telopPartAt(tel, p) {
     && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
   const { icon } = T.layoutTelop(ctx, tel, S.imageLib);
   if (inside(icon)) return 'icon';
-  if (inside(T.textBounds(ctx, tel, S.imageLib), 24)) return 'text';
+  if (inside(T.textOnlyBounds(ctx, tel, S.imageLib), 24)) return 'text';
   const bmp = S.imageLib.get(tel.bgAssetId);
   if (bmp && inside(T.bgRect(tel, bmp))) return 'bg';
   return null;
@@ -1436,7 +1436,7 @@ function telopPartRect(tel, part) {
     const bmp = S.imageLib.get(tel.bgAssetId);
     return bmp ? T.bgRect(tel, bmp) : null;
   }
-  return T.textBounds(ctx, tel, S.imageLib);
+  return T.textOnlyBounds(ctx, tel, S.imageLib);
 }
 
 /**
