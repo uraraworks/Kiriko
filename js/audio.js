@@ -119,9 +119,15 @@ export class AudioPreview {
         if (nowLocal > skip) { skip = nowLocal; when = t0; }
       }
 
-      const offset = (ac.offset ?? 0) + skip;
+      const offset0 = ac.offset ?? 0;
+      const loopLen = Math.max(0.001, buf.duration - offset0);   // ループで繰り返す長さ
       const dur = (ac.duration ?? buf.duration) - skip;
-      if (dur <= 0 || offset >= buf.duration) continue;
+      if (dur <= 0) continue;
+      // 素材のどこから鳴らすか。ループ指定なら素材の頭へ巻き戻して繰り返す。
+      // 巻き戻さずに足していくと、素材の尺を過ぎた時点で「鳴らすものが無い」と見なされ、
+      // 置いた尺の途中から鳴らそうとしても丸ごと落ちていた（波形は出ているのに聞こえない）
+      const srcPos = ac.loop ? offset0 + (skip % loopLen) : offset0 + skip;
+      if (srcPos >= buf.duration) continue;   // ループしないものは素材を鳴らし切っている
 
       const master = (ac.kind === 'bgm' ? mix?.bgm : mix?.se) ?? 1;
       if (master <= 0) continue;
@@ -130,7 +136,7 @@ export class AudioPreview {
       src.buffer = buf;
       if (ac.loop) {
         src.loop = true;
-        src.loopStart = ac.offset ?? 0;
+        src.loopStart = offset0;
         src.loopEnd = buf.duration;
       }
       const gain = ctx.createGain();
@@ -142,11 +148,8 @@ export class AudioPreview {
       src.connect(gain).connect(ctx.destination);
 
       // ループ時は素材尺を超えて鳴らせるので、長さは配置した尺で切る
-      const startOffset = ac.loop
-        ? (ac.offset ?? 0) + (skip % Math.max(0.001, buf.duration - (ac.offset ?? 0)))
-        : Math.min(offset, buf.duration - 0.001);
-      const playDur = ac.loop ? dur : Math.min(dur, buf.duration - offset);
-      src.start(when, startOffset, playDur);
+      const playDur = ac.loop ? dur : Math.min(dur, buf.duration - srcPos);
+      src.start(when, srcPos, playDur);
       this.nodes.push(src);
       this.sounding.set(ac.id, { when, skip });
     }

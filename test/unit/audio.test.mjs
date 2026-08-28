@@ -111,3 +111,51 @@ test('継ぎ目をまたぐ SE は、跨いだ瞬間に鳴っている所へ戻�
   pv.start(long, 10);
   assert.ok(ctx.started[1].offset >= 5.39, `巻き戻さない（offset=${ctx.started[1].offset}）`);
 });
+
+// --- 終了位置まで繰り返す（ループ）---
+
+// 2 秒の素材を 10 秒ぶん置いて、ループさせたもの
+const LOOP = [{ id: 'bgm1', assetId: 'a', kind: 'bgm', start: 0, offset: 0,
+                duration: 10, volume: 1, loop: true }];
+
+test('ループ: 素材の尺を過ぎた所から再生しても鳴る', () => {
+  const ctx = fakeCtx();
+  const pv = new AudioPreview(fakeLib(ctx, 2));
+  pv.start(LOOP, 5);            // 素材 2 秒に対して 5 秒地点
+  assert.equal(ctx.started.length, 1, '丸ごと落ちている（波形は出るのに聞こえない）');
+  assert.ok(Math.abs(ctx.started[0].offset - 1) < 1e-6, `素材の頭に巻き戻す（offset=${ctx.started[0].offset}）`);
+  assert.equal(ctx.started[0].duration, 5, '残りの尺ぶん鳴らす');
+});
+
+test('ループ: 鳴らし直しでも落ちない（継ぎ目のたびに消えていた）', () => {
+  const ctx = fakeCtx();
+  const pv = new AudioPreview(fakeLib(ctx, 2));
+  pv.start(LOOP, 0);
+  ctx.currentTime = ctx.started[0].when + 3;   // 素材 2 秒より長く鳴った後の鳴らし直し
+  pv.start(LOOP, 3);
+  assert.equal(ctx.started.length, 2, '2 回目が鳴っていない');
+  assert.ok(Math.abs(ctx.started[1].offset - 1) < 1e-6, `巻き戻した位置から続ける（offset=${ctx.started[1].offset}）`);
+});
+
+test('ループ: 頭出し（offset）があれば、そこから繰り返す', () => {
+  const ctx = fakeCtx();
+  const pv = new AudioPreview(fakeLib(ctx, 2));
+  const clips = [{ ...LOOP[0], offset: 0.5 }];   // 素材の 0.5 秒から 1.5 秒ぶんを繰り返す
+  pv.start(clips, 2);                            // 0.5 + (2 % 1.5) = 1.0
+  assert.ok(Math.abs(ctx.started[0].offset - 1) < 1e-6, `offset=${ctx.started[0].offset}`);
+});
+
+test('ループしないものは、素材を鳴らし切ったら鳴らさない', () => {
+  const ctx = fakeCtx();
+  const pv = new AudioPreview(fakeLib(ctx, 2));
+  pv.start([{ ...LOOP[0], loop: false }], 5);
+  assert.equal(ctx.started.length, 0);
+});
+
+test('ループしないものは、素材の残りぶんで切る', () => {
+  const ctx = fakeCtx();
+  const pv = new AudioPreview(fakeLib(ctx, 2));
+  pv.start([{ ...LOOP[0], loop: false }], 1.5);
+  assert.equal(ctx.started[0].offset, 1.5);
+  assert.ok(Math.abs(ctx.started[0].duration - 0.5) < 1e-6, '素材の終わりで止める');
+});
