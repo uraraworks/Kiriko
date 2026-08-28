@@ -75,6 +75,44 @@ describe('ブラウザ結合', { skip }, () => {
     assert.ok(r.label.includes('素材'), `ボタンの文言が紛らわしい: ${r.label}`);
   });
 
+  test('見つからない素材の名前は折り返して出す', async () => {
+    // 1 行に詰めて省略すると、窓を広げないと名前が読めない
+    const r = await ev(`(() => {
+      const P = bme.project;
+      const keep = { audio: P.audioAssets, image: P.imageAssets };
+      P.audioAssets = ['ドンドンパフパフ.mp3', '和太鼓でカカッ.mp3', '和太鼓でドドン.mp3',
+        'UberEarts_レーダー.mp3', 'UberEarts_呼び出し.mp3']
+        .map((n, i) => ({ id: 'miss_a' + i, name: n, duration: 2 }));
+      P.imageAssets = ['ウーバーロゴ.png', 'handwritten_loose_leaf_telop_beige.png',
+        'life405.png', 'demae_door_okihai.png', 'nimotsu_ukewatashi.png']
+        .map((n, i) => ({ id: 'miss_i' + i, name: n, width: 100, height: 100 }));
+      bme.render();
+      const bar = document.getElementById('missingBar');
+      const names = bar.querySelector('.mb-names');
+      const out = {
+        shown: !bar.classList.contains('hidden'),
+        head: bar.querySelector('.mb-text b')?.textContent ?? '',
+        wrap: names ? getComputedStyle(names).whiteSpace : null,
+        lines: names ? Math.round(names.getBoundingClientRect().height
+          / parseFloat(getComputedStyle(names).lineHeight)) : 0,
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        buttons: ['mbFind', 'mbFolder'].every((id) => {
+          const b = document.getElementById(id).getBoundingClientRect();
+          return b.width > 0 && b.right <= window.innerWidth + 1;
+        }),
+      };
+      P.audioAssets = keep.audio; P.imageAssets = keep.image;
+      bme.render();
+      return out;
+    })()`);
+    assert.ok(r.shown, '見つからない素材があるのに知らせていない');
+    assert.ok(r.head.includes('10 件'), `件数が出ていない: ${r.head}`);
+    assert.notEqual(r.wrap, 'nowrap', '名前が折り返されない（窓を広げないと読めない）');
+    assert.ok(r.lines >= 2, `折り返していない（${r.lines} 行）`);
+    assert.ok(r.overflow <= 0, `横スクロールが出ている（${r.overflow}px）`);
+    assert.ok(r.buttons, 'ボタンが画面の外へ押し出されている');
+  });
+
   test('タイムラインとフッターの高さが正しい', async () => {
     // グリッドの行がずれると、タイムラインが数 px に潰れてフッターが伸びる
     const r = await ev(`(() => {
@@ -539,18 +577,24 @@ describe('ブラウザ結合', { skip }, () => {
       bme.render();
     })()`);
     await wait(400);
-    // renderOverlay は必ず clearRect から始まるので、その回数で描き直しを数える
+    // renderOverlay は必ず clearRect から始まるので、その回数で描き直しを数える。
+    // 狙いは「シークが終わってから描く」こと。終わる前に描くと、まだ映っている
+    // 前のフレームに新しい時刻の表示が乗ってちらつく
     const n = await ev(`(async () => {
       const g = document.getElementById('overlay').getContext('2d');
       const orig = g.clearRect.bind(g);
       let n = 0;
       g.clearRect = (...a) => { n++; return orig(...a); };
       document.getElementById('btnFwd1').click();
-      await new Promise((r) => setTimeout(r, 120));   // timeupdate（約250ms）より短く見る
+      await new Promise((r) => setTimeout(r, 40));
+      const early = n;                                  // シークの途中では描かない
+      await new Promise((r) => setTimeout(r, 800));
+      const after = n;                                  // 終わったら描く
       g.clearRect = orig;
-      return n;
+      return { early, after };
     })()`);
-    assert.ok(n >= 2, `シーク後に描き直していない（描画 ${n} 回）`);
+    assert.equal(n.early, 0, `シークの途中で描いている（${n.early} 回）— 前のフレームにずれた表示が乗る`);
+    assert.ok(n.after >= 1, `シークが終わっても描き直していない（${n.after} 回）`);
 
     // 後のテストに影響しないよう、ぼかしと再生位置を戻す
     await ev(`(() => {

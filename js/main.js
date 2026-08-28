@@ -4709,9 +4709,17 @@ function renderMissingBar() {
   const want = missingAssets();
   bar.classList.toggle('hidden', !want.length);
   if (!want.length) return;
-  bar.querySelector('.mb-text').textContent =
-    `${want.length} 件の素材が見つかりません（${want.map((x) => x.name).join('、')}）`
-    + ' — 素材の入ったフォルダを開くと、次回から自動でつながります';
+  // 名前は折り返して出す。1 行に詰めて省略すると、窓を広げないと読めない
+  const el = bar.querySelector('.mb-text');
+  el.textContent = '';
+  const head = document.createElement('div');
+  head.innerHTML = `<b>${want.length} 件の素材が見つかりません</b>`
+    + ' — 素材の入ったフォルダを選ぶと、次回から自動でつながります';
+  const names = document.createElement('div');
+  names.className = 'mb-names';
+  names.textContent = want.map((x) => x.name).join('、');
+  names.title = want.map((x) => x.name).join('\n');   // 全部は指したら見える
+  el.append(head, names);
 }
 
 // ---------------------------------------------------------------- 書き出し
@@ -5232,6 +5240,7 @@ new ResizeObserver(() => { renderTimeline(); renderScrub(); renderOverlay(); }).
 function renderAll() {
   renderNoMedia();
   renderSliverBar();
+  renderMissingBar();   // 素材が増減したら案内も追随させる
   renderBin();
   renderInspTabs();
   renderInspector();

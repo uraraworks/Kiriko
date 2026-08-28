@@ -518,13 +518,21 @@ kbd {
 
 /* 素材が見つからない時の案内 */
 .missing-bar {
-  display: flex; align-items: center; gap: 10px; padding: 7px 12px;
+  display: flex; align-items: flex-start; gap: 10px; padding: 7px 12px;
   background: #3a2f1c; border-bottom: 1px solid #5a4a28; color: #e8d3ab; font-size: 12.5px;
+  flex-wrap: wrap;
 }
 .missing-bar.hidden { display: none; }
-.missing-bar .ic { width: 16px; height: 16px; flex: none; color: #d9b25f; }
-.missing-bar .mb-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.missing-bar .tb { padding: 4px 12px; font-size: 12px; }
+.missing-bar .ic { width: 16px; height: 16px; flex: none; color: #d9b25f; margin-top: 1px; }
+/* 素材名は折り返す。1 行に押し込んで省略すると、窓を広げないと読めない */
+.missing-bar .mb-text, .missing-bar .sv-text {
+  flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+}
+.missing-bar .mb-names {
+  color: #cbb08a; word-break: break-all;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+}
+.missing-bar .tb { padding: 4px 12px; font-size: 12px; flex: none; }
 
 /* ---- 作業フォルダ ---- */
 .workdir {
