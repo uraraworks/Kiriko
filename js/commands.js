@@ -5,6 +5,7 @@
 //  - 書き込みは必ず履歴に積んで、人間が Cmd+Z で戻せるようにする
 
 import { BINS_PER_SEC } from './waveform.js';
+import { cutRangesFromKeep } from './edit.js';
 
 /**
  * @param {object} ctx { S, P, T, commit, renderAll, status, waves, thumbs, seekProgram, tc }
@@ -199,6 +200,38 @@ export function createCommands(ctx) {
       const r = ctx.cutRanges(clean, String(label ?? ''), group ? String(group) : null);
       ctx.status(`MCP: ${clean.length} 箇所（${r.removedSec.toFixed(1)} 秒）を切り取りました`);
       return { cut: clean.length, ...r, hint: '戻したい所は restore_at で秒単位に返せます' };
+    },
+
+    /**
+     * 区間マーカーの外を切り取る。書き起こし → マーカー → 外を切る、の最後の一歩。
+     *
+     * pad でセリフの前後にのりしろを残す（whisper のマーカーはぴったり張り付くので、
+     * 入れないと語頭・語尾が欠ける）。minGapSec より短い隙間は切らずに残す（細切れ防止）。
+     * dryRun なら切らずに、何箇所・何秒切ることになるかだけ返す。
+     */
+    async cut_outside_markers({ pad = 0, minGapSec = 0, kind = 'keep', dryRun = false }) {
+      const total = P.totalDuration(proj());
+      const keep = proj().markers
+        .filter((m) => (m.duration ?? 0) > 0.02 && (m.kind ?? 'keep') === kind)
+        .map((m) => [m.time, m.time + m.duration]);
+      if (!keep.length) throw new Error(`長さのある ${kind} マーカーがありません`);
+
+      const ranges = cutRangesFromKeep(keep, total, Math.max(0, Number(pad) || 0),
+        Math.max(0, Number(minGapSec) || 0));
+      const removedSec = ranges.reduce((a, [x, y]) => a + (y - x), 0);
+      const plan = {
+        cut: ranges.length,
+        removedSec: +removedSec.toFixed(3),
+        beforeSec: +total.toFixed(3),
+        durationSec: +(total - removedSec).toFixed(3),
+        keepMarkers: keep.length,
+      };
+      if (dryRun) return { ...plan, dryRun: true, ranges: ranges.map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]) };
+      if (!ranges.length) return { ...plan, note: '切る所がありませんでした' };
+
+      const r = ctx.cutRanges(ranges, 'マーカー区間の外', 'outside-markers');
+      status(`MCP: マーカー区間の外 ${ranges.length} 箇所（${removedSec.toFixed(1)} 秒）を切り取りました`);
+      return { ...plan, ...r, hint: '切りすぎた所は restore_at で秒単位に戻せます' };
     },
 
     /** カットで消した区間の在庫。どこで何秒戻せるかを見るためのもの */

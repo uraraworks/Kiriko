@@ -1,7 +1,7 @@
 // タイムラインの時刻計算。ここが狂うとテロップや音が映像とずれる。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dropIndex, rippleTime, insertTime, trimShift } from '../../js/edit.js';
+import { dropIndex, rippleTime, insertTime, trimShift, cutRangesFromKeep } from '../../js/edit.js';
 
 test('dropIndex: 枠の前半なら手前、後半なら次へ', () => {
   const others = [4, 4, 4];   // 0-4, 4-8, 8-12
@@ -72,4 +72,25 @@ test('rippleTime と insertTime は互いに戻せる', () => {
   for (const v of [0, 3, 5, 7, 12]) {
     assert.equal(rippleTime(insertTime(v, 5, 2), 5, 7), v);
   }
+});
+
+test('残す区間から切る区間を求める（マーカーの外を切る）', () => {
+  // 100 秒の中に 2 箇所だけ残す
+  const keep = [[20, 25], [60, 70]];
+  assert.deepEqual(cutRangesFromKeep(keep, 100), [[0, 20], [25, 60], [70, 100]]);
+
+  // のりしろを付けると残す方が広がる
+  assert.deepEqual(cutRangesFromKeep(keep, 100, 3), [[0, 17], [28, 57], [73, 100]]);
+
+  // のりしろで隣同士がくっつくと、間は切らない
+  assert.deepEqual(cutRangesFromKeep([[20, 25], [30, 35]], 100, 3), [[0, 17], [38, 100]]);
+
+  // 短い隙間は切らずに残す（細切れ防止）
+  assert.deepEqual(cutRangesFromKeep([[10, 20], [23, 40]], 100, 0, 5), [[0, 10], [40, 100]]);
+
+  // 端まで残す場合は、その外に切る所を作らない
+  assert.deepEqual(cutRangesFromKeep([[0, 100]], 100), []);
+
+  // 重なったマーカーは 1 つにまとめる
+  assert.deepEqual(cutRangesFromKeep([[10, 30], [20, 40]], 100), [[0, 10], [40, 100]]);
 });

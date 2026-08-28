@@ -179,6 +179,28 @@ describe('ブラウザ結合', { skip }, () => {
       m => !['素材時刻','のりしろ'].includes(m.text)); bme.render(); })()`);
   });
 
+  test('マーカーの外を切る見積もりが出せる（dryRun は何も変えない）', async () => {
+    const before = await ev(`({
+      dur: bme.project.clips.reduce((a, c) => a + (c.out - c.in), 0),
+      clips: bme.project.clips.length,
+      trims: bme.project.trims.length,
+    })`);
+    // 「目印」マーカー（8 秒から 1 秒）だけが残す区間。のりしろ 2 秒を足すと 6〜11 秒が残る
+    const r = await ev(`bme.call('cut_outside_markers', { pad: 2, dryRun: true })`);
+    assert.equal(r.dryRun, true);
+    assert.equal(r.keepMarkers, 1);
+    assert.ok(r.removedSec > 0 && r.removedSec < before.dur, `見積もりがおかしい: ${r.removedSec}`);
+    assert.ok(Math.abs(r.durationSec - (before.dur - r.removedSec)) < 0.05, '残り尺が合わない');
+    assert.ok(r.ranges.every(([a, b]) => b > a), '範囲が壊れている');
+
+    const after = await ev(`({
+      dur: bme.project.clips.reduce((a, c) => a + (c.out - c.in), 0),
+      clips: bme.project.clips.length,
+      trims: bme.project.trims.length,
+    })`);
+    assert.deepEqual(after, before, 'dryRun なのに変わってしまった');
+  });
+
   test('テロップダイアログの中身がダイアログの外へはみ出さない', async () => {
     await ev(`(() => {
       bme.state.selectedTelopId = bme.project.telops[0].id;

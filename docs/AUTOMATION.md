@@ -50,6 +50,7 @@ Chrome 系か Firefox を使うこと。
 | `get_audio_levels` | 音量エンベロープ（0〜1）|
 | `get_frame` | 指定時刻の完成フレームを PNG dataURL で |
 | `cut_range` | 範囲を切り取る（複数まとめて可）。消した分は在庫に残る |
+| `cut_outside_markers` | 「残す」区間マーカーの外を切る（`pad` / `minGapSec` / `dryRun`）|
 | `list_trims` | 切りすぎた分の在庫。どこで何秒戻せるか |
 | `restore_at` | 継ぎ目から秒単位で戻す（`side`: head / tail）|
 | `get_notes` / `set_notes` | 作業メモ |
@@ -78,6 +79,17 @@ await bme.call('add_markers', {
 `cut_range` で消した区間は捨てず、`project.trims` に在庫として残る。
 アンドゥは一本道なので、カットの後に別の作業をすると「あの箇所だけ 1 秒返す」ができない。
 在庫を持っておけば、**下ごしらえを受け入れた上で、後から必要な所だけ返せる**。
+
+本命の流れはこれ。書き起こし → マーカー → 外を切る → 切りすぎを戻す。
+
+```js
+// セリフに「残す」マーカーを立てて、その外を切る
+const plan = await bme.call('cut_outside_markers', { pad: 3, minGapSec: 5, dryRun: true });
+if (plan.removedSec < 60 * 60) await bme.call('cut_outside_markers', { pad: 3, minGapSec: 5 });
+```
+
+`pad` は必ず検討すること。whisper のマーカーはセリフにぴったり張り付くので、
+0 のままだと語頭・語尾が欠ける。`minGapSec` より短い隙間は切らずに残す（細切れ防止）。
 
 ```js
 // 無音を全部切ってから、切りすぎた 1 箇所だけ 1 秒返す

@@ -54,3 +54,34 @@ export function trimShift(side, startSec, before, after) {
   const edge = side === 'in' ? startSec : startSec + Math.min(before, after);
   return { edge, delta };
 }
+
+/**
+ * 「残す区間」から「切る区間」を求める。
+ *
+ * 書き起こしでセリフに区間マーカーを立て、その外を切る、という使い方が本命。
+ * whisper のマーカーはセリフにぴったり張り付くので、pad を入れないと語頭・語尾が欠ける。
+ *
+ * @param {Array<[number,number]>} keep 残す区間（順不同・重なっていてよい）
+ * @param {number} total 全体の尺
+ * @param {number} pad 残す区間の前後に足すのりしろ秒
+ * @param {number} minGapSec これより短い隙間は切らない（細切れになるのを防ぐ）
+ * @returns {Array<[number,number]>} 切る区間（時刻順）
+ */
+export function cutRangesFromKeep(keep, total, pad = 0, minGapSec = 0) {
+  const merged = [];
+  for (const [a0, b0] of [...keep].sort((x, y) => x[0] - y[0])) {
+    const a = Math.max(0, a0 - pad), b = Math.min(total, b0 + pad);
+    if (b - a <= 0) continue;
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1] + 0.001) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  const gaps = [];
+  let prev = 0;
+  for (const [a, b] of merged) {
+    if (a - prev > 0.02) gaps.push([prev, a]);
+    prev = Math.max(prev, b);
+  }
+  if (total - prev > 0.02) gaps.push([prev, total]);
+  return gaps.filter(([a, b]) => b - a >= minGapSec);
+}

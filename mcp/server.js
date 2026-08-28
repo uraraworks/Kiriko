@@ -154,6 +154,66 @@ server.registerTool('kiriko_add_telops', {
   },
 }, async (a) => asText(await call('add_telops', a)));
 
+server.registerTool('kiriko_cut_range', {
+  title: '範囲を切り取る',
+  description:
+    '範囲を切り取って後ろを詰める。無音カットのように何箇所もある時は ranges でまとめて渡す。\n\n'
+    + '**カットは非破壊**。消した分は在庫として残るので、'
+    + 'kiriko_list_trims で確認し、kiriko_restore_at で秒単位に戻せる。\n'
+    + '迷ったら少し多めに切って「気になる所は戻してください」と伝えるとよい。',
+  inputSchema: {
+    ranges: z.array(z.object({
+      from: z.number().min(0).describe('開始秒（タイムライン）'),
+      to: z.number().min(0).describe('終了秒（タイムライン）'),
+    })).optional().describe('切り取る範囲。複数まとめて渡せる'),
+    from: z.number().min(0).optional().describe('1 箇所だけの時の開始秒'),
+    to: z.number().min(0).optional().describe('1 箇所だけの時の終了秒'),
+    label: z.string().optional().describe("在庫に付ける名前（例 '無音'）。後で見分けが付く"),
+    group: z.string().optional().describe('まとめて戻したい時の目印'),
+  },
+}, async (a) => asText(await call('cut_range', a, 300000)));
+
+server.registerTool('kiriko_cut_outside_markers', {
+  title: '区間マーカーの外を切り取る',
+  description:
+    '「残す」区間マーカーの外を全部切り取る。'
+    + 'kiriko_transcribe でセリフにマーカーを立ててから、これを呼ぶのが本命の流れ。\n\n'
+    + '**pad を必ず検討すること**。whisper のマーカーはセリフにぴったり張り付くので、'
+    + '0 のままだと語頭・語尾が欠ける（3〜4 秒あたりから試すとよい）。\n'
+    + 'minGapSec より短い隙間は切らずに残す（細切れになるのを防ぐ）。\n'
+    + 'dryRun: true で、切らずに何箇所・何秒切ることになるかだけ確認できる。',
+  inputSchema: {
+    pad: z.number().min(0).max(30).optional().describe('マーカーの前後に残すのりしろ秒（既定 0）'),
+    minGapSec: z.number().min(0).optional().describe('これより短い隙間は切らない（既定 0）'),
+    kind: z.enum(['keep', 'cut', 'note']).optional().describe("対象のマーカー種別（既定 'keep'）"),
+    dryRun: z.boolean().optional().describe('true なら切らずに結果の見積もりだけ返す'),
+  },
+}, async (a) => asText(await call('cut_outside_markers', a, 300000)));
+
+server.registerTool('kiriko_list_trims', {
+  title: 'カットで消した分の在庫',
+  description:
+    'どこで何秒戻せるかの一覧。atSec が継ぎ目のタイムライン位置。\n'
+    + '人間に「ここを切りました、気になる所は戻せます」と伝える時にも使える。',
+  inputSchema: {},
+}, async () => asText(await call('list_trims')));
+
+server.registerTool('kiriko_restore_at', {
+  title: 'カットした分を継ぎ目から戻す',
+  description:
+    '継ぎ目から seconds 秒だけ映像を戻す。切りすぎた所の手当てに使う。\n\n'
+    + "side='head' は手前のクリップを伸ばす（語尾が切れた時）、"
+    + "side='tail' は次のクリップの頭を戻す（話し始めが切れた時）。\n"
+    + 'time を省略すると、いまの再生位置の継ぎ目が対象になる。\n'
+    + '在庫より多く頼まれた時は、あるだけ返して restoredSec で知らせる。',
+  inputSchema: {
+    time: z.number().min(0).optional().describe('継ぎ目のタイムライン秒（省略で再生位置）'),
+    seconds: z.number().min(0).optional().describe('戻す秒数（既定 0.5）'),
+    side: z.enum(['head', 'tail']).optional().describe("head=手前を伸ばす / tail=次の頭を戻す（既定 head）"),
+    tolerance: z.number().min(0).optional().describe('継ぎ目とみなす許容秒（既定 0.5）'),
+  },
+}, async (a) => asText(await call('restore_at', a)));
+
 server.registerTool('kiriko_get_frame', {
   title: 'フレームを見る',
   description: '指定した時刻の映像を PNG で返す（テロップやぼかしも入った状態）。中身を確認したい時に。',
