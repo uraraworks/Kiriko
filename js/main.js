@@ -2497,7 +2497,13 @@ function renderTelopForm(force = false) {
         <input class="num" type="number" id="telRowGap" step="2" value="${Math.round(tel.rowGap ?? 0)}"></label>
     </div>
 
-    ${colorField('telFill', '文字', row.fill)}
+    ${colorField('telFill', row.fillMode === 'gradient' ? '文字（上／左）' : '文字', row.fill)}
+    <label class="chk"><input type="checkbox" id="telGrad" ${row.fillMode === 'gradient' ? 'checked' : ''}>
+      文字をグラデーションにする</label>
+    ${row.fillMode === 'gradient' ? colorField('telFill2', '文字（下／右）', row.fill2 ?? row.fill) : ''}
+    ${row.fillMode === 'gradient' ? `<label>グラデーションの向き
+      <div class="align-grid">${[['v', '縦'], ['h', '横']].map(([d, n]) =>
+        `<button data-grad="${d}" class="${(row.fillDir ?? 'v') === d ? 'on' : ''}">${n}</button>`).join('')}</div></label>` : ''}
     <label class="chk"><input type="checkbox" id="telStrokeOn" ${row.strokeOn !== false ? 'checked' : ''}> 内縁をつける</label>
     ${row.strokeOn !== false ? colorField('telStroke', '内縁', row.stroke) : ''}
     ${colorField('telOuter', '白フチ', row.outerStroke)}
@@ -2644,6 +2650,22 @@ function renderTelopForm(force = false) {
   bind('telSize', (v) => { row.size = Math.max(8, +v); S.telopStyle.size = row.size; });
   bind('telSW', (v) => { row.strokeWidth = Math.max(0, +v); S.telopStyle.strokeWidth = row.strokeWidth; });
   bind('telFill', (v) => { row.fill = v; S.telopStyle.fill = v; });
+  bind('telFill2', (v) => { row.fill2 = v; S.telopStyle.fill2 = v; });
+  $('telGrad').onchange = (e) => {
+    commit('文字の塗りを変更');
+    row.fillMode = e.target.checked ? 'gradient' : 'solid';
+    S.telopStyle.fillMode = row.fillMode;
+    renderTelopForm(true);   // 2 色目と向きの欄を出し入れする
+    live();
+  };
+  for (const b of form.querySelectorAll('[data-grad]')) {
+    b.onclick = () => {
+      commit('グラデーションの向きを変更');
+      row.fillDir = b.dataset.grad; S.telopStyle.fillDir = row.fillDir;
+      for (const o of form.querySelectorAll('[data-grad]')) o.classList.toggle('on', o === b);
+      live();
+    };
+  }
   bind('telStroke', (v) => { row.stroke = v; S.telopStyle.stroke = v; });
   bind('telOuter', (v) => { row.outerStroke = v; S.telopStyle.outerStroke = v; });
   bind('telOuterScale', (v) => { row.outerScale = Math.max(0, +v); S.telopStyle.outerScale = row.outerScale; });

@@ -15,6 +15,9 @@ export const DEFAULT_STYLE = {
   underline: false,
   strike: false,          // 取り消し線
   fill: '#f5e04b',
+  fillMode: 'solid',      // solid | gradient … 文字の塗り方
+  fill2: '#f0a020',       // グラデーションの 2 色目（下 or 右）
+  fillDir: 'v',           // v | h … グラデーションの向き（縦 or 横）
   stroke: '#4a3b00',      // 内側の濃い縁
   strokeOn: true,         // 内縁を描くか（白フチは outerScale 0 で消せる）
   strokeWidth: 16,
@@ -298,6 +301,41 @@ export function layoutTelop(ctx, t, imageLib = null) {
   return { rows, totalH, textBox: tb, icon };
 }
 
+/**
+ * 1 行ぶんの左端。
+ * drawRowLine に渡ってくる x は寄せの補正が済んでいるので、そのぶんを戻す。
+ */
+function lineLeft(row, x, w) {
+  const sp = spacingOf(row);
+  const align = row.hAlign || 'center';
+  return align === 'left' ? x : align === 'right' ? x - sp - w : x - sp / 2 - w / 2;
+}
+
+/**
+ * 文字の塗り。単色ならその色、グラデーションなら 2 色の線形グラデーションを返す。
+ *
+ * 掛かる範囲は **その行の 1 行ぶん**。
+ *  - 縦 … 文字の上端から下端（フォントの大きさぶん）
+ *  - 横 … その行の文字が実際に占める左端から右端
+ * 行ごとに掛け直すので、行が増えても 1 行ずつ同じ見た目になる。
+ */
+function fillStyleFor(ctx, row, text, x, y) {
+  if (row.fillMode !== 'gradient') return row.fill;
+  const c2 = row.fill2 ?? row.fill;
+  let g;
+  if ((row.fillDir ?? 'v') === 'h') {
+    const w = inkWidth(ctx, row, text);
+    if (w <= 0) return row.fill;
+    const left = lineLeft(row, x, w);
+    g = ctx.createLinearGradient(left, y, left + w, y);
+  } else {
+    g = ctx.createLinearGradient(x, y - row.size / 2, x, y + row.size / 2);
+  }
+  g.addColorStop(0, row.fill);
+  g.addColorStop(1, c2);
+  return g;
+}
+
 function drawRowLine(ctx, row, text, x, y) {
   if (!text) return;
   const w = row.strokeWidth || 0;
@@ -318,24 +356,22 @@ function drawRowLine(ctx, row, text, x, y) {
     ctx.lineWidth = w;
     ctx.strokeText(text, x, y);
   }
-  ctx.fillStyle = row.fill;
+  const fill = fillStyleFor(ctx, row, text, x, y);
+  ctx.fillStyle = fill;
   ctx.fillText(text, x, y);
-  drawDecoration(ctx, row, text, x, y);
+  drawDecoration(ctx, row, text, x, y, fill);
 }
 
 /**
  * 下線と取り消し線。canvas には無いので自分で引く。
  * 文字と同じ二重の縁取りを掛けて、映像の上でも読めるようにする。
  */
-function drawDecoration(ctx, row, text, x, y) {
+function drawDecoration(ctx, row, text, x, y, fill = row.fill) {
   if (!row.underline && !row.strike) return;
   const w = inkWidth(ctx, row, text);
   if (w <= 0) return;
 
-  // drawRowLine に渡ってくる x は寄せの補正済みなので、そのぶんを戻して左端を出す
-  const sp = spacingOf(row);
-  const align = row.hAlign || 'center';
-  const left = align === 'left' ? x : align === 'right' ? x - sp - w : x - sp / 2 - w / 2;
+  const left = lineLeft(row, x, w);
 
   const th = Math.max(2, row.size * 0.055);
   // フチは文字と同じ太さにすると線が帯になってしまうので、線の太さに見合わせる
@@ -350,7 +386,7 @@ function drawDecoration(ctx, row, text, x, y) {
     };
     if (outer) bar(outer, row.outerStroke);
     if (inner) bar(inner, row.stroke);
-    bar(0, row.fill);
+    bar(0, fill);
   };
   if (row.underline) line(y + row.size * 0.42);
   if (row.strike) line(y - row.size * 0.02);

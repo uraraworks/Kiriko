@@ -224,6 +224,36 @@ describe('ブラウザが要るモジュール', { skip: haveChrome() ? false : 
     assert.ok(r.both > r.underline && r.both > r.strike, '両方は重ねられるはず');
   });
 
+  test('テロップ: 文字をグラデーションで塗れる（縦・横）', async () => {
+    const r = await ev(`(async () => {
+      const T = await import('/js/telop.js');
+      // 塗りの色だけを見たいので、フチと影は外す。
+      // 「■」を並べて中身の詰まった面を作り、その中の色を拾う
+      const draw = (style) => {
+        const cv = new OffscreenCanvas(600, 200);
+        const ctx = cv.getContext('2d');
+        const t = T.createTelop(0, 3, { ...style, size: 120, wrap: false, hAlign: 'center',
+          strokeWidth: 0, outerScale: 0, shadow: 0,
+          box: { x: 0, y: 0, w: 600, h: 200 }, vAlign: 'middle' }, '■■■');
+        T.drawTelop(ctx, t);
+        const at = (x, y) => [...ctx.getImageData(x, y, 1, 1).data].slice(0, 3);
+        return { top: at(300, 62), bottom: at(300, 138), left: at(200, 100), right: at(400, 100) };
+      };
+      return {
+        solid: draw({ fill: '#ff0000' }),
+        vert: draw({ fill: '#ff0000', fill2: '#0000ff', fillMode: 'gradient', fillDir: 'v' }),
+        horz: draw({ fill: '#ff0000', fill2: '#0000ff', fillMode: 'gradient', fillDir: 'h' }),
+      };
+    })()`);
+    const red = (c) => c[0] > 150 && c[2] < 100;
+    const blue = (c) => c[2] > 150 && c[0] < 100;
+    assert.ok(red(r.solid.top) && red(r.solid.bottom), `単色が塗れていない: ${JSON.stringify(r.solid)}`);
+    assert.ok(red(r.vert.top), `縦: 上が 1 色目でない: ${JSON.stringify(r.vert)}`);
+    assert.ok(blue(r.vert.bottom), `縦: 下が 2 色目でない: ${JSON.stringify(r.vert)}`);
+    assert.ok(red(r.horz.left), `横: 左が 1 色目でない: ${JSON.stringify(r.horz)}`);
+    assert.ok(blue(r.horz.right), `横: 右が 2 色目でない: ${JSON.stringify(r.horz)}`);
+  });
+
   test('テロップ: 文字の外形が枠の中に収まる', async () => {
     const r = await ev(`(async () => {
       const T = await import('/js/telop.js');
