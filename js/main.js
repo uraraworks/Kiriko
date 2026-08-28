@@ -4879,11 +4879,12 @@ function applyProject(p) {
   // カットの在庫は黙って捨てない。差し替え後のクリップに繋がらないものは
   // 「戻せないカット」として残り、list_trims で分かるようにしてある
   if (!p.trims) p.trims = S.project.trims ?? [];
+  const head = S.programTime;   // 差し替えでも、見ている場所と拡大率は保つ
   S.project = p;
   normalizeProject();
   select(null, null);
   syncProjectUI();
-  zoomFit();
+  seekProgram(head, true);
   renderAll();
 }
 
@@ -4971,13 +4972,17 @@ function cutRanges(ranges, label, group) {
   const total0 = P.totalDuration(S.project);
   commit(`MCP: ${sorted.length} 箇所をカット`);
   let removed = 0;
+  let head = S.programTime;   // 人間が見ている場所。同じ映像を指したままにする
   for (const [a, b] of sorted) {
     const hi = Math.min(b, P.totalDuration(S.project));
     if (hi - a <= 0.001) continue;
     extractRange(a, hi, label, group);
+    head = rippleTime(head, a, hi);
     removed += hi - a;
   }
-  S.selectedClipId = null;
+  // 選択は、そのクリップが残っていれば保つ（AI の書き込みで選択が飛ばないように）
+  if (!S.project.clips.some((c) => c.id === S.selectedClipId)) S.selectedClipId = null;
+  seekProgram(head, true);
   renderAll();
   return { removedSec: +removed.toFixed(3), durationSec: +P.totalDuration(S.project).toFixed(3), beforeSec: +total0.toFixed(3) };
 }
@@ -4989,8 +4994,9 @@ function restoreAt({ time, seconds = 0.5, side = 'head', tolerance = SEAM_TOL })
   commit(`MCP: カットを ${r.restoredSec.toFixed(1)} 秒戻す`);
   S.project.clips = r.clips;
   S.project.trims = r.trims;
+  const head = insertTime(S.programTime, r.atSec, r.restoredSec);
   insertGapAt(r.atSec, r.restoredSec);
-  seekProgram(side === 'tail' ? r.atSec : r.atSec + r.restoredSec, true);
+  seekProgram(head, true);   // 戻した分だけずれるが、見ている映像は変えない
   renderAll();
   return r;
 }
@@ -5004,12 +5010,44 @@ const mcpCommands = createCommands({
   seekTo: (t) => { setMode('program'); seekProgram(t, true); renderAll(); },
 });
 
+/**
+ * 書き込み系のコマンド。人間がドラッグしている最中に割り込むと、
+ * 履歴のスナップショットが操作の途中で撮られて、⌘Z の戻り先がおかしくなる。
+ */
+const WRITE_CMDS = new Set([
+  'set_project', 'add_markers', 'add_telops', 'set_notes',
+  'cut_range', 'cut_outside_markers', 'restore_at',
+]);
+
+/**
+ * 人間が手を動かしている間は待つ。
+ * ずっと待たされても困るので、しばらくで諦めて進む（待てなかったことは返り値で分かる）。
+ */
+async function waitForHumanIdle(timeoutMs = 15000) {
+  const t0 = Date.now();
+  while (drag || history.key !== null) {
+    if (Date.now() - t0 > timeoutMs) return false;
+    await new Promise((r) => setTimeout(r, 80));
+  }
+  return true;
+}
+
+/**
+ * コマンドの入口。ページ内 JS（bme.call）からも MCP からもここを通すので、
+ * どちらで叩いても挙動がずれない。
+ */
+async function runCommand(cmd, args = {}) {
+  const fn = mcpCommands[cmd];
+  if (!fn) {
+    throw new Error(`知らないコマンドです: ${cmd}（使えるもの: ${Object.keys(mcpCommands).join(', ')}）`);
+  }
+  // 人間の操作を邪魔しない。書き起こしなどを任せながら自分で編集を進められるように
+  if (WRITE_CMDS.has(cmd)) await waitForHumanIdle();
+  return await fn(args ?? {});
+}
+
 const bridge = new Bridge(
-  async (cmd, args) => {
-    const fn = mcpCommands[cmd];
-    if (!fn) throw new Error(`知らないコマンドです: ${cmd}`);
-    return await fn(args ?? {});
-  },
+  (cmd, args) => runCommand(cmd, args ?? {}),
   (state) => {
     const el = $('mcpDot');
     if (!el) return;
@@ -5078,11 +5116,9 @@ window.bme = {
    * ブラウザペインなど、WebSocket を通さずに直接操作したい時はこちら。
    * MCP 経由とまったく同じ処理を通るので、挙動がずれない。
    */
-  call: async (cmd, args = {}) => {
-    const fn = mcpCommands[cmd];
-    if (!fn) throw new Error(`知らないコマンドです: ${cmd}（使えるもの: ${Object.keys(mcpCommands).join(', ')}）`);
-    return await fn(args);
-  },
+  call: (cmd, args = {}) => runCommand(cmd, args),
+  /** 人間が手を動かしている最中か（書き込みはこれが false になるまで待つ）*/
+  busy: () => drag !== null || history.key !== null,
   timelineLevels,
   frameAt,
 };

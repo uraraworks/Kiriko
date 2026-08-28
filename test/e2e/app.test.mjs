@@ -201,6 +201,42 @@ describe('ブラウザ結合', { skip }, () => {
     assert.deepEqual(after, before, 'dryRun なのに変わってしまった');
   });
 
+  test('人間がドラッグしている間は MCP の書き込みを待たせる', async () => {
+    // タイムラインのクリップを掴む（ドラッグ開始）
+    const grabbed = await ev(`(() => {
+      const cv = document.getElementById('tlCanvas');
+      const r = cv.getBoundingClientRect();
+      // クリップが乗っている行を上から探す
+      for (let y = 40; y < r.height - 4; y += 4) {
+        cv.dispatchEvent(new PointerEvent('pointerdown', {
+          clientX: r.left + 40, clientY: r.top + y, bubbles: true, pointerId: 1, button: 0, buttons: 1,
+        }));
+        if (window.bme.busy()) return y;
+        cv.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+      }
+      return null;
+    })()`);
+    assert.ok(grabbed !== null, 'クリップを掴めなかった');
+
+    // 掴んでいる間はマーカーが立たない
+    await ev(`(() => { window.__mk = window.bme.call('add_markers', {
+      markers: [{ time: 1, duration: 1, text: '待たされる' }] }); })()`);
+    await wait(500);
+    assert.equal(await ev(`bme.project.markers.some(m => m.text === '待たされる')`), false,
+      'ドラッグ中なのに書き込まれた');
+
+    // 手を離したら通る
+    await ev(`document.getElementById('tlCanvas').dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }))`);
+    await ev(`window.__mk`);
+    assert.equal(await ev(`bme.project.markers.some(m => m.text === '待たされる')`), true,
+      '手を離しても書き込まれない');
+    assert.equal(await ev(`bme.busy()`), false);
+
+    await ev(`(() => { bme.project.markers = bme.project.markers.filter(
+      m => m.text !== '待たされる'); bme.render(); })()`);
+  });
+
   test('テロップダイアログの中身がダイアログの外へはみ出さない', async () => {
     await ev(`(() => {
       bme.state.selectedTelopId = bme.project.telops[0].id;
