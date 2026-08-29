@@ -41,6 +41,9 @@ const S = {
   thumbBaseKey: null,      // その元。base の中身が変わったら作り直す目印
   programTime: 0,          // プログラムモニターの再生位置（出力タイムライン秒）
   programIndex: -1,
+  // 時刻の見せ方。'clock' は 00:00:00.00、'sec' は 123.45s。
+  // プロパティ欄は秒で入れるので、画面から読んだ値をそのまま打てるように切り替えられる
+  timeUnit: 'clock',
   pxPerSec: 8,
   scrollSec: 0,
   shuttle: 0,
@@ -95,6 +98,8 @@ const video = $('video');
 function tc(sec, withHours = true) {
   if (!Number.isFinite(sec)) sec = 0;
   sec = Math.max(0, sec);
+  // 末尾の 0 は落とす。目盛りが 1200.00s だらけになると読みにくい
+  if (S.timeUnit === 'sec') return `${+sec.toFixed(2)}s`;
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = Math.floor(sec % 60);
@@ -5979,6 +5984,31 @@ function zoomBy(f) {
   setScroll(centerSec - nv / 2);
   renderTimeline();
 }
+/**
+ * 時刻の見せ方を切り替える。
+ *
+ * BGM やぼかしの範囲はプロパティ欄に秒で入れるのに、画面はどこも 00:00:00 なので、
+ * 「今が何秒か」がぱっと出てこない。全体の表示をクリックすると秒表記になる。
+ */
+function setTimeUnit(unit) {
+  S.timeUnit = unit;
+  try { localStorage.setItem('kiriko.timeUnit', unit); } catch {}
+  // ツールチップは title を data-tip に退避して aria-label は初回しか入れない作りなので、
+  // 切り替わる説明文はこちらで両方とも面倒を見る
+  const tip = unit === 'sec' ? 'クリックで 00:00:00 表記に戻す' : 'クリックで秒表記に切り替える';
+  const el = $('totalDur');
+  el.removeAttribute('title');
+  el.setAttribute('data-tip', tip);
+  el.setAttribute('aria-label', tip);
+  renderTransport();
+  renderTimeline();
+}
+$('totalDur').onclick = () => setTimeUnit(S.timeUnit === 'sec' ? 'clock' : 'sec');
+try {
+  if (localStorage.getItem('kiriko.timeUnit') === 'sec') S.timeUnit = 'sec';
+} catch {}
+setTimeUnit(S.timeUnit);
+
 $('btnZoomIn').onclick = () => zoomBy(1.5);
 $('btnZoomOut').onclick = () => zoomBy(1 / 1.5);
 $('btnZoomFit').onclick = zoomFit;
