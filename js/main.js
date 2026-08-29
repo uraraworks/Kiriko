@@ -5342,7 +5342,8 @@ function renderWorkDir() {
   const el = $('workDirName');
   const ready = !canUseWorkDir() || !!(S.workDir && S.workDirReady);
   if (el) {
-    el.textContent = S.workDir && S.workDirReady ? S.workDir.name : '';
+    const label = $('workDirNameText');
+    if (label) label.textContent = S.workDir && S.workDirReady ? S.workDir.name : '';
     el.classList.toggle('hidden', !(S.workDir && S.workDirReady));
     el.title = S.workDir ? `作業フォルダ: ${S.workDir.name}` : '';
   }
@@ -5404,6 +5405,25 @@ async function useWorkFolder(dir) {
   }
   if (projs.length === 1) { await openFromWorkDir(projs[0]); return; }
   showProjectPicker(projs);
+}
+
+/**
+ * 作業フォルダを閉じる（openWorkFolder() と対になる操作）。
+ * 画面上は「閉じる」だが、実体は FS.forgetWorkDir() で覚えているハンドルを忘れる処理。
+ * 素材フォルダ・ライブラリフォルダは覚えたまま。
+ */
+async function closeWorkFolder() {
+  if (!S.workDir) return;
+  const name = S.workDir.name;
+  const ok = confirm(`作業フォルダ「${name}」を閉じます。\n\n`
+    + `次からは自動で開かなくなり、編集を続けるにはもう一度開く必要があります。\n`
+    + `（素材のフォルダとライブラリフォルダは覚えたままです）`);
+  if (!ok) return;
+  await FS.forgetWorkDir();
+  S.workDir = null;
+  S.workDirReady = false;
+  renderWorkDir();
+  status('作業フォルダを閉じました（素材とライブラリの場所は覚えたままです）');
 }
 
 async function openFromWorkDir(p) {
@@ -5679,6 +5699,7 @@ $('btnRedo').onclick = doRedo;
 $('btnWorkDir').onclick = openWorkFolder;
 $('wcOpen').onclick = openWorkFolder;
 $('wcReopen').onclick = reopenWorkDir;
+$('btnCloseWorkDir').onclick = (ev) => { ev.stopPropagation(); closeWorkFolder(); };
 $('projPickClose').onclick = () => $('projPick').classList.add('hidden');
 $('btnLoadProj').onclick = async () => {
   if (!('showOpenFilePicker' in window)) return $('projInput').click();

@@ -71,6 +71,19 @@ export async function readFile(dir, name) {
   try { return await (await dir.getFileHandle(name)).getFile(); } catch { return null; }
 }
 
+/**
+ * 作業フォルダだけを忘れる（`__work__` キーだけ消す）。
+ * useWorkFolder() は setWorkDir() と rememberDir() の両方を呼ぶので、同じフォルダの
+ * ハンドルが `__work__` と「フォルダ名」の 2 つのキーで DIRS に入っている。
+ * ここで消すのは `__work__` だけで、フォルダ名の方はあえて残す。素材の探し先
+ * （listDirs / resolveFile）としては生きていてほしいので、道連れにしない。
+ */
+export async function forgetWorkDir() {
+  const db = await open();
+  await tx(db, DIRS, 'readwrite', (st) => st.delete(WORK));
+  db.close();
+}
+
 /** 覚えている作業フォルダ（無ければ null） */
 export async function getWorkDir() {
   const db = await open();
