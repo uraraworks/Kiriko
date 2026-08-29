@@ -81,6 +81,8 @@ MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1
 | `kiriko_restore_at` | 継ぎ目から秒単位で戻す（切りすぎた時） |
 | `kiriko_add_markers` | マーカーを一括で立てる（素材の時刻でも渡せる／のりしろ指定可）|
 | `kiriko_add_telops` | テロップを一括で追加する |
+| `kiriko_get_subtitles` | 字幕（SRT）一覧を取得する。長すぎ・速すぎの警告付き |
+| `kiriko_set_subtitles` | 字幕（SRT）をまとめて入れる・更新する（英訳だけの流し込みも可） |
 | `kiriko_get_frame` | 指定時刻のフレームを画像で取得する（映っているものを確かめたい時） |
 | `kiriko_get_project` | 編集内容の JSON を丸ごと取得する |
 | `kiriko_set_project` | 編集内容の JSON を丸ごと差し替える |

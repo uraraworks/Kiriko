@@ -18,6 +18,7 @@ import { dropIndex, rippleTime, insertTime, trimShift } from './edit.js';
 import * as TR from './trims.js';
 import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageClip, drawImageClip, drawnRect, srcRect } from './images.js';
 import * as TH from './thumbnail.js';
+import * as SUB from './subtitles.js';
 
 // ---------------------------------------------------------------- 状態
 
@@ -57,6 +58,7 @@ const S = {
   zoneOut: null,
   selectedImageId: null,
   selectedMarkerId: null,
+  selectedSubId: null,
   imageLib: new ImageLibrary(),
   focusArea: 'timeline',   // 'preview' ならカーソルキーで枠を動かす
   binTab: 'media',
@@ -66,6 +68,9 @@ const S = {
   snapLine: null,          // タイムラインで吸着中の位置（秒）
   showThumbs: true,
   showWaves: true,
+  subShow: true,           // プレビューに字幕を重ねて表示するか（動画には焼き込まれない）
+  subLang: 'ja',           // 'ja' | 'en' | 'both'
+  subGuide: false,         // YouTube 字幕ゾーンのガイドを表示するか
   inspTab: 'props',
   library: null,           // AudioLibrary（初回の音源読み込み時に作る）
   audioPreview: null,
@@ -111,6 +116,7 @@ function select(type, id) {
   S.selectedAudioId = type === 'audio' ? id : null;
   S.selectedImageId = type === 'image' ? id : null;
   S.selectedMarkerId = type === 'marker' ? id : null;
+  S.selectedSubId = type === 'sub' ? id : null;
 }
 /**
  * テロップ・画像の置き場所。サムネモードでは project.thumbnail 側を見る。
@@ -126,6 +132,18 @@ const selectedBlur = () => S.project.blurs.find((b) => b.id === S.selectedBlurId
 const selectedAudio = () => S.project.audioClips.find((a) => a.id === S.selectedAudioId) || null;
 const selectedImage = () => imageList().find((i) => i.id === S.selectedImageId) || null;
 const selectedMarker = () => S.project.markers.find((m) => m.id === S.selectedMarkerId) || null;
+const selectedSub = () => S.project.subtitles.find((s) => s.id === S.selectedSubId) || null;
+
+/** タイムラインのブロックに出す短いラベル。日本語 → 英語 → 空、の順で 1 行目を使う */
+function subBlockLabel(sub) {
+  const line = (t) => (t ?? '').split('\n')[0].trim();
+  return line(sub.ja) || line(sub.en) || '（空）';
+}
+/** 折り返し・速度のどちらかが超えていたら、色を変えて気付けるようにする */
+function subOverLimit(sub) {
+  const ja = SUB.checkLimits(sub, 'ja'), en = SUB.checkLimits(sub, 'en');
+  return ja.long || ja.fast || en.long || en.fast;
+}
 /** 書式の中の「大きさを持つ値」を引き伸ばす（枠と文字まわり） */
 function scaleStyle(style, sx, sy) {
   if (!style) return style;
@@ -181,6 +199,7 @@ const history = new History(
     if (!S.project.audioClips.some((a) => a.id === S.selectedAudioId)) S.selectedAudioId = null;
     if (!imageList().some((i) => i.id === S.selectedImageId)) S.selectedImageId = null;
     if (!S.project.markers?.some((m) => m.id === S.selectedMarkerId)) S.selectedMarkerId = null;
+    if (!S.project.subtitles?.some((s) => s.id === S.selectedSubId)) S.selectedSubId = null;
     normalizeProject();
     S.programTime = Math.min(S.programTime, P.totalDuration(S.project));
     S.programIndex = -1;
@@ -206,6 +225,7 @@ function syncProjectUI() {
   $('mixBgmLbl').textContent = `${Math.round((p.mix?.bgm ?? 1) * 100)}%`;
   set('optRes', `${p.output.width}x${p.output.height}`);
   set('optFps', String(p.output.fps));
+  renderSrtSection();
 }
 
 function renderHistoryUI() {
@@ -246,6 +266,7 @@ function normalizeProject() {
   p.blurs = (p.blurs ?? []).map((b) => ({
     shape: 'full', feather: 0.25, round: true, keys: [], ...b,
   }));
+  p.subtitles = (p.subtitles ?? []).map((s) => ({ ...s, ja: s.ja ?? '', en: s.en ?? '' }));
   // kind: keep=ここは残す / cut=ここは消す / note=ただのメモ
   p.markers = (p.markers ?? [])
     .map((m) => ({ duration: 0, text: '', kind: (m.duration ?? 0) > 0 ? 'keep' : 'note', ...m }))
@@ -594,7 +615,7 @@ function renderZoneInfo() {
   show('btnZoneClear', started);
   show('btnExtract', !!r);          // 範囲になってから
   // コピーは「範囲」か「何か選んでいる時」。貼り付けは持っている時だけ
-  show('btnCopy', !!r || !!(S.selectedTelopId || S.selectedAudioId || S.selectedImageId || S.selectedBlurId));
+  show('btnCopy', !!r || !!(S.selectedTelopId || S.selectedAudioId || S.selectedImageId || S.selectedBlurId || S.selectedSubId));
   show('btnPaste', !!S.clipboard?.items?.length);
   $('btnExtract').disabled = !r;
 
@@ -667,6 +688,9 @@ function rippleAfter(a, b) {
   S.project.blurs = S.project.blurs
     .map((x) => ({ ...x, start: shift(x.start), end: shift(x.end) }))
     .filter((x) => alive(x.start, x.end));
+  S.project.subtitles = S.project.subtitles
+    .map((x) => ({ ...x, start: shift(x.start), end: shift(x.end) }))
+    .filter((x) => alive(x.start, x.end));
   S.project.images = S.project.images
     .map((x) => ({ ...x, start: shift(x.start), end: shift(x.end) }))
     .filter((x) => alive(x.start, x.end));
@@ -702,6 +726,7 @@ function insertGapAt(t, len) {
   const shiftBlock = (x) => ({ ...x, start: push(x.start), end: push(x.end) });
   P0.telops = P0.telops.map(shiftBlock);
   P0.blurs = P0.blurs.map(shiftBlock);
+  P0.subtitles = P0.subtitles.map(shiftBlock);
   P0.images = P0.images.map(shiftBlock);
   P0.markers = P0.markers.map((m) => {
     const s0 = push(m.time), e0 = push(m.time + (m.duration ?? 0));
@@ -867,6 +892,11 @@ function deleteSelected() {
     removeFrom(imageList(), S.selectedImageId);
     S.selectedImageId = null; renderAll(); renderFxForm(true); return;
   }
+  if (S.selectedSubId) {
+    commit('字幕を削除');
+    S.project.subtitles = S.project.subtitles.filter((s) => s.id !== S.selectedSubId);
+    S.selectedSubId = null; renderAll(); renderFxForm(true); return;
+  }
   if (S.selectedAudioId) {
     commit('音源を削除');
     S.project.audioClips = S.project.audioClips.filter((a) => a.id !== S.selectedAudioId);
@@ -916,6 +946,7 @@ function copySelected() {
     ['audio', selectedAudio()],
     ['image', selectedImage()],
     ['blur', selectedBlur()],
+    ['sub', selectedSub()],
   ].find(([, v]) => v);
   if (!pick) return status('コピーするものが選ばれていません（範囲を選ぶとまとめてコピーできます）', true);
   const [kind, item] = pick;
@@ -934,6 +965,7 @@ function copyRange(a, b) {
   for (const x of P0.telops) if (hit(x.start, x.end)) items.push({ kind: 'telop', data: clone(x) });
   for (const x of P0.images) if (hit(x.start, x.end)) items.push({ kind: 'image', data: clone(x) });
   for (const x of P0.blurs) if (hit(x.start, x.end)) items.push({ kind: 'blur', data: clone(x) });
+  for (const x of P0.subtitles) if (hit(x.start, x.end)) items.push({ kind: 'sub', data: clone(x) });
   for (const x of P0.audioClips) if (hit(x.start, x.start + x.duration)) items.push({ kind: 'audio', data: clone(x) });
   if (!items.length) return status('この範囲にはコピーするものがありません', true);
 
@@ -948,7 +980,21 @@ function copyRange(a, b) {
   status(`範囲の ${list} をコピーしました（⌘V で再生位置に貼り付け）`);
 }
 
-const KIND_NAME = { telop: 'テロップ', audio: '音源', image: '画像', blur: 'ぼかし' };
+const KIND_NAME = { telop: 'テロップ', audio: '音源', image: '画像', blur: 'ぼかし', sub: '字幕' };
+
+/**
+ * 字幕は 1 トラック固定・重なり禁止なので、貼り付け先の [start, end) を
+ * 既存の字幕にぶつからないよう詰める。ずらすのではなく端を削る。
+ */
+function squeezeSubRange(start, end) {
+  const list = S.project.subtitles.slice().sort((a, b) => a.start - b.start);
+  for (const o of list) {
+    if (o.end <= start || o.start >= end) continue;   // 重ならない
+    if (o.start <= start) start = Math.max(start, o.end);
+    else end = Math.min(end, o.start);
+  }
+  return [start, end];
+}
 
 /** コピーしたものを再生位置に貼り付ける。長さ・書式・間隔はそのまま */
 function pasteClipboard() {
@@ -973,6 +1019,17 @@ function pasteClipboard() {
         && ac.start < o.start + o.duration && ac.start + ac.duration > o.start)) ac.track++;
       S.project.audioClips.push(ac);
       last = ['audio', ac.id];
+    } else if (kind === 'sub') {
+      const len = src.end - src.start;
+      let start = Math.max(0, at);
+      let end = Math.min(total, start + len);
+      if (end - start < 0.02) continue;
+      [start, end] = squeezeSubRange(start, end);
+      if (end - start < 0.3) continue;   // 詰めても収まらないものは置かない
+      const item = { ...src, id: P.newId('sub'), start, end };
+      S.project.subtitles.push(item);
+      S.project.subtitles.sort((a, b) => a.start - b.start);
+      last = ['sub', item.id];
     } else {
       const len = src.end - src.start;
       const prefix = { telop: 'tel', image: 'img', blur: 'blur' }[kind];
@@ -1067,6 +1124,33 @@ function addTelop() {
   renderAll();
   openTelopEditor();
   status(`テロップを追加しました（${tc(t0, false)} 〜 ${tc(t1, false)}）`);
+}
+
+// ---------------------------------------------------------------- 字幕
+
+/** 再生位置に長さ 2.5 秒で字幕を追加する。次の字幕にはぶつからないよう縮める */
+function addSubtitle() {
+  const total = P.totalDuration(S.project);
+  if (total <= 0) return status('先にクリップを作ってください', true);
+  const t0 = Math.min(currentTimelineTime(), Math.max(0, total - 0.3));
+  const list = S.project.subtitles;
+  if (list.some((s) => t0 >= s.start && t0 < s.end)) {
+    return status('ここには字幕を置く余地がありません', true);
+  }
+  const next = list.filter((s) => s.start > t0).sort((a, b) => a.start - b.start)[0];
+  const limit = Math.min(total, next ? next.start : total);
+  const end = Math.min(limit, t0 + 2.5);
+  if (end - t0 < 0.3) return status('ここには字幕を置く余地がありません', true);
+  commit('字幕を追加');
+  const sub = SUB.createSubtitle(t0, end);
+  S.project.subtitles.push(sub);
+  S.project.subtitles.sort((a, b) => a.start - b.start);
+  select('sub', sub.id);
+  setMode('program');
+  seekProgram(t0, true);
+  renderAll();
+  renderFxForm(true);
+  status(`字幕を追加しました（${tc(t0, false)} 〜 ${tc(end, false)}）`);
 }
 
 // ---------------------------------------------------------------- マーカー
@@ -1673,6 +1757,10 @@ function renderOverlay() {
       for (const b of activeRectBlurs(S.project.blurs, t)) drawRectBlur(ctx, video, W, H, b, t);
     }
     drawOverlaysAt(ctx, S.project, t, S.imageLib);
+    // 字幕プレビューと YouTube 字幕ゾーンのガイド。どちらも確認用の表示だけで、
+    // exporter.js / compose.js の書き出し経路には一切関わらない（動画には焼き込まれない）
+    if (S.subShow) drawSubtitlePreview(ctx, W, H, t);
+    if (S.subGuide) drawSubGuide(ctx, W, H, t);
   } else if (sel) {
     // ソースモニターでは、位置調整しやすいよう選択中のものだけ出す
     if (sel.kind === 'image') drawImageClip(ctx, sel.item, S.imageLib);
@@ -1685,6 +1773,96 @@ function renderOverlay() {
     B.drawBoxChrome(ctx, sel.item.box, sc, { color: sel.kind === 'image' ? '#e0ab74' : sel.kind === 'blur' ? '#7fd8c4' : '#4c9aff' });
     if (boxDrag?.guides?.length) B.drawGuides(ctx, boxDrag.guides, W, H, sc);
   }
+}
+
+/** 現在時刻 t に掛かっている字幕を 1 つ返す（無ければ null。1トラック・重なり禁止なので高々1件）*/
+function subtitleAt(t) {
+  return S.project.subtitles?.find((s) => t >= s.start && t < s.end) ?? null;
+}
+
+/**
+ * プレビューに字幕を重ねて描く（確認用）。
+ * これは「だいたいこう見える」の目安でしかない。YouTube の実際の字幕サイズは
+ * 視聴者の字幕設定（50〜400%）とプレイヤーの大きさで変わるので、正確な再現は
+ * 原理的に不可能。判断の拠り所は文字数・表示速度の警告（SUB.checkLimits）の方であり、
+ * この描画はイメージをつかむための補助に過ぎない。
+ * 毎フレーム呼ばれるので、ここでの処理はフォント指定と measureText 程度に留める。
+ */
+function drawSubtitlePreview(ctx, W, H, t) {
+  const sub = subtitleAt(t);
+  if (!sub) return;
+  const lang = S.subLang || 'ja';
+  const order = lang === 'both' ? ['ja', 'en'] : [lang];   // both は ja が上、en が下
+  const jaSize = H * 0.045;   // 出力高さの 4.5%（1080 なら約 49px）
+  const enSize = jaSize * 0.8;
+  const pad = jaSize * 0.32;
+  const gap = jaSize * 0.22;  // 日英の間隔
+  const bottomMargin = H * 0.05;
+
+  const blocks = [];
+  for (const l of order) {
+    const raw = (sub[l] ?? '').trim();
+    if (!raw) continue;   // その言語のテキストが空なら描かない
+    const size = l === 'ja' ? jaSize : enSize;
+    ctx.font = `${size}px sans-serif`;
+    const lines = SUB.wrapForDisplay(raw, SUB.LIMITS[l].chars).split('\n');
+    const lineH = size * 1.3;
+    const maxW = Math.max(...lines.map((ln) => ctx.measureText(ln).width));
+    blocks.push({ lines, size, lineH, w: maxW + pad * 2, h: lineH * lines.length + pad * 2 });
+  }
+  if (!blocks.length) return;
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  let y = H - bottomMargin;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    y -= b.h;
+    const x = W / 2 - b.w / 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.beginPath();
+    roundRect(ctx, x, y, b.w, b.h, 6);
+    ctx.fill();
+    ctx.font = `${b.size}px sans-serif`;
+    ctx.fillStyle = '#fff';
+    let ly = y + b.h / 2 - (b.lineH * (b.lines.length - 1)) / 2;
+    for (const line of b.lines) { ctx.fillText(line, W / 2, ly); ly += b.lineH; }
+    y -= gap;
+  }
+  ctx.restore();
+}
+
+/**
+ * YouTube の字幕が出るであろう帯を、破線の枠で示す（確認用。中は塗らない）。
+ * 狙いは「ここにテロップを置くと、字幕を出している視聴者には重なって読めなくなる」を
+ * 目で見て分かるようにすること。実際の位置はプレイヤーの大きさや視聴者設定で
+ * 変わるので、これも「だいたいこの辺り」という目安。
+ * テロップの枠がこの帯に重なっている時は、警告として枠線を赤系にする。
+ */
+function drawSubGuide(ctx, W, H, t) {
+  // 画面下部中央・幅は中央 80%・高さは下から 8%〜22% のあたり
+  const zone = { x: W * 0.1, y: H * 0.78, w: W * 0.8, h: H * 0.14 };
+  const telops = overlaysAt(S.project, t).filter((o) => o.kind === 'telop');
+  const overlap = telops.some((o) => rectsOverlap(o.item.box, zone));
+
+  ctx.save();
+  const color = overlap ? 'rgba(255,90,80,0.9)' : 'rgba(255,255,255,0.55)';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 6]);
+  ctx.strokeRect(zone.x, zone.y, zone.w, zone.h);
+  ctx.setLineDash([]);
+  ctx.font = '12px sans-serif';
+  ctx.fillStyle = color;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('YouTube 字幕ゾーン', zone.x + 4, zone.y - 4);
+  ctx.restore();
+}
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
 /** マウス座標 → 出力ピクセル座標 */
@@ -2665,10 +2843,10 @@ function renderEffectBin() {
 
 function renderInspector() {
   const form = $('clipForm');
-  const tel = selectedTelop(), other = selectedBlur() || selectedAudio() || selectedImage() || selectedMarker();
+  const tel = selectedTelop(), other = selectedBlur() || selectedAudio() || selectedImage() || selectedMarker() || selectedSub();
   $('selHead').textContent = tel ? '選択テロップ'
     : selectedBlur() ? '選択ぼかし' : selectedAudio() ? '選択音源'
-    : selectedImage() ? '選択画像' : selectedMarker() ? '選択マーカー' : '選択クリップ';
+    : selectedImage() ? '選択画像' : selectedMarker() ? '選択マーカー' : selectedSub() ? '選択字幕' : '選択クリップ';
   // テロップはフローティングダイアログ側、それ以外は fxForm 側に出る
   form.classList.toggle('hidden', !!other || !!tel);
 
@@ -3431,8 +3609,8 @@ function setupCropPicker(im) {
 
 function renderFxForm(force = false) {
   const form = $('fxForm');
-  const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage(), mk = selectedMarker();
-  const key = mk ? `m:${mk.id}` : blur ? `b:${blur.id}` : ac ? `a:${ac.id}` : im ? `i:${im.id}` : null;
+  const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage(), mk = selectedMarker(), sub = selectedSub();
+  const key = mk ? `m:${mk.id}` : blur ? `b:${blur.id}` : ac ? `a:${ac.id}` : im ? `i:${im.id}` : sub ? `s:${sub.id}` : null;
   form.classList.toggle('hidden', !key);
   if (!key) { fxFormKey = null; return; }
   if (!force && fxFormKey === key) { syncBoxNumbers(); syncFxNumbers(); return; }
@@ -3640,6 +3818,67 @@ function renderFxForm(force = false) {
     return;
   }
 
+  if (sub) {
+    const list = S.project.subtitles.slice().sort((a2, b2) => a2.start - b2.start);
+    const idx = list.findIndex((s) => s.id === sub.id);
+    const prev = idx > 0 ? list[idx - 1] : null;
+    const t = currentTimelineTime();
+    const canSplit = t > sub.start && t < sub.end;
+    form.innerHTML = `
+      <label>日本語<textarea id="subJa" rows="2">${esc(sub.ja ?? '')}</textarea></label>
+      <div class="sub-count" id="subJaInfo"></div>
+      <label>English<textarea id="subEn" rows="2">${esc(sub.en ?? '')}</textarea></label>
+      <div class="sub-count" id="subEnInfo"></div>
+      <div class="grid2">
+        <label>開始（秒）<input class="num" type="number" id="subStart" step="0.1" value="${sub.start.toFixed(2)}"></label>
+        <label>長さ（秒）<input class="num" type="number" id="subDur" step="0.1" min="0.3" value="${(sub.end - sub.start).toFixed(2)}"></label>
+      </div>
+      <div class="z-row">
+        <button class="mini" id="subSplit" ${canSplit ? '' : 'disabled'}>再生位置で分割</button>
+        <button class="mini" id="subMerge" ${prev ? '' : 'disabled'}>前の字幕と結合</button>
+      </div>
+      <div class="sub-label">字幕は画面に焼き込まれません。SRT ファイルとして書き出して YouTube に添付します。日本語は 16文字×2行、英語は 42文字×2行が目安です。</div>`;
+
+    const bind = (id, field, fn) => $(id).addEventListener('input', (e) => {
+      commit('字幕を編集', `sub:${sub.id}:${field}`);
+      fn(e.target.value);
+      live();
+      syncSubLimits(sub);
+      renderSrtSection();
+    });
+    bind('subJa', 'ja', (v) => { sub.ja = v; });
+    bind('subEn', 'en', (v) => { sub.en = v; });
+    bind('subStart', 'start', (v) => {
+      const edges = subEdges(sub.id, sub.start);
+      const len = sub.end - sub.start;
+      let start = Math.max(0, +v);
+      start = Math.max(edges.prevEnd, Math.min(edges.nextStart - len, start));
+      sub.start = start; sub.end = start + len;
+    });
+    bind('subDur', 'dur', (v) => {
+      const edges = subEdges(sub.id, sub.start);
+      const dur = Math.max(0.3, +v);
+      sub.end = Math.min(edges.nextStart, sub.start + dur);
+    });
+    syncSubLimits(sub);
+    $('subSplit').onclick = () => {
+      if (!canSplit) return;
+      commit('字幕を分割');
+      S.project.subtitles = SUB.splitAt(S.project.subtitles, sub.id, t);
+      renderAll(); renderFxForm(true);
+      status('字幕を分割しました');
+    };
+    $('subMerge').onclick = () => {
+      if (!prev) return;
+      commit('字幕を結合');
+      S.project.subtitles = SUB.mergeAdjacent(S.project.subtitles, prev.id, sub.id);
+      select('sub', prev.id);
+      renderAll(); renderFxForm(true);
+      status('前の字幕と結合しました');
+    };
+    return;
+  }
+
   const asset = S.project.audioAssets.find((a) => a.id === ac.assetId);
   form.innerHTML = `
     <div class="sub-label">${esc(asset?.name ?? ac.assetId)}（${ac.kind === 'bgm' ? 'BGM' : '効果音'}）</div>
@@ -3673,7 +3912,7 @@ function renderFxForm(force = false) {
 
 function syncFxNumbers() {
   const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v; };
-  const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage(), mk = selectedMarker();
+  const blur = selectedBlur(), ac = selectedAudio(), im = selectedImage(), mk = selectedMarker(), sub = selectedSub();
   if (mk) { set('mkTime', mk.time.toFixed(2)); set('mkDur', (mk.duration ?? 0).toFixed(2)); }
   else if (blur) { set('fxStart', blur.start.toFixed(2)); set('fxEnd', blur.end.toFixed(2)); }
   else if (ac) { set('fxStart', ac.start.toFixed(2)); set('fxDur', ac.duration.toFixed(2)); }
@@ -3681,6 +3920,28 @@ function syncFxNumbers() {
     set('imStart', im.start.toFixed(2)); set('imEnd', im.end.toFixed(2));
     // 切り出し範囲は ⌘Z や MCP からも変わるので、ピッカーも描き直す
     cropRedraw?.();
+  } else if (sub) {
+    set('subStart', sub.start.toFixed(2)); set('subDur', (sub.end - sub.start).toFixed(2));
+    syncSubLimits(sub);
+  }
+}
+
+/** 字幕フォームの「文字数×行 / 文字毎秒」表示を、超えていたら赤く出す */
+function syncSubLimits(sub) {
+  for (const lang of ['ja', 'en']) {
+    const el = $(`sub${lang === 'ja' ? 'Ja' : 'En'}Info`);
+    if (!el) continue;
+    const r = SUB.checkLimits(sub, lang);
+    const lim = SUB.LIMITS[lang];
+    const over = r.long || r.fast;
+    el.classList.toggle('warn', over);
+    if (!over) {
+      el.textContent = `${r.maxLine}文字 × ${r.lines}行 / ${r.cps === Infinity ? '—' : r.cps.toFixed(1)} 文字毎秒`;
+    } else if (r.long) {
+      el.textContent = `1行が長すぎます（${r.maxLine} / ${lim.chars}文字）`;
+    } else {
+      el.textContent = `速すぎて読めません（${r.cps.toFixed(1)} / ${lim.cps} 文字毎秒）`;
+    }
   }
 }
 
@@ -3779,7 +4040,7 @@ $('scrubBar').addEventListener('pointerdown', (e) => {
 // ---------------------------------------------------------------- 描画：タイムライン
 
 const tlCanvas = $('tlCanvas');
-const RULER_H = 26, MARK_H = 24, FX_H = 22, IMG_H = 30, TELOP_H = 30, TRACK_H = 60, AUD_H = 42;
+const RULER_H = 26, MARK_H = 24, FX_H = 22, IMG_H = 30, TELOP_H = 30, SUB_H = 30, TRACK_H = 60, AUD_H = 42;
 
 /** テロップのトラック数。いつでも 1 本空きがあるようにして、そこへドラッグで移せる */
 function telopTrackCount() {
@@ -3803,6 +4064,7 @@ const TRACK_TIPS = {
   fx: 'エフェクト：ぼかしを掛ける区間を置く行です',
   image: '画像：差し込んだ画像を置く行です',
   telop: (i) => `テロップ ${i + 1}：文字を置く行です（重ねたい時は別の行へ）`,
+  sub: '字幕：SRT で書き出す字幕を置く行です（画面には焼き込まれません）　［ S で追加 ］',
   video: '映像：カットしたクリップが並ぶ行です',
   audio: '元の音：動画にもともと入っている音です（クリップと一緒に動きます）',
   music: (i) => `効果音 / BGM ${i + 1}：追加した音源を置く行です`,
@@ -3820,6 +4082,7 @@ function trackLayout() {
   push('fx', 0, 'FX', FX_H);
   push('image', 0, 'IM', IMG_H);
   for (let i = 0; i < telopTrackCount(); i++) push('telop', i, `T${i + 1}`, TELOP_H);
+  push('sub', 0, 'ST', SUB_H);
   push('video', 0, 'V1', TRACK_H);
   push('audio', 0, 'A1', TRACK_H);
   for (let i = 0; i < audioTrackCount(); i++) push('music', i, `A${i + 2}`, AUD_H);
@@ -3989,7 +4252,7 @@ function renderTimeline() {
   ctx.stroke();
 
   // --- トラック背景 ---
-  const BG = { marker: '#1f1c26', fx: '#191f22', image: '#241d16', telop: '#1b1d24', video: '#1e2128', audio: '#1c1f26', music: '#1d1b26' };
+  const BG = { marker: '#1f1c26', fx: '#191f22', image: '#241d16', telop: '#1b1d24', sub: '#16232a', video: '#1e2128', audio: '#1c1f26', music: '#1d1b26' };
   const layout = trackLayout();
   for (const r of layout) {
     ctx.fillStyle = BG[r.kind] ?? '#1b1d24';
@@ -4098,6 +4361,17 @@ function renderTimeline() {
     const a = S.project.imageAssets.find((y) => y.id === im.assetId);
     drawFxBlock(ctx, x, trackTop('image') + 2, Math.max(3, iw), IMG_H - 5, `▣ ${a?.name ?? ''}`,
       im.id === S.selectedImageId, ['#e6b482', '#b57a3e'], '#2b1a06');
+  }
+
+  // --- 字幕 ---
+  for (const sub of S.project.subtitles) {
+    const x = secToX(sub.start), sw = (sub.end - sub.start) * S.pxPerSec;
+    if (x + sw < -5 || x > w + 5) continue;
+    const warn = subOverLimit(sub);
+    drawFxBlock(ctx, x, trackTop('sub') + 2, Math.max(3, sw), SUB_H - 5, subBlockLabel(sub),
+      sub.id === S.selectedSubId,
+      warn ? ['#e69090', '#b74a4a'] : ['#7fd4e0', '#3e93a3'],
+      warn ? '#2a0a0a' : '#062226');
   }
 
   // --- テロップ ---
@@ -4343,7 +4617,7 @@ function snapTargets(includePlayhead = true) {
 /** 置いてあるもの（テロップ・画像・音源・ぼかし）の先頭 */
 function elementStarts() {
   const P0 = S.project;
-  return [...P0.telops, ...P0.images, ...P0.audioClips, ...P0.blurs].map((x) => x.start);
+  return [...P0.telops, ...P0.images, ...P0.audioClips, ...P0.blurs, ...P0.subtitles].map((x) => x.start);
 }
 
 /**
@@ -4442,6 +4716,30 @@ function hitImageBlock(x, y) {
   return null;
 }
 
+function hitSubBlock(x, y) {
+  if (trackAt(y)?.kind !== 'sub') return null;
+  for (let i = S.project.subtitles.length - 1; i >= 0; i--) {
+    const sub = S.project.subtitles[i];
+    const cx = secToX(sub.start), cw = (sub.end - sub.start) * S.pxPerSec;
+    if (x >= cx && x <= cx + cw) return { sub, cx, cw };
+  }
+  return null;
+}
+
+/**
+ * 字幕は 1 トラック固定・重なり禁止。ドラッグ開始時点の前後の字幕を覚えておき、
+ * それを越えないよう動きを止める（隣を押しのけない）。
+ */
+function subEdges(id, origStart) {
+  let prevEnd = 0, nextStart = Infinity;
+  for (const o of S.project.subtitles) {
+    if (o.id === id) continue;
+    if (o.start < origStart) prevEnd = Math.max(prevEnd, o.end);
+    else nextStart = Math.min(nextStart, o.start);
+  }
+  return { prevEnd, nextStart };
+}
+
 function hitTelopBlock(x, y) {
   const tr = trackAt(y);
   if (tr?.kind !== 'telop') return null;
@@ -4468,7 +4766,7 @@ tlCanvas.addEventListener('pointermove', (e) => {
   if (drag) return;
   const r = tlCanvas.getBoundingClientRect();
   const x = e.clientX - r.left, y = e.clientY - r.top;
-  const hit = hitMarker(x, y) || hitBlurBlock(x, y) || hitImageBlock(x, y) || hitTelopBlock(x, y) || hitAudioClip(x, y) || hitClip(x, y);
+  const hit = hitMarker(x, y) || hitBlurBlock(x, y) || hitImageBlock(x, y) || hitSubBlock(x, y) || hitTelopBlock(x, y) || hitAudioClip(x, y) || hitClip(x, y);
   tlCanvas.style.cursor = !hit ? 'default'
     : (Math.abs(x - hit.cx) < 6 || Math.abs(x - (hit.cx + hit.cw)) < 6) ? 'ew-resize' : 'grab';
 });
@@ -4520,6 +4818,21 @@ tlCanvas.addEventListener('pointerdown', (e) => {
     return;
   }
   if (trackAt(y)?.kind === 'image') { select('clip', null); renderAll(); renderFxForm(true); renderTelopForm(true); return; }
+
+  // 字幕トラック
+  const sh = hitSubBlock(x, y);
+  if (sh) {
+    select('sub', sh.sub.id);
+    commit('字幕を編集', `subTime:${sh.sub.id}`);
+    const eL = Math.abs(x - sh.cx) < 6, eR = Math.abs(x - (sh.cx + sh.cw)) < 6;
+    const edges = subEdges(sh.sub.id, sh.sub.start);
+    drag = (eL || eR)
+      ? { type: 'subTrim', sub: sh.sub, side: eL ? 'start' : 'end', startX: x, orig: { start: sh.sub.start, end: sh.sub.end }, edges }
+      : { type: 'subMove', sub: sh.sub, startX: x, orig: { start: sh.sub.start, end: sh.sub.end }, edges };
+    renderAll(); renderFxForm(true); renderTelopForm(true);
+    return;
+  }
+  if (trackAt(y)?.kind === 'sub') { select('clip', null); renderAll(); renderFxForm(true); renderTelopForm(true); return; }
 
   // SE / BGM トラック
   const ah = hitAudioClip(x, y);
@@ -4657,6 +4970,24 @@ tlCanvas.addEventListener('pointermove', (e) => {
     if (drag.side === 'start') drag.im.start = Math.max(0, Math.min(drag.orig.end - 0.1, snapEdge(drag.orig.start + d, e.altKey)));
     else drag.im.end = Math.max(drag.orig.start + 0.1, snapEdge(drag.orig.end + d, e.altKey));
     renderTimeline(); renderOverlay(); syncFxNumbers();
+  } else if (drag.type === 'subMove') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    const len = drag.orig.end - drag.orig.start;
+    let start = Math.max(0, snapBlockMove(drag.orig.start + d, len, e.altKey));
+    start = Math.max(drag.edges.prevEnd, Math.min(drag.edges.nextStart - len, start));
+    drag.sub.start = start;
+    drag.sub.end = start + len;
+    renderTimeline(); syncFxNumbers();
+  } else if (drag.type === 'subTrim') {
+    const d = (x - drag.startX) / S.pxPerSec;
+    if (drag.side === 'start') {
+      const lo = Math.max(0, drag.edges.prevEnd);
+      drag.sub.start = Math.max(lo, Math.min(drag.orig.end - 0.3, snapEdge(drag.orig.start + d, e.altKey)));
+    } else {
+      const hi = drag.edges.nextStart;
+      drag.sub.end = Math.min(hi, Math.max(drag.orig.start + 0.3, snapEdge(drag.orig.end + d, e.altKey)));
+    }
+    renderTimeline(); syncFxNumbers();
   } else if (drag.type === 'telopMove') {
     const d = (x - drag.startX) / S.pxPerSec;
     const len = drag.orig.end - drag.orig.start;
@@ -4738,6 +5069,7 @@ function contentEndSec() {
   let end = P.totalDuration(S.project);
   for (const t of S.project.telops) end = Math.max(end, t.end);
   for (const b of S.project.blurs) end = Math.max(end, b.end);
+  for (const s of S.project.subtitles) end = Math.max(end, s.end);
   for (const i of S.project.images) end = Math.max(end, i.end);
   for (const a of S.project.audioClips) end = Math.max(end, a.start + a.duration);
   return end;
@@ -4897,6 +5229,47 @@ async function saveProject() {
   const a = document.createElement('a'); a.href = url; a.download = name; a.click();
   URL.revokeObjectURL(url);
   status('プロジェクトを保存しました');
+}
+
+// ---------------------------------------------------------------- 字幕（SRT）書き出し
+
+const SRT_LANG_NAME = { ja: '日本語', en: '英語' };
+
+/** その言語のテキストがあるエントリ数 */
+function srtCount(lang) {
+  return (S.project.subtitles ?? []).filter((s) => (s[lang] ?? '').trim() !== '').length;
+}
+
+/** 出力タブの SRT 節（件数表示・ボタンの有効／無効）を更新する */
+function renderSrtSection() {
+  const ja = srtCount('ja'), en = srtCount('en');
+  $('srtJaCount').textContent = `${ja} 件`;
+  $('srtEnCount').textContent = `${en} 件`;
+  $('btnSrtJa').disabled = ja === 0;
+  $('btnSrtEn').disabled = en === 0;
+}
+
+/**
+ * SRT を書き出す。保存先は saveProject() と同じ流儀：
+ * 作業フォルダが設定されていればそこへ書き、無ければブラウザのダウンロードに任せる。
+ */
+async function saveSrt(lang) {
+  const count = srtCount(lang);
+  if (count === 0) return;
+  const title = (S.project.title ?? '').trim() || '字幕';
+  const name = `${title}.${lang}.srt`;
+  const text = SUB.toSrt(S.project.subtitles, lang);
+  const blob = () => new Blob([text], { type: 'text/plain' });   // UTF-8, BOM なし
+
+  const dir = await FS.writableDir().catch(() => null);
+  if (dir && await FS.writeFile(dir, name, blob())) {
+    status(`${SRT_LANG_NAME[lang]} SRT を保存しました（${count} 件）— ${dir.name} / ${name}`);
+    return;
+  }
+  const url = URL.createObjectURL(blob());
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+  status(`${SRT_LANG_NAME[lang]} SRT を保存しました（${count} 件）`);
 }
 
 /** 「プロジェクト.kiriko」→「プロジェクト」 */
@@ -5510,10 +5883,46 @@ $('btnWaves').onclick = () => {
   $('btnWaves').classList.toggle('on', S.showWaves);
   renderTimeline();
 };
+// 字幕の表示設定はプロジェクトではなく表示設定なので localStorage に持つ
+(() => {
+  try {
+    const s = localStorage.getItem('kiriko.subShow');
+    if (s !== null) S.subShow = s === '1';
+    const l = localStorage.getItem('kiriko.subLang');
+    if (l) S.subLang = l;
+    const g = localStorage.getItem('kiriko.subGuide');
+    if (g !== null) S.subGuide = g === '1';
+  } catch {}
+})();
+$('btnSubShow').classList.toggle('on', S.subShow);
+$('selSubLang').value = S.subLang;
+$('selSubLang').classList.toggle('hidden', !S.subShow);
+$('btnSubGuide').classList.toggle('on', S.subGuide);
+$('btnSubShow').onclick = () => {
+  S.subShow = !S.subShow;
+  $('btnSubShow').classList.toggle('on', S.subShow);
+  $('selSubLang').classList.toggle('hidden', !S.subShow);
+  try { localStorage.setItem('kiriko.subShow', S.subShow ? '1' : '0'); } catch {}
+  renderOverlay();
+};
+$('selSubLang').onchange = (e) => {
+  S.subLang = e.target.value;
+  try { localStorage.setItem('kiriko.subLang', S.subLang); } catch {}
+  renderOverlay();
+};
+$('btnSubGuide').onclick = () => {
+  S.subGuide = !S.subGuide;
+  $('btnSubGuide').classList.toggle('on', S.subGuide);
+  try { localStorage.setItem('kiriko.subGuide', S.subGuide ? '1' : '0'); } catch {}
+  renderOverlay();
+};
+$('btnSrtJa').onclick = () => saveSrt('ja');
+$('btnSrtEn').onclick = () => saveSrt('en');
 $('btnAddMarker').onclick = () => addMarker();
 $('btnPrevGap').onclick = selectPrevGap;
 $('btnNextGap').onclick = selectNextGap;
 $('btnAddTelop').onclick = addTelop;
+$('btnAddSubtitle').onclick = addSubtitle;
 $('btnCopy').onclick = copySelected;
 $('btnPaste').onclick = pasteClipboard;
 $('telSaveLib').onclick = () => saveTelopToLibrary();
@@ -5698,6 +6107,7 @@ document.addEventListener('keydown', (e) => {
       break;
     case 'enter': addClip(); break;
     case 't': addTelop(); break;
+    case 's': addSubtitle(); break;
     case 'm': addMarker(); break;
     case ',': jumpMarker(-1); break;
     case '.': jumpMarker(1); break;
@@ -5759,6 +6169,7 @@ function renderAll() {
   renderThumbBar();
   renderTimeline();
   renderOverlay();
+  renderSrtSection();
 }
 
 if (!('VideoEncoder' in window)) {
@@ -5940,7 +6351,7 @@ const mcpCommands = createCommands({
  * 履歴のスナップショットが操作の途中で撮られて、⌘Z の戻り先がおかしくなる。
  */
 const WRITE_CMDS = new Set([
-  'set_project', 'add_markers', 'add_telops', 'set_notes',
+  'set_project', 'add_markers', 'add_telops', 'set_notes', 'set_subtitles',
   'cut_range', 'cut_outside_markers', 'restore_at',
 ]);
 
@@ -6017,6 +6428,7 @@ window.bme = {
   loadProject,     // 保存先を覚えるので、テストや自動化からも同じ経路を通せる
   saveProject,
   addTelop,
+  addSubtitle,
   addBlur,
   addMarker,
   keepMarkedRangesOnly,

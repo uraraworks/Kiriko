@@ -21,6 +21,8 @@ export function createProject() {
     audioClips: [], // { id, assetId, kind, start, offset, duration, volume, fadeIn, fadeOut, loop }
     mix: { se: 1, bgm: 1 }, // 効果音 / BGM のマスター音量
     blurs: [],      // { id, start, end, strength } 区間ぼかし（プライバシー保護）
+    // SRT 字幕。テロップとは別レイヤー。1 エントリに日英を持ち、書き出しは言語ごとに分ける。
+    subtitles: [],  // { id, start, end, ja, en }
     // カットで消した区間の在庫。継ぎ目から秒単位で戻せるようにするためのもの（trims.js）。
     // { id, prevClipId, nextClipId, segments:[{sourceId,in,out,volume}], label, group }
     trims: [],

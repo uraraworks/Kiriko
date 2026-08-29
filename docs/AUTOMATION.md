@@ -56,6 +56,8 @@ Chrome 系か Firefox を使うこと。
 | `get_project` / `set_project` | 編集内容の JSON を丸ごと |
 | `add_markers` | マーカーを一括で立てる（`kind`: keep / cut / note、`pad` でのりしろ）|
 | `add_telops` | テロップを一括で追加（プリセット指定・複数行可）|
+| `get_subtitles` | 字幕（SRT）一覧。長すぎ・速すぎの警告付き |
+| `set_subtitles` | 字幕（SRT）をまとめて入れる・更新する（`mode`: replace / merge、`autoSplit`）|
 | `find_silence` | 無音／有音の区間を音量から求める |
 | `get_audio_levels` | 音量エンベロープ（0〜1）|
 | `get_frame` | 指定時刻の完成フレームを PNG dataURL で |
@@ -123,6 +125,34 @@ await bme.call('add_markers', {
   markers: silence.map(s => ({ time: s.start, duration: s.end - s.start, kind: 'cut', text: '無音' })),
 });
 ```
+
+### 字幕（SRT）の下ごしらえ
+
+字幕は**動画に焼き込まれない**。SRT ファイルとして書き出して YouTube 等に添付するもの。
+1 エントリに日本語（ja）と英語（en）を同居させる。想定している流れ:
+
+1. 人間が `kiriko_transcribe` で書き起こす
+2. AI が `set_subtitles({ subtitles: segments, autoSplit: true })` で日本語の下書きを流し込む
+   （長すぎる発話は読みやすい長さに自動分割される）
+3. AI が `get_subtitles` を呼び、`warnings`（長すぎ・速すぎ）が付いたエントリを見つけて `ja` を書き直す
+4. AI が **英訳だけを `id` 指定で流し込む**（`set_subtitles({ subtitles: [{ id, en }] })`）。
+   逐語訳である必要はなく、収まらなければ短く言い直すのが正しい
+5. 人間が UI で仕上げて SRT を書き出す
+
+```js
+// 2. 書き起こしをそのまま日本語字幕の下書きにする
+await bme.call('set_subtitles', { subtitles: segments, autoSplit: true });
+
+// 3. 警告が付いたものだけ拾う
+const { subtitles } = await bme.call('get_subtitles');
+const needsFix = subtitles.filter((s) => s.warnings.length);
+
+// 4. 英訳を id 指定で流し込む（ja / start / end は省略すれば保持される）
+await bme.call('set_subtitles', { subtitles: [{ id: needsFix[0].id, en: 'Short translation' }] });
+```
+
+字幕は 1 トラックで**重ならない**。`set_subtitles` は入れ終わると start 昇順に並べ替えて
+重なりを詰め、詰めた結果 0.3 秒未満になったものは落とす（返り値の `dropped`）。
 
 ## 直接いじる場合
 

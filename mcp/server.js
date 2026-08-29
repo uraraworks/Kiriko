@@ -154,6 +154,43 @@ server.registerTool('kiriko_add_telops', {
   },
 }, async (a) => asText(await call('add_telops', a)));
 
+server.registerTool('kiriko_get_subtitles', {
+  title: '字幕一覧を見る',
+  description:
+    '字幕（SRT）を全件取得する。各エントリに checkLimits の警告（長すぎ・速すぎ）が付くので、'
+    + 'まずこれを呼んで直す所を見つけるのに使う。warnings が空なら問題なし。',
+  inputSchema: {},
+}, async () => asText(await call('get_subtitles')));
+
+server.registerTool('kiriko_set_subtitles', {
+  title: '字幕を入れる・更新する',
+  description:
+    '字幕（SRT）をまとめて入れる。**字幕は動画に焼き込まれない**。'
+    + 'SRT ファイルとして書き出して YouTube 等に添付するためのものなので、映像は変わらない。\n\n'
+    + '1 エントリに日本語（ja）と英語（en）を同居させる。**英訳だけを流し込みたい時は '
+    + 'id を指定して en だけ渡す**（ja / start / end は省略すれば保持される）。\n\n'
+    + '目安は日本語 16 文字 × 2 行・6 文字毎秒、英語 42 文字 × 2 行・17 文字毎秒'
+    + '（kiriko_get_subtitles の warnings で分かる）。**逐語訳である必要はなく、'
+    + '収まらなければ短く言い直すのが正しい。** 特に英語は日本語より文字数を食うので直訳しないこと。\n\n'
+    + 'mode は replace（総入れ替え）/ merge（既定、id があれば更新・無ければ新規追加）。'
+    + 'id 指定なのに見つからない分はエラーにせず skipped で返る。\n\n'
+    + 'kiriko_transcribe の結果（{start,end,text}）をそのまま入れる時は autoSplit: true '
+    + '（長い発話を読みやすい長さに自動分割する。新規追加にのみ効き、id 指定の更新には効かない）。\n\n'
+    + '字幕は 1 トラックで**重ならない**。重なった分は start 昇順に詰められ、'
+    + '詰めた結果 0.3 秒未満になったものは落ちる（dropped で件数が分かる）。',
+  inputSchema: {
+    subtitles: z.array(z.object({
+      id: z.string().optional().describe('既存エントリの更新なら指定する。省略すると新規追加'),
+      start: z.number().min(0).optional().describe('タイムライン上の開始秒'),
+      end: z.number().min(0).optional().describe('タイムライン上の終了秒'),
+      ja: z.string().optional(),
+      en: z.string().optional(),
+    })).describe('入れる字幕'),
+    mode: z.enum(['replace', 'merge']).optional().describe("既定 'merge'"),
+    autoSplit: z.boolean().optional().describe('true なら新規追加分を読みやすい長さに自動分割する'),
+  },
+}, async (a) => asText(await call('set_subtitles', a)));
+
 server.registerTool('kiriko_cut_range', {
   title: '範囲を切り取る',
   description:

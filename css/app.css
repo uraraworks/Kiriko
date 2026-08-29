@@ -159,6 +159,7 @@ a.tb { text-decoration: none; }
 }
 .form input[type=range] { width: 100%; }
 .form .row { display: flex; gap: 8px; align-items: center; }
+.srt-count { color: var(--dim); font-size: 11px; }
 kbd {
   background: #2f343e; border: 1px solid #454b58; border-bottom-width: 2px; border-radius: 3px;
   padding: 0 4px; font-size: 10px; margin-right: 2px; color: var(--text);
@@ -271,6 +272,8 @@ kbd {
 }
 .align-group button.on { background: var(--accent2); border-color: #3d80e6; color: #fff; }
 .sub-label { color: #6f7684; font-size: 10.5px; margin-top: 2px; }
+.sub-count { color: #6f7684; font-size: 10.5px; margin: -4px 0 6px; }
+.sub-count.warn { color: #ff8a80; }
 
 /* ---------- Phase 3: 音まわり / ぼかし ---------- */
 .tl-head.fx { color: #9fd0c0; }
@@ -477,6 +480,7 @@ kbd {
 .tl-head.fx { color: #9fd0c0; }
 .tl-head.image { color: #e0ab74; }
 .tl-head.telop { color: #d9c07a; }
+.tl-head.sub { color: #7fd4e0; }
 .tl-head.music { color: #b0a8d8; }
 .tl-head.audio { color: #86c9a4; }
 .tl-head.video { color: #9fb6e6; }

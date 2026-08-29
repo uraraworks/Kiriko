@@ -6,6 +6,7 @@
 
 import { BINS_PER_SEC } from './waveform.js';
 import { cutRangesFromKeep } from './edit.js';
+import * as SUB from './subtitles.js';
 
 /**
  * @param {object} ctx { S, P, T, commit, renderAll, status, waves, thumbs, seekProgram, tc }
@@ -34,6 +35,21 @@ export function createCommands(ctx) {
       t += dur;
     }
     return out;
+  };
+
+  /** 字幕 1 件の警告文を作る（長すぎ・速すぎ）。無ければ空配列 */
+  const subtitleWarnings = (sub) => {
+    const warnings = [];
+    for (const lang of ['ja', 'en']) {
+      const r = SUB.checkLimits(sub, lang);
+      const lim = SUB.LIMITS[lang];
+      if (r.long) warnings.push(`${lang}:1行が長すぎます（${r.maxLine}/${lim.chars}文字）`);
+      if (r.fast) {
+        const cps = Number.isFinite(r.cps) ? r.cps.toFixed(1) : '∞';
+        warnings.push(`${lang}:速すぎます（${cps}/${lim.cps} 文字毎秒）`);
+      }
+    }
+    return warnings;
   };
 
   /** 素材を名前でも id でも引けるようにする（MCP 側は名前しか知らないことがある） */
@@ -183,6 +199,89 @@ export function createCommands(ctx) {
       renderAll();
       status(`MCP: テロップを ${added.length} 件追加しました`);
       return { added: added.length, total: proj().telops.length };
+    },
+
+    /** 字幕を一覧する。各エントリに checkLimits から作った警告だけを添える */
+    async get_subtitles() {
+      const total = P.totalDuration(proj());
+      const list = proj().subtitles.slice().sort((a, b) => a.start - b.start);
+      let warned = 0;
+      const subtitles = list.map((s) => {
+        const warnings = subtitleWarnings(s);
+        if (warnings.length) warned++;
+        return {
+          id: s.id, start: +s.start.toFixed(3), end: +s.end.toFixed(3),
+          ja: s.ja ?? '', en: s.en ?? '', warnings,
+        };
+      });
+      return { subtitles, total: subtitles.length, warned, durationSec: +total.toFixed(3) };
+    },
+
+    /**
+     * 字幕を入れる。mode='replace' は総入れ替え、mode='merge'（既定）は
+     * id 指定なら既存のフィールドだけ更新（渡されなかったフィールドは保持）、
+     * id 無しなら新規追加。id が見つからない更新はエラーにせず skipped で数える。
+     *
+     * autoSplit は新規追加分だけに効く。fromSegments に通してから足すので、
+     * whisper の書き起こしをそのまま流し込める（英訳は付かないので落ちる）。
+     *
+     * 入れ終わったら start 昇順に並べ替え、重なりを詰め、
+     * 詰めた結果 0.3 秒未満になったものは落とす（normalizeOverlaps）。
+     * タイムライン全体の長さを超える分は clamp する。
+     */
+    async set_subtitles({ subtitles, mode = 'merge', autoSplit = false }) {
+      if (!Array.isArray(subtitles)) throw new Error('subtitles は配列で渡してください');
+      const total = P.totalDuration(proj());
+      commit(mode === 'replace' ? 'MCP: 字幕を置き換え' : 'MCP: 字幕を反映');
+
+      let list = mode === 'replace' ? [] : proj().subtitles.slice();
+      let updated = 0, skipped = 0;
+
+      const withId = subtitles.filter((s) => s.id !== undefined && s.id !== null);
+      const withoutId = subtitles.filter((s) => s.id === undefined || s.id === null);
+
+      for (const s of withId) {
+        const idx = list.findIndex((x) => x.id === s.id);
+        if (idx < 0) { skipped++; continue; }
+        const next = { ...list[idx] };
+        if (s.ja !== undefined) next.ja = String(s.ja);
+        if (s.en !== undefined) next.en = String(s.en);
+        if (s.start !== undefined) next.start = Number(s.start) || 0;
+        if (s.end !== undefined) next.end = Number(s.end) || 0;
+        list[idx] = next;
+        updated++;
+      }
+
+      let newEntries;
+      if (autoSplit) {
+        // {start,end,ja} で来るので、fromSegments が読む text に橋渡しする。
+        // 分割されると入力エントリとの 1:1 対応が崩れるため、en はここでは付けない。
+        const segs = withoutId.map((s) => ({
+          start: Number(s.start) || 0, end: Number(s.end) || 0, text: s.ja ?? '',
+        }));
+        newEntries = SUB.fromSegments(segs);
+      } else {
+        newEntries = withoutId.map((s) => SUB.createSubtitle(
+          Number(s.start) || 0, Number(s.end) || 0, String(s.ja ?? ''), String(s.en ?? ''),
+        ));
+      }
+      const added = newEntries.length;
+      list.push(...newEntries);
+
+      // タイムライン全体の長さを超える分は clamp する
+      list = list.map((s) => ({
+        ...s,
+        start: Math.max(0, Math.min(total, s.start)),
+        end: Math.max(0, Math.min(total, s.end)),
+      }));
+
+      const { subtitles: normalized, dropped } = SUB.normalizeOverlaps(list, 0.3);
+      proj().subtitles = normalized;
+      renderAll();
+
+      const warned = normalized.filter((s) => subtitleWarnings(s).length).length;
+      status(`MCP: 字幕を反映しました（追加 ${added} / 更新 ${updated} / 総数 ${normalized.length}）`);
+      return { added, updated, skipped, dropped, total: normalized.length, warned };
     },
 
     /**
