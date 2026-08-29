@@ -44,6 +44,95 @@ describe('ブラウザ結合', { skip }, () => {
     assert.equal(await ev(`document.getElementById('btnCloseWorkDir').disabled`), false);
   });
 
+  // 作業フォルダを開いて新規に始めたら、名前を付けなくてもフォルダ名が保存名になってほしい
+  // （毎回名前を聞かれると「保存で止まらない」という方針が崩れる）
+  test('新規プロジェクトの保存名は、作業フォルダの名前になる', async () => {
+    const r = await ev(`(async () => {
+      const before = bme.project.title;
+      await bme.saveProject();
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle('work', { create: true });
+      const names = [];
+      for await (const [n] of dir.entries()) names.push(n);
+      return { before, after: bme.project.title, file: bme.state.projectFile?.name, names };
+    })()`);
+    assert.equal(r.before, 'work', 'フォルダを開いた時点でタイトルがフォルダ名になっていない');
+    assert.equal(r.after, 'work');
+    assert.equal(r.file, 'work.kiriko');
+    assert.ok(r.names.includes('work.kiriko'), `work.kiriko が保存されていない: ${r.names.join(', ')}`);
+    assert.ok(!r.names.includes('無題プロジェクト.kiriko'), `別名で保存された: ${r.names.join(', ')}`);
+  });
+
+  // 同じ作業フォルダで新規プロジェクトを 2 つ始めると、同名で黙って上書きされてしまっていた。
+  // 開いているファイル以外への上書きは確認を挟み、キャンセルなら連番で逃がす。
+  test('保存先に同名の別ファイルがある時は確認し、キャンセルなら連番で保存する', async () => {
+    const r = await ev(`(async () => {
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle('work', { create: true });
+      // 先に「別の」dup2.kiriko を置いておく（今開いているファイルではない）
+      const fh = await dir.getFileHandle('dup2.kiriko', { create: true });
+      const w = await fh.createWritable();
+      await w.write(JSON.stringify({ other: true })); await w.close();
+
+      const asked = [];
+      const origConfirm = window.confirm;
+
+      // OK → そのまま上書き
+      window.confirm = (msg) => { asked.push(msg); return true; };
+      bme.state.projectFile = null;
+      bme.project.title = 'dup2';
+      await bme.saveProject();
+      const afterOk = { file: bme.state.projectFile?.name, asked: asked.length };
+
+      // キャンセル → 空いている連番（dup2-2.kiriko）
+      window.confirm = () => false;
+      bme.state.projectFile = null;
+      bme.project.title = 'dup2';
+      await bme.saveProject();
+      const afterCancel = { file: bme.state.projectFile?.name };
+
+      window.confirm = origConfirm;
+      const names = [];
+      for await (const [n] of dir.entries()) names.push(n);
+      return { afterOk, afterCancel, names };
+    })()`);
+    assert.ok(r.afterOk.asked > 0, '同名ファイルがあるのに確認していない');
+    assert.equal(r.afterOk.file, 'dup2.kiriko', '確認 OK で上書きされていない');
+    assert.equal(r.afterCancel.file, 'dup2-2.kiriko', 'キャンセルで連番になっていない');
+    assert.ok(r.names.includes('dup2.kiriko'));
+    assert.ok(r.names.includes('dup2-2.kiriko'));
+  });
+
+  test('名前を付けて保存：新しい名前に切り替わり、タイトルも付け直される', async () => {
+    const r = await ev(`(async () => {
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle('work', { create: true });
+      const fh = await dir.getFileHandle('renamed.kiriko', { create: true });
+      const origPicker = window.showSaveFilePicker;
+      let suggested = null;
+      const titleBefore = bme.project.title;
+      window.showSaveFilePicker = async (opt) => { suggested = opt?.suggestedName; return fh; };
+      await bme.saveProjectAs();
+      window.showSaveFilePicker = origPicker;
+      const saved = JSON.parse(await (await dir.getFileHandle('renamed.kiriko')).getFile().then((f) => f.text()));
+      return {
+        suggested,
+        titleBefore,
+        file: bme.state.projectFile?.name,
+        title: bme.project.title,
+        savedTitle: saved.title,
+      };
+    })()`);
+    assert.equal(r.file, 'renamed.kiriko', '保存先が切り替わっていない');
+    assert.equal(r.title, 'renamed', 'タイトルが新しいファイル名から付け直されていない');
+    // ファイルの中身の title も、書き出す前に新しい名前へ付け直されていること
+    // （そうでないと、A というプロジェクトを B.kiriko として保存した時、
+    //   ファイル名は B なのに中身の title は A のまま、という食い違いが起きる）
+    assert.equal(r.savedTitle, 'renamed', '保存したファイルの中身の title が付けた名前と一致していない');
+    assert.notEqual(r.savedTitle, r.titleBefore);
+    assert.ok(r.suggested, 'suggestedName を渡していない');
+  });
+
   test('「素材のフォルダを選ぶ」は保存先を変えない', async () => {
     // 素材を別フォルダにまとめている人の保存先を、黙って移してしまわないこと。
     // 作業フォルダがまだ無い時だけ、選んだフォルダをそのまま保存先にする

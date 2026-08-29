@@ -5197,8 +5197,18 @@ $('tlWrap').addEventListener('wheel', (e) => {
 
 // ---------------------------------------------------------------- プロジェクト保存 / 読込
 
+/** まだ名前が決まっていない印か（'無題プロジェクト' か、空） */
+const isUntitled = (title) => !title || title === '無題プロジェクト';
+
+/**
+ * タイトルが未定の時に採る既定名。
+ * 作業フォルダを開いていればその名前、無ければ従来通り「無題プロジェクト」。
+ * 「保存で止まらない」方針を壊さないよう、初回に名前を尋ねる代わりにこれを使う。
+ */
+const defaultProjectTitle = () => S.workDir?.name || '無題プロジェクト';
+
 async function saveProject() {
-  S.project.title = S.project.title || '無題プロジェクト';
+  if (isUntitled(S.project.title)) S.project.title = defaultProjectTitle();
   const text = P.serialize(S.project);
   const blob = () => new Blob([text], { type: 'application/json' });
   // 開いたファイルがあればその名前を使う（タイトルは中身の見出しなので、
@@ -5217,30 +5227,94 @@ async function saveProject() {
   }
   // ② 作業フォルダを開いていれば、そこへそのまま保存する（毎回選ばなくてよい）
   const dir = await FS.writableDir().catch(() => null);
-  if (dir && await FS.writeFile(dir, name, blob())) {
-    S.projectFile = { name, handle: await dir.getFileHandle(name).catch(() => null) };
-    status(`${dir.name} / ${name} に保存しました`);
-    return;
+  if (dir) {
+    let target = name;
+    // 同名が既にあり、それが今開いているファイルでなければ上書きしていいか尋ねる。
+    // 開いているファイルへの上書き保存はいつも通り黙って通す（毎回聞かれては使い物にならない）
+    if (target !== S.projectFile?.name && await FS.hasFile(dir, target)) {
+      const ok = confirm(`${target} は既にあります。上書きしますか？\n\nキャンセルすると、別の名前（${target.replace(/\.kiriko$/i, '-2.kiriko')}）で保存します`);
+      if (!ok) target = await FS.nextFreeName(target, (n) => FS.hasFile(dir, n));
+    }
+    if (await FS.writeFile(dir, target, blob())) {
+      S.projectFile = { name: target, handle: await dir.getFileHandle(target).catch(() => null) };
+      status(`${dir.name} / ${target} に保存しました`);
+      return;
+    }
   }
   if ('showSaveFilePicker' in window) {
+    const prevTitle3 = S.project.title;
     try {
       const h = await window.showSaveFilePicker({
         suggestedName: name,
         types: [{ description: 'Kiriko プロジェクト', accept: { 'application/json': ['.kiriko', '.json'] } }],
       });
+      // ファイル名が決まってからタイトルを付け直し、その状態で直列化し直す
+      // （中身の title がファイル名と食い違ったまま書き出されるのを防ぐ）
+      S.project.title = projectTitleOf(h.name);
+      const text3 = P.serialize(S.project);
       const w = await h.createWritable();
-      await w.write(text); await w.close();
+      await w.write(text3); await w.close();
       // 次からはここへ保存する
       S.projectFile = { name: h.name, handle: h };
-      if (S.project.title === '無題プロジェクト') S.project.title = projectTitleOf(h.name);
       status(`${h.name} に保存しました`);
       return;
-    } catch (e) { if (e.name === 'AbortError') return; }
+    } catch (e) {
+      S.project.title = prevTitle3;
+      if (e.name === 'AbortError') return;
+    }
   }
   const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
   const a = document.createElement('a'); a.href = url; a.download = name; a.click();
   URL.revokeObjectURL(url);
   status('プロジェクトを保存しました');
+}
+
+/**
+ * 名前を付けて保存。常に新しい名前を尋ね、以後の保存先をそこへ切り替える。
+ * `showSaveFilePicker` が使える環境では saveProject() の経路 ③ と同じ書き方に倣う。
+ */
+async function saveProjectAs() {
+  const currentName = S.projectFile?.name ?? `${(isUntitled(S.project.title) ? defaultProjectTitle() : S.project.title)}.kiriko`;
+
+  if ('showSaveFilePicker' in window) {
+    const prevTitle = S.project.title;
+    try {
+      const h = await window.showSaveFilePicker({
+        suggestedName: currentName,
+        types: [{ description: 'Kiriko プロジェクト', accept: { 'application/json': ['.kiriko', '.json'] } }],
+      });
+      // タイトルを決めてから直列化する（ファイル名と中身の title の食い違いを防ぐ）
+      S.project.title = projectTitleOf(h.name);
+      const text = P.serialize(S.project);
+      const w = await h.createWritable();
+      await w.write(text); await w.close();
+      S.projectFile = { name: h.name, handle: h };
+      renderAll();
+      status(`${h.name} に保存しました`);
+    } catch (e) {
+      S.project.title = prevTitle;
+      if (e.name !== 'AbortError') status(e.message, true);
+    }
+    return;
+  }
+
+  // 使えない環境では prompt() で名前を聞き、作業フォルダへ書く
+  const dir = await FS.writableDir().catch(() => null);
+  if (!dir) return status('保存先の作業フォルダがありません', true);
+  const base = prompt('名前を付けて保存', projectTitleOf(currentName));
+  if (base == null || !base.trim()) return;
+  const name = `${base.trim()}.kiriko`;
+  const prevTitle = S.project.title;
+  S.project.title = projectTitleOf(name);
+  const text = P.serialize(S.project);
+  if (await FS.writeFile(dir, name, new Blob([text], { type: 'application/json' }))) {
+    S.projectFile = { name, handle: await dir.getFileHandle(name).catch(() => null) };
+    renderAll();
+    status(`${dir.name} / ${name} に保存しました`);
+  } else {
+    S.project.title = prevTitle;
+    status('保存できませんでした', true);
+  }
 }
 
 // ---------------------------------------------------------------- 字幕（SRT）書き出し
@@ -5305,7 +5379,7 @@ async function loadProject(file, handle = null) {
     // 開いたファイル名を、保存先とタイトルの既定にする。
     // これが無いと、編集して保存した時に「無題プロジェクト.kiriko」になってしまう
     S.projectFile = { name: file.name, handle };
-    if (!p.title || p.title === '無題プロジェクト') p.title = projectTitleOf(file.name);
+    if (isUntitled(p.title)) p.title = projectTitleOf(file.name);
     // ファイルの実体はブラウザに保持できないので、名前で突き合わせる。
     // 保存されていた素材の一覧は捨てずに残す（どのファイルが要るか分かるように）。
     // 既に開いている素材があれば、そちらの id に寄せる。
@@ -5411,6 +5485,9 @@ async function useWorkFolder(dir) {
 
   const projs = await listProjectsIn(dir).catch(() => []);
   if (!projs.length) {
+    // 既存プロジェクトを開かない時だけ、タイトルの既定にフォルダ名を採る
+    // （既存プロジェクトを開いた時はそちらの名前が正しいので、絶対に上書きしない）
+    if (isUntitled(S.project.title)) S.project.title = defaultProjectTitle();
     status(`${dir.name} を作業フォルダにしました（プロジェクトはまだありません）`);
     await reloadMissingAssets(true);
     return;
@@ -5706,6 +5783,7 @@ function warnExporting(e) { e.preventDefault(); e.returnValue = ''; }
 // ---------------------------------------------------------------- イベント配線
 
 $('btnSaveProj').onclick = saveProject;
+$('btnSaveProjAs').onclick = saveProjectAs;
 $('btnUndo').onclick = doUndo;
 $('btnRedo').onclick = doRedo;
 $('btnWorkDir').onclick = openWorkFolder;
@@ -6110,7 +6188,7 @@ document.addEventListener('keydown', (e) => {
   // 作業フォルダを開くまでは編集操作を受け付けない（ヘルプだけ通す）
   if (document.body.classList.contains('no-workdir') && k !== '?' && k !== 'escape') return;
   if (e.ctrlKey || e.metaKey) {
-    if (k === 's') { e.preventDefault(); saveProject(); return; }
+    if (k === 's') { e.preventDefault(); e.shiftKey ? saveProjectAs() : saveProject(); return; }
     if (k === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
     if (k === 'y') { e.preventDefault(); doRedo(); return; }   // Windows 流
     if (k === 'c') { e.preventDefault(); copySelected(); return; }
@@ -6460,6 +6538,7 @@ window.bme = {
   addFiles,
   loadProject,     // 保存先を覚えるので、テストや自動化からも同じ経路を通せる
   saveProject,
+  saveProjectAs,
   addTelop,
   addSubtitle,
   addBlur,

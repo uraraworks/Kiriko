@@ -118,6 +118,7 @@ node scripts/gen-version.mjs
 | <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd> | 元に戻す |
 | <kbd>⇧⌘Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> | やり直す |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | プロジェクト保存 |
+| <kbd>⇧⌘S</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | 名前を付けて保存 |
 | <kbd>?</kbd> | ショートカット一覧 |
 
 タイムラインのホイール操作：

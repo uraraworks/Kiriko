@@ -197,6 +197,24 @@ export async function hasFile(dir, name) {
 }
 
 /**
+ * 同名のファイルが無い名前を探す（"foo.kiriko" → "foo-2.kiriko" → "foo-3.kiriko" …）。
+ * `exists(name)` を差し替えれば IndexedDB / File System Access API 無しでもテストできる。
+ * @param {string} name
+ * @param {(name: string) => boolean | Promise<boolean>} exists
+ * @returns {Promise<string>}
+ */
+export async function nextFreeName(name, exists) {
+  if (!(await exists(name))) return name;
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  for (let i = 2; ; i++) {
+    const cand = `${base}-${i}${ext}`;
+    if (!(await exists(cand))) return cand;
+  }
+}
+
+/**
  * フォルダにファイルを書く。書けたらハンドルも覚える。
  * @returns {Promise<boolean>} 書けたか
  */
