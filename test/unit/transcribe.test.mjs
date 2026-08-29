@@ -14,6 +14,14 @@ test('窓いっぱいの区間は幻聴として落とす', () => {
   assert.equal(hallucinationReason(seg(0, 29.7, '車椅子を切り替えます。')), 'window');
   // ふつうの長さなら残す
   assert.equal(hallucinationReason(seg(0, 12, 'ようやく一軒目が上がりました')), null);
+
+  // 区間が窓より短いのに 0〜30 秒が返るのは、窓の長さを書いているだけ。本物として通す
+  assert.equal(
+    hallucinationReason(seg(0, 30, 'はいみなさんこんにちは今日は10月2日木曜日です'), 22),
+    null,
+  );
+  // 区間が窓に届いていれば、これまで通り window で落とす
+  assert.equal(hallucinationReason(seg(0, 30, '交差点を右に曲がります'), 45), 'window');
 });
 
 test('学習データ由来の決まり文句を落とす', () => {

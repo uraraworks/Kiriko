@@ -84,13 +84,47 @@ function isRepetitive(text) {
   return false;
 }
 
-/** 幻聴らしければ、その理由を返す（本物なら null）*/
-function hallucinationReason(seg, windowSec = 30) {
-  if (seg.to - seg.from >= windowSec - 0.5) return 'window';
+/**
+ * 幻聴らしければ、その理由を返す（本物なら null）
+ *
+ * pieceSec は切り出した区間の長さ。whisper は区間が窓より短くても、
+ * タイムスタンプを窓いっぱい（0〜30 秒）で返してくることがある。
+ * 区間より長い to は「窓の長さをそのまま書いただけ」で、発話が無かった
+ * 証拠にはならない（実素材の 1:33 のセリフがこれで落ちていた）。
+ * 区間そのものが窓に届く時だけ 1 を見る。
+ *
+ * VAD を通した時は 1 を見ない。「窓いっぱい ＝ その窓に発話が無かった」は
+ * ノイズごと渡していたから成り立っていた話で、喋っている所だけを渡すなら
+ * 長いセグメントは単に長い発話でしかない。
+ */
+function hallucinationReason(seg, pieceSec = Infinity, { windowSec = 30, vad = false } = {}) {
+  if (!vad && pieceSec >= windowSec && seg.to - seg.from >= windowSec - 0.5) return 'window';
   const t = seg.text;
   if (HALLUCINATIONS.some((h) => t.includes(h))) return 'phrase';
   if (isRepetitive(t)) return 'repeat';
   return null;
+}
+
+/**
+ * silero の VAD モデル（置いてあれば）。
+ *
+ * 走行中はロードノイズが途切れないので、音量だけで切り出した区間には
+ * 「音はあるが誰も喋っていない」所が大量に混ざる。それをそのまま whisper に
+ * 渡すと、無い言葉を作ってしまう上に、タイムスタンプが窓いっぱい（0〜30 秒）に
+ * なってマーカーが粗くなる。VAD を通すと実際に喋っている所だけになる
+ * （実素材で 0.00-30.00 → 5.79-20.32）。
+ */
+let vadModelCache;
+function findVadModel() {
+  if (vadModelCache !== undefined) return vadModelCache;
+  try {
+    const hit = fs.readdirSync(MODEL_DIR)
+      .find((f) => f.includes('silero') && f.endsWith('.bin'));
+    vadModelCache = hit ? path.join(MODEL_DIR, hit) : null;
+  } catch {
+    vadModelCache = null;
+  }
+  return vadModelCache;
 }
 
 async function transcribeRange(file, srcFrom, srcTo, model, language, threads) {
@@ -109,6 +143,8 @@ async function transcribeRange(file, srcFrom, srcTo, model, language, threads) {
       // -mc 0: 直前の文脈を持ち越さない。持ち越すと、ノイズが続く所で
       // 同じ文を延々と吐き続けるループに落ちる（実素材で確認済み）
       '-mc', '0',
+      // 人の声がある所だけを見る（無ければ従来どおり全部を見る）
+      ...(findVadModel() ? ['--vad', '-vm', findVadModel()] : []),
       '-t', String(threads), wav,
     ], { maxBuffer: 1 << 26 });
 
@@ -138,6 +174,7 @@ async function transcribeRange(file, srcFrom, srcTo, model, language, threads) {
 async function transcribePieces(pieces, { model, language = 'ja', threads = 8, onProgress = () => {} } = {}) {
   const out = [];
   const dropped = [];
+  const vad = !!findVadModel();
   for (let i = 0; i < pieces.length; i++) {
     const p = pieces[i];
     onProgress(i + 1, pieces.length, p);
@@ -150,7 +187,7 @@ async function transcribePieces(pieces, { model, language = 'ja', threads = 8, o
     const len = p.srcTo - p.srcFrom;
     for (const s of segs) {
       // 何も言っていない所に作られた文は落とす（走行中はノイズが途切れないため出やすい）
-      const why = hallucinationReason(s);
+      const why = hallucinationReason(s, len, { vad });
       if (why) { dropped.push({ ...s, why }); continue; }
       // 切り出し区間の外にはみ出した分は丸める
       const from = Math.max(0, Math.min(len, s.from));
@@ -171,4 +208,4 @@ async function transcribePieces(pieces, { model, language = 'ja', threads = 8, o
   return out;
 }
 
-module.exports = { findModels, pickModel, transcribePieces, hallucinationReason, isRepetitive, MODEL_DIR };
+module.exports = { findModels, pickModel, findVadModel, transcribePieces, hallucinationReason, isRepetitive, MODEL_DIR };
