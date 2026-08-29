@@ -5245,6 +5245,7 @@ async function doExport() {
   $('btnCancel').onclick = () => ac.abort();
   $('exportDialog').classList.remove('hidden');
   $('ovLog').textContent = '';
+  status('書き出し中…');
   const t0 = performance.now();
 
   try {
@@ -5256,11 +5257,10 @@ async function doExport() {
       audioMix: audioMixer(),
       onProgress: (r, text) => {
         $('ovProg').style.width = `${Math.min(100, r * 100).toFixed(1)}%`;
-        $('progBar').style.width = `${Math.min(100, r * 100).toFixed(1)}%`;
         const el = performance.now() - t0;
         const eta = r > 0.01 ? (el / r - el) / 1000 : 0;
+        // 進み具合はダイアログにだけ出す。フッターはダイアログの陰になって読めない
         $('ovText').textContent = `${(r * 100).toFixed(1)}%  ${text}  残り約 ${tc(eta, false)}`;
-        status(`書き出し中… ${(r * 100).toFixed(1)}%（残り約 ${tc(eta, false)}）`);
       },
       onLog: (t) => { $('ovLog').textContent += t + '\n'; $('ovLog').scrollTop = 1e9; },
     });
@@ -5279,7 +5279,6 @@ async function doExport() {
     S.exporting = false;
     setExporting(false);
     $('exportDialog').classList.add('hidden');
-    $('progBar').style.width = '0';
   }
 }
 

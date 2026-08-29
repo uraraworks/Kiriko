@@ -211,9 +211,6 @@ kbd {
 
 /* ---------- ステータスバー ---------- */
 .statusbar { display: flex; align-items: center; gap: 10px; padding: 0 10px; background: #1a1d23; border-top: 1px solid #101216; }
-.progress { width: 160px; height: 6px; background: #2b3038; border-radius: 3px; overflow: hidden; }
-.progress > div { height: 100%; width: 0; background: var(--accent); transition: width .12s linear; }
-.progress.big { width: 100%; height: 10px; }
 .status { font-size: 11.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .status.err { color: #ff8a80; }
 
@@ -228,6 +225,8 @@ kbd {
   box-shadow: 0 24px 60px #0009;
 }
 .overlay-box h2 { margin: 0; font-size: 15px; }
+.progress { width: 100%; height: 10px; background: #2b3038; border-radius: 3px; overflow: hidden; }
+.progress > div { height: 100%; width: 0; background: var(--accent); transition: width .12s linear; }
 .ov-text { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .ov-log {
   margin: 0; background: #14171c; border: 1px solid var(--line); border-radius: 6px;
@@ -660,10 +659,6 @@ body.exporting .status { color: var(--accent); font-weight: 700; }
 .foot-links { display: flex; gap: 10px; flex: none; font-size: 11.5px; }
 .foot-links a { color: var(--dim); text-decoration: none; white-space: nowrap; }
 .foot-links a:hover { color: var(--accent); text-decoration: underline; }
-
-/* フッターのプログレスバーは書き出し中だけ出す（普段は使わないので場所を空ける） */
-.statusbar > .progress { display: none; }
-body.exporting .statusbar > .progress { display: block; }
 
 /* 説明が付いているタイムライン見出し */
 .panel-head > span[title] { cursor: help; border-bottom: 1px dotted #4a5160; }
