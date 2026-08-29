@@ -27,6 +27,10 @@ export function createProject() {
     // メモ用マーカー。duration > 0 なら「区間マーカー」＝ここは残す、という印になる。
     // AI に「セリフのある所に区間マーカーを立てて」と頼む使い方を想定している。
     markers: [],    // { id, time, duration, text, color }
+    // YouTube 用サムネイル（1 枚絵）。動画の中身には出ない。
+    // telops / images は上のものと同じ形なので、描画関数をそのまま共有できる。
+    // base: null | { kind:'frame', time } | { kind:'asset', assetId }
+    thumbnail: { base: null, telops: [], images: [] },
   };
 }
 
@@ -108,21 +112,26 @@ export function rescale(project, sx, sy) {
     if (typeof o.letterSpacing === 'number') o.letterSpacing *= s;
   };
 
-  for (const t of project.telops ?? []) {
-    box(t.box);
-    box(t.bgBox);
-    if (typeof t.textX === 'number') t.textX *= sx;
-    if (typeof t.textY === 'number') t.textY *= sy;
-    if (typeof t.rowGap === 'number') t.rowGap *= s;
-    if (t.icon) {
-      if (typeof t.icon.size === 'number') t.icon.size *= s;
-      if (typeof t.icon.gap === 'number') t.icon.gap *= s;
-      if (typeof t.icon.x === 'number') t.icon.x *= sx;
-      if (typeof t.icon.y === 'number') t.icon.y *= sy;
+  // テロップと画像は、タイムラインにもサムネイルにも同じ形で入っている
+  const overlays = (telops, images) => {
+    for (const t of telops ?? []) {
+      box(t.box);
+      box(t.bgBox);
+      if (typeof t.textX === 'number') t.textX *= sx;
+      if (typeof t.textY === 'number') t.textY *= sy;
+      if (typeof t.rowGap === 'number') t.rowGap *= s;
+      if (t.icon) {
+        if (typeof t.icon.size === 'number') t.icon.size *= s;
+        if (typeof t.icon.gap === 'number') t.icon.gap *= s;
+        if (typeof t.icon.x === 'number') t.icon.x *= sx;
+        if (typeof t.icon.y === 'number') t.icon.y *= sy;
+      }
+      for (const r of t.rows ?? []) styleSizes(r);
     }
-    for (const r of t.rows ?? []) styleSizes(r);
-  }
-  for (const im of project.images ?? []) box(im.box);
+    for (const im of images ?? []) box(im.box);
+  };
+  overlays(project.telops, project.images);
+  overlays(project.thumbnail?.telops, project.thumbnail?.images);
   for (const b of project.blurs ?? []) {
     box(b.rect);
     for (const k of b.keys ?? []) box(k);

@@ -250,6 +250,32 @@ async function main() {
     await sleep(500);
     await shot('08-export');
 
+    // 8b) サムネイル（動画の 1 コマを敷いて、テロップを載せる）
+    await run(`(() => {
+      const S = window.bme.state;
+      S.programTime = 6;
+      document.querySelector('.tab[data-mode=thumb]').click();
+      document.getElementById('thGrabFrame').click();
+    })()`);
+    await page.waitForFunction('!!window.bme.state.thumbBase', { timeout: 30000 });
+    await run(`(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 't', bubbles: true }));
+    })()`);
+    await sleep(600);
+    await run(`(() => {
+      const th = window.bme.project.thumbnail.telops[0];
+      th.rows[0].text = '95分を16分に';
+      document.getElementById('telopDialogClose').click();
+      // 枠を外して仕上がりのまま写す（プレビューの何も無い所を押した状態）
+      window.bme.state.selectedTelopId = null;
+      document.querySelector('.insptab[data-insp=props]').click();
+      window.bme.render();
+    })()`);
+    await sleep(700);
+    await shot('13-thumbnail');
+    await run(`document.querySelector('.tab[data-mode=program]').click()`);
+    await sleep(400);
+
     // 9) フォント選び（テロップ編集を開き直してから）
     await run(`(() => {
       window.bme.state.selectedTelopId = window.bme.project.telops[0].id;

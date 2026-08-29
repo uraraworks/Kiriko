@@ -80,6 +80,11 @@ const sample = () => ({
   blurs: [{ id: 'b1', strength: 40, rect: { x: 760, y: 400, w: 400, h: 280 },
             keys: [{ t: 1, x: 100, y: 100, w: 200, h: 100 }] }],
   telopPresets: [{ name: 'p', style: { size: 92, strokeWidth: 16, box: { x: 160, y: 820, w: 1600, h: 200 } } }],
+  thumbnail: {
+    base: { kind: 'frame', time: 12 },
+    telops: [{ id: 'tt1', box: { x: 160, y: 820, w: 1600, h: 200 }, rows: [{ size: 96, strokeWidth: 16 }] }],
+    images: [{ id: 'ti1', box: { x: 100, y: 200, w: 400, h: 300 } }],
+  },
 });
 
 test('rescale: FHD → 4K で位置も大きさも 2 倍になる', () => {
@@ -92,6 +97,21 @@ test('rescale: FHD → 4K で位置も大きさも 2 倍になる', () => {
   assert.equal(p.telops[0].rowGap, 20);
   assert.deepEqual(p.blurs[0].rect, { x: 1520, y: 800, w: 800, h: 560 });
   assert.deepEqual(p.blurs[0].keys[0], { t: 1, x: 200, y: 200, w: 400, h: 200 });
+});
+
+test('rescale: サムネイルの枠も付いてくる（座標は同じ出力画素で持っているため）', () => {
+  const p = P.rescale(sample(), 2, 2);
+  assert.deepEqual(p.thumbnail.telops[0].box, { x: 320, y: 1640, w: 3200, h: 400 });
+  assert.equal(p.thumbnail.telops[0].rows[0].size, 192);
+  assert.deepEqual(p.thumbnail.images[0].box, { x: 200, y: 400, w: 800, h: 600 });
+  // 元画像は「どこから取るか」なので触らない
+  assert.deepEqual(p.thumbnail.base, { kind: 'frame', time: 12 });
+});
+
+test('rescale: サムネイルが無い旧いプロジェクトでも落ちない', () => {
+  const s0 = sample();
+  delete s0.thumbnail;
+  assert.doesNotThrow(() => P.rescale(s0, 2, 2));
 });
 
 test('rescale: 文字の位置・背景画像・アイコンも付いてくる', () => {

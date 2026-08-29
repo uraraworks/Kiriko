@@ -17,6 +17,7 @@ import * as B from './boxes.js';
 import { dropIndex, rippleTime, insertTime, trimShift } from './edit.js';
 import * as TR from './trims.js';
 import { ImageLibrary, PLACEMENTS, placementBox, defaultPlacement, createImageClip, drawImageClip, drawnRect, srcRect } from './images.js';
+import * as TH from './thumbnail.js';
 
 // ---------------------------------------------------------------- 状態
 
@@ -34,7 +35,9 @@ const S = {
   markIn: null,
   markOut: null,
   selectedClipId: null,
-  mode: 'source',          // 'source' | 'program'
+  mode: 'source',          // 'source' | 'program' | 'thumb'（サムネ作り）
+  thumbBase: null,         // 敷いている元画像の ImageBitmap（プロジェクトには入れない）
+  thumbBaseKey: null,      // その元。base の中身が変わったら作り直す目印
   programTime: 0,          // プログラムモニターの再生位置（出力タイムライン秒）
   programIndex: -1,
   pxPerSec: 8,
@@ -109,10 +112,19 @@ function select(type, id) {
   S.selectedImageId = type === 'image' ? id : null;
   S.selectedMarkerId = type === 'marker' ? id : null;
 }
-const selectedTelop = () => S.project.telops.find((t) => t.id === S.selectedTelopId) || null;
+/**
+ * テロップ・画像の置き場所。サムネモードでは project.thumbnail 側を見る。
+ * 中身の形は同じなので、選択・編集・削除の仕組みがそのまま流用できる。
+ */
+const isThumb = () => S.mode === 'thumb';
+const thumb = () => S.project.thumbnail;
+const telopList = () => (isThumb() ? thumb().telops : S.project.telops);
+const imageList = () => (isThumb() ? thumb().images : S.project.images);
+
+const selectedTelop = () => telopList().find((t) => t.id === S.selectedTelopId) || null;
 const selectedBlur = () => S.project.blurs.find((b) => b.id === S.selectedBlurId) || null;
 const selectedAudio = () => S.project.audioClips.find((a) => a.id === S.selectedAudioId) || null;
-const selectedImage = () => S.project.images.find((i) => i.id === S.selectedImageId) || null;
+const selectedImage = () => imageList().find((i) => i.id === S.selectedImageId) || null;
 const selectedMarker = () => S.project.markers.find((m) => m.id === S.selectedMarkerId) || null;
 /** 書式の中の「大きさを持つ値」を引き伸ばす（枠と文字まわり） */
 function scaleStyle(style, sx, sy) {
@@ -164,10 +176,10 @@ const history = new History(
     }
     // 消えた要素を選択したままにしない
     if (!S.project.clips.some((c) => c.id === S.selectedClipId)) S.selectedClipId = null;
-    if (!S.project.telops.some((t) => t.id === S.selectedTelopId)) S.selectedTelopId = null;
+    if (!telopList().some((t) => t.id === S.selectedTelopId)) S.selectedTelopId = null;
     if (!S.project.blurs.some((b) => b.id === S.selectedBlurId)) S.selectedBlurId = null;
     if (!S.project.audioClips.some((a) => a.id === S.selectedAudioId)) S.selectedAudioId = null;
-    if (!S.project.images.some((i) => i.id === S.selectedImageId)) S.selectedImageId = null;
+    if (!imageList().some((i) => i.id === S.selectedImageId)) S.selectedImageId = null;
     if (!S.project.markers?.some((m) => m.id === S.selectedMarkerId)) S.selectedMarkerId = null;
     normalizeProject();
     S.programTime = Math.min(S.programTime, P.totalDuration(S.project));
@@ -215,7 +227,7 @@ function doRedo() {
 
 /** 重ね物（画像・テロップ）の z の範囲 */
 function zRange() {
-  const all = [...S.project.images, ...S.project.telops].map((x) => x.z ?? 0);
+  const all = [...imageList(), ...telopList()].map((x) => x.z ?? 0);
   return all.length ? [Math.min(...all), Math.max(...all)] : [0, 0];
 }
 const bringToFront = (item) => { item.z = zRange()[1] + 1; };
@@ -243,6 +255,11 @@ function normalizeProject() {
   p.audioAssets = p.audioAssets ?? [];
   p.mix = { se: 1, bgm: 1, ...(p.mix ?? {}) };
   p.trims = (p.trims ?? []).filter((t) => (t.segments ?? []).length);
+  // サムネイル（旧いプロジェクトには無い）
+  p.thumbnail = TH.normalize(p.thumbnail);
+  p.thumbnail.telops = p.thumbnail.telops.map(T.migrateTelop);
+  p.thumbnail.images.forEach((im, i) => { if (typeof im.z !== 'number') im.z = i; });
+  p.thumbnail.telops.forEach((tl, i) => { if (typeof tl.z !== 'number') tl.z = 1000 + i; });
   // 途中の行が空いたまま保存されたものも、ここで詰めておく
   compactTracks(p.telops);
   compactTracks(p.audioClips);
@@ -399,9 +416,20 @@ function setVideoSource(id) {
 }
 
 function setMode(mode) {
+  const was = S.mode;
   S.mode = mode;
   for (const t of document.querySelectorAll('.tab[data-mode]')) t.classList.toggle('active', t.dataset.mode === mode);
-  if (mode === 'program') {
+  // テロップ・画像の置き場所がモードで変わるので、跨いだ時は選択を落とす
+  // （タイムラインの id をサムネ側で選んだままにすると、見えないものが選択状態になる）
+  if ((was === 'thumb') !== (mode === 'thumb')) select(null, null);
+  document.querySelector('.monitor').classList.toggle('thumb-mode', mode === 'thumb');
+  $('thumbBar').classList.toggle('hidden', mode !== 'thumb');
+  if (mode === 'thumb') {
+    video.pause();
+    $('monName').textContent = 'サムネイル';
+    ensureThumbBase();
+    renderThumbBar();
+  } else if (mode === 'program') {
     seekProgram(S.programTime, true);
   } else {
     const src = curSource();
@@ -815,6 +843,12 @@ const compactTracks = P.compactTracks;
 const compactAudioTracks = () => compactTracks(S.project.audioClips);
 const compactTelopTracks = () => compactTracks(S.project.telops);
 
+/** 配列から id のものを抜く（差し替えないので、サムネ側の配列にも効く） */
+function removeFrom(list, id) {
+  const i = list.findIndex((x) => x.id === id);
+  if (i >= 0) list.splice(i, 1);
+}
+
 function deleteSelected() {
   // プログラムモニターで範囲が選ばれていれば「切り取って詰める」を優先する
   if (S.mode === 'program' && zoneRange()) { extractZone(); return; }
@@ -830,7 +864,7 @@ function deleteSelected() {
   }
   if (S.selectedImageId) {
     commit('画像を削除');
-    S.project.images = S.project.images.filter((i) => i.id !== S.selectedImageId);
+    removeFrom(imageList(), S.selectedImageId);
     S.selectedImageId = null; renderAll(); renderFxForm(true); return;
   }
   if (S.selectedAudioId) {
@@ -841,8 +875,8 @@ function deleteSelected() {
   }
   if (S.selectedTelopId) {
     commit('テロップを削除');
-    S.project.telops = S.project.telops.filter((t) => t.id !== S.selectedTelopId);
-    compactTelopTracks();
+    removeFrom(telopList(), S.selectedTelopId);
+    if (!isThumb()) compactTelopTracks();   // サムネにトラックは無い
     S.selectedTelopId = null;
     renderAll();
     return;
@@ -920,6 +954,7 @@ const KIND_NAME = { telop: 'テロップ', audio: '音源', image: '画像', blu
 function pasteClipboard() {
   const cb = S.clipboard;
   if (!cb?.items?.length) return status('コピーされていません', true);
+  if (isThumb()) return pasteIntoThumbnail(cb);
   const total = P.totalDuration(S.project);
   if (total <= 0) return status('先にクリップを作ってください', true);
 
@@ -971,11 +1006,35 @@ function pasteClipboard() {
     : `${cb.items.length} 件を ${tc(t0, false)} から貼り付けました`);
 }
 
+/**
+ * サムネへ貼り付ける。サムネに時刻は無いので、時間の情報だけ捨てて
+ * 枠・書式はそのまま持ってくる（タイムラインのテロップを流用する使い方を想定）。
+ */
+function pasteIntoThumbnail(cb) {
+  const items = cb.items.filter((x) => x.kind === 'telop' || x.kind === 'image');
+  if (!items.length) return status('サムネに貼り付けられるのはテロップと画像だけです', true);
+  commit(items.length === 1 ? `${KIND_NAME[items[0].kind]}をサムネに貼り付け` : 'まとめてサムネに貼り付け');
+
+  let last = null;
+  for (const { kind, data: src } of items) {
+    const item = { ...src, id: P.newId(kind === 'telop' ? 'tel' : 'img'), start: 0, end: 3 };
+    item.z = zRange()[1] + 1;
+    if (kind === 'telop') item.track = 0;
+    (kind === 'telop' ? thumb().telops : thumb().images).push(item);
+    last = [kind, item.id];
+  }
+  select(...last);
+  S.focusArea = 'preview';
+  renderAll(); renderTelopForm(true); renderFxForm(true);
+  status(`${items.length} 件をサムネに貼り付けました`);
+}
+
 // ---------------------------------------------------------------- テロップ
 
 /** いま編集中の「タイムライン時刻」。ソースモニターでも近い位置を返す */
 function currentTimelineTime() {
   if (S.mode === 'program') return S.programTime;
+  if (isThumb()) return S.programTime;   // サムネに時刻は無い。呼ばれても害の無い値を返す
   // ソースモニターの位置が採用区間に入っていれば、その出力時刻に読み替える
   let acc = 0;
   for (const c of S.project.clips) {
@@ -988,6 +1047,7 @@ function currentTimelineTime() {
 }
 
 function addTelop() {
+  if (isThumb()) return addThumbTelop();
   const total = P.totalDuration(S.project);
   if (total <= 0) return status('先にクリップを作ってください', true);
   const t0 = Math.min(currentTimelineTime(), Math.max(0, total - 0.5));
@@ -1241,6 +1301,7 @@ function placeAudio(assetId) {
 // ---------------------------------------------------------------- 画像
 
 async function addImageAssets(files) {
+  const added = [];
   for (const f of files) {
     try {
       const slot = S.project.imageAssets.find((x) => x.name === f.name && !S.imageLib.get(x.id));
@@ -1248,18 +1309,22 @@ async function addImageAssets(files) {
       const meta = await S.imageLib.add(f, id);
       if (slot) Object.assign(slot, meta);
       else S.project.imageAssets.push(meta);
+      added.push(slot ?? meta);
+      if (thumb().base?.assetId === id) S.thumbBaseKey = null;   // 元画像が届いたので作り直す
       status(`${f.name} を読み込みました（${meta.width}×${meta.height}）`);
     } catch {
       status(`${f.name}: 画像を読み込めませんでした`, true);
     }
   }
   renderAll();
+  return added;
 }
 
 /** 画像を再生位置に配置する */
 function placeImage(assetId, placement = null) {
   const asset = S.project.imageAssets.find((a) => a.id === assetId);
   if (!asset) return;
+  if (isThumb()) return placeThumbImage(asset, placement);
   const total = P.totalDuration(S.project);
   if (total <= 0) return status('先にクリップを作ってください', true);
   const W = S.project.output.width, H = S.project.output.height;
@@ -1275,6 +1340,208 @@ function placeImage(assetId, placement = null) {
   S.focusArea = 'preview';
   renderAll(); renderFxForm(true);
   status(`${asset.name} を ${PLACEMENTS.find((x) => x.id === place)?.name ?? place} に配置しました`);
+}
+
+
+// ---------------------------------------------------------------- サムネイル
+//
+// YouTube 用の 1 枚絵。編集の実体はテロップ・画像とまったく同じもので、
+// 置き場所が project.thumbnail に変わるだけ（telopList / imageList を参照）。
+// 座標系も出力解像度のままなので、タイムラインのテロップをコピーしてそのまま貼れる。
+
+/** サムネにテロップを足す。時刻は使わないが、貼り直した時に困らない値を入れておく */
+function addThumbTelop() {
+  commit('サムネにテロップを追加');
+  const style = S.telopStyle.box ? S.telopStyle : { ...S.telopStyle, box: toOutputScale({ box: T.DEFAULT_BOX }).box };
+  const tel = T.createTelop(0, 3, style, 'テロップ');
+  tel.track = 0;
+  tel.z = zRange()[1] + 1;
+  thumb().telops.push(tel);
+  select('telop', tel.id);
+  S.focusArea = 'preview';
+  renderAll();
+  openTelopEditor();
+  status('サムネにテロップを追加しました');
+}
+
+/** サムネに画像を置く */
+function placeThumbImage(asset, placement = null) {
+  const W = S.project.output.width, H = S.project.output.height;
+  const place = placement ?? defaultPlacement(asset, W, H);
+  commit(`サムネに ${asset.name} を配置`);
+  const im = createImageClip(asset.id, 0, 3, placementBox(place, asset, W, H));
+  im.z = zRange()[1] + 1;
+  thumb().images.push(im);
+  select('image', im.id);
+  S.focusArea = 'preview';
+  renderAll(); renderFxForm(true);
+  status(`サムネに ${asset.name} を配置しました`);
+}
+
+/** 元画像がまだ無い時の下敷き（何もしていない事が分かる程度に） */
+function drawThumbPlaceholder(ctx, w, h) {
+  ctx.fillStyle = '#1b1e24';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#4a515e';
+  ctx.font = `${Math.round(h / 24)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('元画像がありません（下のバーから選んでください）', w / 2, h / 2);
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
+}
+
+const baseKey = (b) => (b ? (b.kind === 'frame' ? `frame:${b.time.toFixed(3)}` : `asset:${b.assetId}`) : '');
+
+/**
+ * 元画像を用意する。プロジェクトには「どこから取るか」しか持たせていないので、
+ * 実際の絵はここで作って抱える（プロジェクトファイルを画像で膨らませないため）。
+ */
+async function ensureThumbBase() {
+  const b = thumb().base;
+  const key = baseKey(b);
+  if (key === S.thumbBaseKey) return;
+  S.thumbBaseKey = key;
+  S.thumbBase = null;
+  if (!b) { renderOverlay(); renderThumbBar(); return; }
+
+  try {
+    S.thumbBase = b.kind === 'asset' ? S.imageLib.get(b.assetId) ?? null : await rawFrameAt(b.time);
+    if (!S.thumbBase) status('元画像が見つかりません（素材を読み込み直してください）', true);
+  } catch (e) {
+    status(`元画像を取り込めませんでした: ${e.message}`, true);
+  }
+  renderOverlay();
+  renderThumbBar();
+}
+
+/**
+ * 出力タイムライン時刻の「素のフレーム」を取る。
+ * テロップもぼかしも乗せない（サムネの文字は、この上に改めて置くため）。
+ */
+async function rawFrameAt(time) {
+  const loc = locate(Math.max(0, Math.min(time, P.totalDuration(S.project))));
+  if (!loc) throw new Error('クリップがありません');
+  const src = S.sources.get(loc.clip.sourceId);
+  if (!src) throw new Error('素材が読み込まれていません');
+
+  const v = document.createElement('video');
+  v.muted = true; v.preload = 'auto'; v.src = src.previewUrl;
+  await new Promise((res, rej) => {
+    v.addEventListener('loadeddata', res, { once: true });
+    v.addEventListener('error', () => rej(new Error('素材を開けませんでした')), { once: true });
+  });
+  await new Promise((res, rej) => {
+    const to = setTimeout(() => rej(new Error('シークできませんでした')), 5000);
+    v.addEventListener('seeked', () => { clearTimeout(to); res(); }, { once: true });
+    v.currentTime = loc.localTime;
+  });
+  const bmp = await createImageBitmap(v);
+  v.src = '';
+  return bmp;
+}
+
+/** サムネ用バーの表示を更新する */
+function renderThumbBar() {
+  const b = thumb().base;
+  const el = $('thBaseName');
+  const asset = b?.kind === 'asset' ? S.project.imageAssets.find((a) => a.id === b.assetId) : null;
+  el.textContent = !b ? '未設定'
+    : b.kind === 'frame' ? `動画 ${tc(b.time, false)} の場面`
+    : (asset?.name ?? '（見つかりません）');
+  el.classList.toggle('unset', !b);
+  // どの位置から取り込むのかは、プログラムモニターの再生位置で決まる。
+  // サムネモードでは映像が見えないので、ここに出しておく
+  const has = P.totalDuration(S.project) > 0;
+  $('thGrabFrame').disabled = !has;
+  $('thGrabFrame').textContent = has ? `この場面から（${tc(S.programTime, false)}）` : 'この場面から';
+  $('thClearBase').disabled = !b;
+  $('thSave').disabled = !b && !thumb().telops.length && !thumb().images.length;
+  // アンドゥ・プロジェクト読み込み・MCP でも元画像は変わる。中身が同じなら空振りする
+  if (isThumb()) ensureThumbBase();
+}
+
+/** 書き出しの選択肢を作る（初回だけ） */
+function fillThumbOptions() {
+  $('thSize').innerHTML = TH.SIZES.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('');
+  $('thFormat').innerHTML = TH.FORMATS.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('');
+}
+
+/** 元画像を差し替える */
+function setThumbBase(base, label) {
+  commit('サムネの元画像を変更');
+  thumb().base = base;
+  ensureThumbBase();
+  renderThumbBar();
+  status(label);
+}
+
+/** 別に用意した画像を敷く */
+async function pickThumbBaseImage() {
+  let files = null;
+  if ('showOpenFilePicker' in window) {
+    try {
+      const handles = await window.showOpenFilePicker({
+        types: [{ description: '画像', accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.webp'] } }],
+      });
+      for (const h of handles) await FS.rememberFile(h.name, h);
+      files = await Promise.all(handles.map((h) => h.getFile()));
+    } catch (e) { if (e.name !== 'AbortError') status(e.message, true); return; }
+  } else {
+    files = await new Promise((res) => {
+      const inp = $('thumbBaseInput');
+      inp.onchange = () => { const f = [...inp.files]; inp.value = ''; res(f); };
+      inp.click();
+    });
+  }
+  if (!files?.length) return;
+  const added = await addImageAssets(files);
+  if (!added.length) return;
+  setThumbBase({ kind: 'asset', assetId: added[0].id }, `${added[0].name} を元画像にしました`);
+}
+
+/** サムネイルを画像として保存する */
+async function saveThumbnail() {
+  const th = thumb();
+  if (!S.thumbBase && !th.telops.length && !th.images.length) {
+    return status('サムネイルが空です', true);
+  }
+  const fmt = TH.FORMATS.find((f) => f.id === $('thFormat').value) ?? TH.FORMATS[0];
+  const [w, h] = $('thSize').value.split('x').map(Number);
+  const name = `${S.project.title || 'thumbnail'}-thumb.${fmt.ext}`;
+
+  let fileHandle = null;
+  if ('showSaveFilePicker' in window) {
+    try {
+      fileHandle = await window.showSaveFilePicker({
+        suggestedName: name,
+        types: [{ description: fmt.name, accept: { [fmt.id]: [`.${fmt.ext}`] } }],
+      });
+    } catch (e) { if (e.name === 'AbortError') return; throw e; }
+  }
+
+  try {
+    await T.ensureFontsLoaded(th.telops);   // 未ロードだと別書体で焼き込まれてしまう
+    const blob = await TH.renderBlob(th, S.imageLib, S.thumbBase, {
+      outW: S.project.output.width, outH: S.project.output.height,
+      width: w, height: h, type: fmt.id, quality: fmt.quality,
+    });
+    if (fileHandle) {
+      const ws = await fileHandle.createWritable();
+      await ws.write(blob); await ws.close();
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+      URL.revokeObjectURL(url);
+    }
+    const kb = Math.round(blob.size / 1024);
+    status(kb > 2048
+      ? `保存しました（${w}×${h} / ${kb} KB）— YouTube の上限 2MB を超えています。JPEG か小さい方をお試しください`
+      : `サムネイルを保存しました（${w}×${h} / ${kb} KB）`, kb > 2048);
+  } catch (e) {
+    console.error(e);
+    status(`サムネイルを保存できませんでした: ${e.message}`, true);
+  }
 }
 
 // ---------------------------------------------------------------- エフェクト一覧
@@ -1388,7 +1655,15 @@ function renderOverlay() {
   video.style.transform = '';
 
   const sel = activeBox();
-  if (S.mode === 'program') {
+  if (isThumb()) {
+    // 映像は隠してあるので、下敷きから重ね物まで全部このキャンバスに描く
+    if (S.thumbBase) TH.drawCover(ctx, S.thumbBase, W, H);
+    else drawThumbPlaceholder(ctx, W, H);
+    for (const o of TH.thumbOverlays(thumb())) {
+      if (o.kind === 'image') drawImageClip(ctx, o.item, S.imageLib);
+      else T.drawTelop(ctx, o.item, S.imageLib);
+    }
+  } else if (S.mode === 'program') {
     // 部分ぼかしは <video> の CSS filter では表現できないので、
     // その区間だけ映像をキャンバスに描き直して重ねる
     if (video.readyState >= 2) {
@@ -1426,7 +1701,9 @@ function pickBox(p, t) {
   const ctx = overlay.getContext('2d');
   const sel = activeBox();
   // 部分ぼかしは一番奥に置く（テロップ・画像が重なっていればそちらを優先して掴む）
-  const list = S.mode === 'program'
+  const list = isThumb()
+    ? TH.thumbOverlays(thumb())
+    : S.mode === 'program'
     ? [
         ...activeRectBlurs(S.project.blurs, t).map((b) => ({ kind: 'blur', item: blurBoxProxy(b, t) })),
         ...overlaysAt(S.project, t),
@@ -1445,6 +1722,10 @@ let boxDrag = null;
 
 /** いま画面に出ている、自分以外の枠（揃える相手） */
 function otherBoxes(self) {
+  if (isThumb()) {
+    return TH.thumbOverlays(thumb()).map((o) => o.item)
+      .filter((x) => x.id !== self.id && x.box).map((x) => x.box);
+  }
   const t = currentTimelineTime();
   const items = [
     ...activeRectBlurs(S.project.blurs, t).map((b) => blurBoxProxy(b, t)),
@@ -1541,7 +1822,22 @@ overlay.addEventListener('pointerdown', (e) => {
   }
 
   const hit = pickBox(p, t);
-  if (!hit) { renderTimeline(); return; }
+  if (!hit) {
+    // 何も無い所を押したら、プレビュー上の選択を解く（枠とハンドルが消えて仕上がりが見える）。
+    // タイムライン側の選択（クリップ・音源・マーカー）はそのまま残す。
+    // 枠だけ外したいのに、選んでいたクリップまで失うと困るため
+    if (sel) {
+      S.selectedTelopId = null;
+      S.selectedImageId = null;
+      S.selectedBlurId = null;
+      renderAll();
+      renderTelopForm(true);
+      renderFxForm(true);
+      return;
+    }
+    renderTimeline();
+    return;
+  }
   try { overlay.setPointerCapture(e.pointerId); } catch {}
   const changed = hit.item.id !== (sel?.item.id ?? null);
   select(hit.kind, hit.item.id);
@@ -2068,6 +2364,11 @@ function removeAsset(kind, id, name) {
     if (n) used.push(`画像 ${n} 個`);
     const t = P0.telops.filter((tl) => tl.bgAssetId === id || tl.icon?.assetId === id).length;
     if (t) used.push(`テロップ ${t} 個`);
+    const th = P0.thumbnail;
+    const tn = th.images.filter((im) => im.assetId === id).length
+      + th.telops.filter((tl) => tl.bgAssetId === id || tl.icon?.assetId === id).length
+      + (th.base?.assetId === id ? 1 : 0);
+    if (tn) used.push(`サムネ ${tn} 箇所`);
   }
   const msg = used.length
     ? `「${name}」はタイムラインで使われています（${used.join('・')}）。\n\n`
@@ -2093,10 +2394,12 @@ function removeAsset(kind, id, name) {
     compactAudioTracks();
   } else {
     P0.images = P0.images.filter((im) => im.assetId !== id);
-    for (const tl of P0.telops) {
+    P0.thumbnail.images = P0.thumbnail.images.filter((im) => im.assetId !== id);
+    for (const tl of [...P0.telops, ...P0.thumbnail.telops]) {
       if (tl.bgAssetId === id) tl.bgAssetId = null;
       if (tl.icon?.assetId === id) tl.icon.assetId = null;
     }
+    if (P0.thumbnail.base?.assetId === id) P0.thumbnail.base = null;
     P0.imageAssets = P0.imageAssets.filter((x) => x.id !== id);
   }
   select(null, null);
@@ -2627,10 +2930,10 @@ function renderTelopForm(force = false) {
       <button class="mini" id="telZFront" title="他の画像・テロップより手前に出す">最前面へ</button>
       <button class="mini" id="telZBack" title="他の画像・テロップより奥に送る">最背面へ</button>
     </div>
-    <div class="grid2">
+    ${isThumb() ? '' : `<div class="grid2">
       <label>開始（秒）<input class="num" type="number" id="telStart" step="0.1" value="${tel.start.toFixed(2)}"></label>
       <label>終了（秒）<input class="num" type="number" id="telEnd" step="0.1" value="${tel.end.toFixed(2)}"></label>
-    </div>
+    </div>`}
     <div class="grid2">
       <label>枠 X <input class="num" type="number" id="boxX" value="${Math.round(tel.box.x)}"></label>
       <label>枠 Y <input class="num" type="number" id="boxY" value="${Math.round(tel.box.y)}"></label>
@@ -3279,10 +3582,10 @@ function renderFxForm(force = false) {
       <label>不透明度 <span id="imOpLbl">${Math.round((im.opacity ?? 1) * 100)}%</span>
         <input type="range" id="imOp" min="0" max="100" value="${Math.round((im.opacity ?? 1) * 100)}"></label>
       <label class="chk"><input type="checkbox" id="imStretch" ${im.fit === 'stretch' ? 'checked' : ''}> 枠いっぱいに引き伸ばす（比率を無視）</label>
-      <div class="grid2">
+      ${isThumb() ? '' : `<div class="grid2">
         <label>開始（秒）<input class="num" type="number" id="imStart" step="0.1" value="${im.start.toFixed(2)}"></label>
         <label>終了（秒）<input class="num" type="number" id="imEnd" step="0.1" value="${im.end.toFixed(2)}"></label>
-      </div>
+      </div>`}
       <div class="grid2">
         <label>枠 X <input class="num" type="number" id="boxX" value="${Math.round(im.box.x)}"></label>
         <label>枠 Y <input class="num" type="number" id="boxY" value="${Math.round(im.box.y)}"></label>
@@ -3309,7 +3612,7 @@ function renderFxForm(force = false) {
           <label>範囲 高さ <input class="num" type="number" id="cropH" value="0"></label>
         </div>
       </div>`;
-    const b = (id, fn) => $(id).addEventListener('input', (e) => {
+    const b = (id, fn) => $(id)?.addEventListener('input', (e) => {
       commit('画像を編集', `imF:${im.id}:${id}`); fn(e.target.value); live();
     });
     b('imOp', (v) => { im.opacity = +v / 100; $('imOpLbl').textContent = `${v}%`; });
@@ -4821,6 +5124,7 @@ async function reloadMissingAssets(ask = false) {
       } else {
         const meta = await S.imageLib.add(file, a.id);
         Object.assign(S.project.imageAssets.find((x) => x.id === a.id) ?? {}, meta);
+        if (thumb().base?.assetId === a.id) S.thumbBaseKey = null;   // 元画像が戻ったので作り直す
       }
       loaded++;
     } catch (e) {
@@ -5240,6 +5544,16 @@ $('projInput').onchange = (e) => { if (e.target.files[0]) loadProject(e.target.f
 
 for (const t of document.querySelectorAll('.tab[data-mode]')) t.onclick = () => { setMode(t.dataset.mode); renderAll(); };
 
+// --- サムネイル ---
+fillThumbOptions();
+$('thGrabFrame').onclick = () => {
+  if (!P.totalDuration(S.project)) return status('先にクリップを作ってください', true);
+  setThumbBase({ kind: 'frame', time: S.programTime }, `${tc(S.programTime, false)} の場面を元画像にしました`);
+};
+$('thPickImage').onclick = () => pickThumbBaseImage().catch((e) => status(e.message, true));
+$('thClearBase').onclick = () => setThumbBase(null, '元画像を外しました');
+$('thSave').onclick = () => saveThumbnail();
+
 $('btnPlay').onclick = togglePlay;
 $('btnHome').onclick = () => { if (S.mode === 'program') seekProgram(0, true); else video.currentTime = 0; renderAll(); };
 $('btnEnd').onclick = () => {
@@ -5362,6 +5676,10 @@ document.addEventListener('keydown', (e) => {
     if (k === 'v') { e.preventDefault(); pasteClipboard(); return; }
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // サムネモードは映像を触らない。枠の操作とテロップ追加だけ通す
+  const THUMB_KEYS = ['t', '?', '/', 'escape', 'delete', 'backspace',
+    'arrowleft', 'arrowright', 'arrowup', 'arrowdown'];
+  if (isThumb() && !THUMB_KEYS.includes(k)) return;
   switch (k) {
     case ' ': e.preventDefault(); togglePlay(); break;
     case 'i':
@@ -5405,6 +5723,7 @@ document.addEventListener('keydown', (e) => {
         else nudgeBox(0, d);
         break;
       }
+      if (isThumb()) break;
       if (k === 'arrowleft') step(e.shiftKey ? -1 : -1 / fps());
       else if (k === 'arrowright') step(e.shiftKey ? 1 : 1 / fps());
       break;
@@ -5438,6 +5757,7 @@ function renderAll() {
   renderTransport();
   renderScrub();
   renderZoneInfo();
+  renderThumbBar();
   renderTimeline();
   renderOverlay();
 }

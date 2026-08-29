@@ -440,6 +440,23 @@ kbd {
 .mini.accent:hover { background: #3a7fe0; }
 .transport .inout { margin-left: auto; }
 
+/* ---------- サムネモードのバー ---------- */
+.thumb-bar .spacer { flex: 1; }
+.thumb-bar .thumb-label { color: var(--dim); font-size: 11.5px; }
+.thumb-bar .thumb-base {
+  color: var(--dim); font-size: 11.5px; max-width: 220px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.thumb-bar .thumb-base.unset { font-style: italic; opacity: .7; }
+.thumb-bar select {
+  background: #30353f; border: 1px solid #3c424e; color: var(--text);
+  border-radius: 4px; height: 26px; font-size: 11.5px; max-width: 190px;
+}
+/* サムネ編集中は映像を出さない（下敷きは overlay に描く） */
+.monitor.thumb-mode #video { visibility: hidden; }
+.monitor.thumb-mode .scrub, .monitor.thumb-mode .transport:not(.thumb-bar) { display: none; }
+.monitor.thumb-mode .no-media { display: none !important; }
+
 /* ---------- テロップの行タブ ---------- */
 .row-tabs { display: flex; gap: 3px; flex-wrap: wrap; margin-bottom: 2px; }
 .row-tab {

@@ -238,6 +238,7 @@
       <div class="panel-head tabs">
         <button class="tab active" data-mode="source">ソース</button>
         <button class="tab" data-mode="program">プログラム</button>
+        <button class="tab" data-mode="thumb" title="YouTube 用のサムネイルを作る">サムネ</button>
         <span class="mon-name" id="monName">—</span>
       </div>
       <div class="video-wrap" id="videoWrap">
@@ -265,6 +266,19 @@
         <span class="rate" id="rateLabel">×1</span>
         <span class="inout">IN <b id="lblIn">--:--</b> / OUT <b id="lblOut">--:--</b> / <b id="lblLen">--:--</b></span>
         <button id="btnAddClip" class="mini accent" title="ソースモニターの IN〜OUT を、タイムラインの末尾にクリップとして足す　［ Enter ］"><svg class="ic"><use href="#i-plus"/></svg><span>区間を追加</span></button>
+      </div>
+
+      <!-- サムネモードのときだけ出るバー（再生系の代わり） -->
+      <div class="transport thumb-bar hidden" id="thumbBar">
+        <span class="thumb-label">元画像</span>
+        <button id="thGrabFrame" class="mini" title="プログラムモニターに映っている位置のフレームを、素のまま取り込む">この場面から</button>
+        <button id="thPickImage" class="mini" title="別に用意した画像を読み込んで敷く">画像を選ぶ…</button>
+        <button id="thClearBase" class="mini" title="元画像を外す">外す</button>
+        <span class="thumb-base" id="thBaseName">未設定</span>
+        <span class="spacer"></span>
+        <select id="thSize" title="書き出す大きさ。YouTube の推奨は 1280×720（上限 2MB）"></select>
+        <select id="thFormat" title="JPEG は軽く写真向き。PNG は文字がくっきりする代わりに重い"></select>
+        <button id="thSave" class="mini accent" title="サムネイルを画像として保存する"><svg class="ic"><use href="#i-plus"/></svg><span>画像で保存</span></button>
       </div>
     </section>
 
@@ -540,6 +554,7 @@
 <input type="file" id="fontInput" accept=".ttf,.otf,.woff,.woff2,.ttc" multiple hidden>
 <input type="file" id="audioInput" accept="audio/*,.mp3,.wav,.m4a,.ogg" multiple hidden>
 <input type="file" id="imageInput" accept="image/*,.png,.jpg,.jpeg,.webp" multiple hidden>
+<input type="file" id="thumbBaseInput" accept="image/*,.png,.jpg,.jpeg,.webp" hidden>
 <input type="file" id="libInput" accept=".kirikolib,application/json,.json" hidden>
 <script type="module" src="js/main.js"></script>
 </body>
