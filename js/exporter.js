@@ -59,6 +59,21 @@ async function pickAvcCodec(width, height, fps, cfg) {
 }
 
 /**
+ * 仕上げ（エンコーダの吐き出し・mux・ファイルへの書き込み）の取り分。
+ *
+ * ここを空けておかないと、映像を焼き終えた時点でゲージが 100% に届いてしまい、
+ * 「仕上げ中…」に移った瞬間に**戻って見える**。
+ * 進み具合の刻みは素材の 0.5 秒ごとなので、長い素材ほど 100% に近づいて目立つ。
+ */
+export const ENCODE_SHARE = 0.99;
+
+/** 映像を焼いている間の進み具合。仕上げの取り分より先には行かない */
+export function encodeRatio(done, total) {
+  if (!(total > 0)) return 0;
+  return Math.min(1, Math.max(0, done / total)) * ENCODE_SHARE;
+}
+
+/**
  * @param {object} project
  * @param {Map<string, Mp4Source>} sourceMap
  * @param {object} opts { onProgress, onLog, signal, composeFrame(ctx,frame,t,w,h), audioMix(planar,n,absStart,ch,rate) }
@@ -165,7 +180,7 @@ export async function exportProject(project, sourceMap, opts = {}) {
         ctx, canvas, videoEncoder, fps, width, height, state, signal, composeFrame,
         onProgress: (secDone) => {
           const done = state.timelineBase + secDone;
-          onProgress(done / totalOut, `映像 ${fmt(done)} / ${fmt(totalOut)}`);
+          onProgress(encodeRatio(done, totalOut), `映像 ${fmt(done)} / ${fmt(totalOut)}`);
         },
       });
 
@@ -177,7 +192,7 @@ export async function exportProject(project, sourceMap, opts = {}) {
       if (encError) throw encError;
     }
 
-    onProgress(0.99, 'flush 中…');
+    onProgress(ENCODE_SHARE, '仕上げ中…');
     await videoEncoder.flush();
     if (audioEncoder) await audioEncoder.flush();
     muxer.finalize();

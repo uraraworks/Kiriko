@@ -1044,11 +1044,20 @@ describe('ブラウザ結合', { skip }, () => {
       const fh = await root.getFileHandle('out.mp4', { create: true });
       window.showSaveFilePicker = async () => fh;      // 保存先だけ差し替える
       document.getElementById('optRes').value = '1280x720';
+      // ゲージが戻らないか見張る。取りこぼすと意味が無いので、
+      // 決まった間隔で覗くのではなく、書き換わるたびに拾う
+      const seen = [];
+      const mo = new MutationObserver(() => {
+        const w = parseFloat(document.getElementById('ovProg').style.width) || 0;
+        if (seen[seen.length - 1] !== w) seen.push(w);
+      });
+      mo.observe(document.getElementById('ovProg'), { attributes: true, attributeFilter: ['style'] });
       document.getElementById('btnExport').click();
       for (let i = 0; i < 200; i++) {
         await new Promise((r) => setTimeout(r, 250));
         if (!bme.state.exporting) break;
       }
+      mo.disconnect();
       const f = await (await root.getFileHandle('out.mp4')).getFile();
       // 先頭のボックスを順に読む
       const head = new DataView(await f.slice(0, Math.min(f.size, 4 * 1024 * 1024)).arrayBuffer());
@@ -1074,10 +1083,14 @@ describe('ブラウザ結合', { skip }, () => {
         setTimeout(() => res(null), 8000);
       });
       URL.revokeObjectURL(v.src);
-      return { size: f.size, boxes, meta, status: document.getElementById('status').textContent };
+      return { size: f.size, boxes, meta, seen, status: document.getElementById('status').textContent };
     })()`, { timeout: 180000 });
 
     assert.ok(r.size > 10000, `出力が小さすぎる: ${r.size}`);
+    // 進み具合は増える一方（仕上げの取り分を空けていないと、ここで戻る）
+    for (let i = 1; i < r.seen.length; i++) {
+      assert.ok(r.seen[i] >= r.seen[i - 1], `進み具合が戻った: ${r.seen.join(' → ')}`);
+    }
     assert.equal(r.boxes[0], 'ftyp');
     assert.equal(r.boxes[1], 'moov', `moov が先頭に無い: ${r.boxes.join(' → ')}`);
     assert.ok(r.boxes.includes('mdat'));

@@ -1,7 +1,7 @@
 // 書き出し設定の計算。ここを間違えると「4K を選ぶと必ず失敗する」ような形で出る。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { avcCodecCandidates } from '../../js/exporter.js';
+import { avcCodecCandidates, encodeRatio, ENCODE_SHARE } from '../../js/exporter.js';
 
 const first = (w, h, f) => avcCodecCandidates(w, h, f)[0];
 
@@ -36,4 +36,32 @@ test('規格を超える大きさでも空にはならない', () => {
   const c = avcCodecCandidates(7680, 4320, 60);
   assert.equal(c.length, 1);
   assert.equal(c[0], 'avc1.640034', '最上位に任せる');
+});
+
+// --- 進み具合 ---
+//
+// 映像を焼き終えた時点で 100% に届いてしまい、「仕上げ中…」に移った瞬間に
+// ゲージが 99% へ戻って見えた（長い素材ほど目立つ）。
+
+test('映像の進み具合は、仕上げの取り分より先には行かない', () => {
+  assert.equal(encodeRatio(5700, 5700), ENCODE_SHARE);
+  // 最後の刻みが端数で行き過ぎても、はみ出さない
+  assert.equal(encodeRatio(5701, 5700), ENCODE_SHARE);
+  assert.ok(encodeRatio(5699.9, 5700) < ENCODE_SHARE);
+});
+
+test('進み具合は増える一方', () => {
+  let prev = -1;
+  for (let done = 0; done <= 5700; done += 57) {
+    const r = encodeRatio(done, 5700);
+    assert.ok(r >= prev, `戻った: ${prev} → ${r}`);
+    prev = r;
+  }
+  // 仕上げに移っても戻らない
+  assert.ok(ENCODE_SHARE >= prev);
+});
+
+test('尺が 0 でも 0 除算にならない', () => {
+  assert.equal(encodeRatio(0, 0), 0);
+  assert.equal(encodeRatio(5, 0), 0);
 });
