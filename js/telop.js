@@ -52,8 +52,13 @@ export const SYSTEM_FONTS = [
 
 /** 行 1 本を作る */
 export function createRow(text = 'テロップ', style = {}) {
-  const { box, vAlign, wrap, ...rowStyle } = { ...DEFAULT_STYLE, ...style };
-  return { id: `row_${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`, text, ...rowStyle };
+  // joinPrev（前の行に続けるか）は書式ではなく行の並べ方の指定なので、
+  // 元にした行（+ 行を追加、で渡ってくる）から引き継がず常に false で始める
+  const { box, vAlign, wrap, joinPrev, ...rowStyle } = { ...DEFAULT_STYLE, ...style };
+  return {
+    id: `row_${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`,
+    text, joinPrev: false, ...rowStyle,
+  };
 }
 
 /**
@@ -114,7 +119,7 @@ export function migrateTelop(t) {
       rows: [createRow(text ?? '', style)],
     };
   }
-  out.rows = out.rows.map((r) => ({ ...DEFAULT_STYLE, ...r }));
+  out.rows = out.rows.map((r) => ({ ...DEFAULT_STYLE, joinPrev: false, ...r }));
   out.icon = { assetId: null, side: 'left', size: 120, gap: 20, valign: 'middle', trim: true,
     free: false, x: 0, y: 0, ...(out.icon ?? {}) };
   out.bgFillOn = out.bgFillOn ?? false;
@@ -260,23 +265,74 @@ export function layoutTelop(ctx, t, imageLib = null) {
     tb.w = Math.max(40, tb.w); tb.h = Math.max(20, tb.h);
   }
 
-  const rows = (t.rows ?? []).map((row) => {
-    const lines = wrapRow(ctx, row, tb.w, t.wrap);
-    const lh = row.size * (row.lineHeight ?? 1.18);
-    return { row, lines, lh, height: (lines.length - 1) * lh + row.size };
+  // 行を「連結行」（横に並ぶひとまとまり）単位でグループ化する。
+  // 配列の先頭（index 0）は joinPrev が true でも常に連結行の先頭として扱う
+  // （行を消した後に「前の行」が居なくなって壊れるのを防ぐため）
+  const inRows = t.rows ?? [];
+  const groups = [];
+  inRows.forEach((row, i) => {
+    if (i > 0 && row.joinPrev) groups[groups.length - 1].push(row);
+    else groups.push([row]);
   });
+
   const gap = t.rowGap ?? 0;
-  const totalH = rows.reduce((a, r) => a + r.height, 0) + gap * Math.max(0, rows.length - 1);
+  let bandSeq = 0;
+  const bands = groups.map((group) => {
+    if (group.length === 1) {
+      const row = group[0];
+      const lines = wrapRow(ctx, row, tb.w, t.wrap);
+      const lh = row.size * (row.lineHeight ?? 1.18);
+      return { joined: false, height: (lines.length - 1) * lh + row.size, parts: [{ row, lines, lh }] };
+    }
+    // 連結行は折り返さない（横並びと両立しないため）。
+    // パーツのテキスト中の改行は「2 段目からどう並べるか」が曖昧になるので、
+    // 単純に空白 1 つへ詰めて 1 行として扱う
+    const headLh = group[0].size * (group[0].lineHeight ?? 1.18);
+    let parts;
+    ctx.save();
+    try {
+      parts = group.map((row) => {
+        applyFont(ctx, row);
+        const text = String(row.text ?? '').replace(/\n/g, ' ');
+        const w = inkWidth(ctx, row, text);
+        return { row, lines: [text], lh: headLh, w };
+      });
+    } finally { ctx.restore(); }
+    // 連結行の高さはパーツの size の最大値
+    const height = Math.max(...parts.map((p) => p.row.size));
+    return { joined: true, height, hAlign: group[0].hAlign, parts, seq: bandSeq++ };
+  });
+
+  const totalH = bands.reduce((a, band) => a + band.height, 0) + gap * Math.max(0, bands.length - 1);
 
   const top = t.vAlign === 'top' ? tb.y
     : t.vAlign === 'bottom' ? tb.y + tb.h - totalH
     : tb.y + (tb.h - totalH) / 2;
 
+  const rows = [];
   let y = top;
-  for (const r of rows) {
-    r.firstY = y + r.row.size / 2;
-    r.x = r.row.hAlign === 'left' ? tb.x : r.row.hAlign === 'right' ? tb.x + tb.w : tb.x + tb.w / 2;
-    y += r.height + gap;
+  for (const band of bands) {
+    if (!band.joined) {
+      const p = band.parts[0];
+      const firstY = y + p.row.size / 2;
+      const x = p.row.hAlign === 'left' ? tb.x : p.row.hAlign === 'right' ? tb.x + tb.w : tb.x + tb.w / 2;
+      rows.push({ row: p.row, lines: p.lines, lh: p.lh, firstY, x });
+    } else {
+      // 横の寄せは連結行の先頭パーツの hAlign を、連結行全体に対して使う
+      // （2 番目以降のパーツの hAlign は無視する）
+      const bandW = band.parts.reduce((a, p) => a + p.w, 0);
+      const align = band.hAlign || 'center';
+      const left = align === 'left' ? tb.x : align === 'right' ? tb.x + tb.w - bandW : tb.x + (tb.w - bandW) / 2;
+      // 縦は中心そろえ（textBaseline: 'middle' と揃える）。
+      // 帯の中で全パーツに共通の firstY を使うことで、大きさが違っても中心が合う
+      const firstY = y + band.height / 2;
+      let px = left;
+      for (const p of band.parts) {
+        rows.push({ row: p.row, lines: p.lines, lh: p.lh, firstY, x: px, joined: true, band: band.seq });
+        px += p.w;
+      }
+    }
+    y += band.height + gap;
   }
 
   // アイコンは文字のかたまりに揃える（左右に置いた時に浮かないように）
@@ -304,8 +360,12 @@ export function layoutTelop(ctx, t, imageLib = null) {
 /**
  * 1 行ぶんの左端。
  * drawRowLine に渡ってくる x は寄せの補正が済んでいるので、そのぶんを戻す。
+ *
+ * 連結行のパーツは hAlign が当てにならない（連結行全体の寄せは先頭パーツのものを
+ * 使うため）ので、その時は呼び出し側が左端を直接渡す（left 引数）。
  */
-function lineLeft(row, x, w) {
+function lineLeft(row, x, w, left) {
+  if (left != null) return left;
   const sp = spacingOf(row);
   const align = row.hAlign || 'center';
   return align === 'left' ? x : align === 'right' ? x - sp - w : x - sp / 2 - w / 2;
@@ -319,15 +379,15 @@ function lineLeft(row, x, w) {
  *  - 横 … その行の文字が実際に占める左端から右端
  * 行ごとに掛け直すので、行が増えても 1 行ずつ同じ見た目になる。
  */
-function fillStyleFor(ctx, row, text, x, y) {
+function fillStyleFor(ctx, row, text, x, y, left) {
   if (row.fillMode !== 'gradient') return row.fill;
   const c2 = row.fill2 ?? row.fill;
   let g;
   if ((row.fillDir ?? 'v') === 'h') {
     const w = inkWidth(ctx, row, text);
     if (w <= 0) return row.fill;
-    const left = lineLeft(row, x, w);
-    g = ctx.createLinearGradient(left, y, left + w, y);
+    const l = lineLeft(row, x, w, left);
+    g = ctx.createLinearGradient(l, y, l + w, y);
   } else {
     g = ctx.createLinearGradient(x, y - row.size / 2, x, y + row.size / 2);
   }
@@ -336,42 +396,85 @@ function fillStyleFor(ctx, row, text, x, y) {
   return g;
 }
 
-function drawRowLine(ctx, row, text, x, y) {
+/**
+ * 1 行ぶんを描く。
+ *
+ * pass を省略すると、外フチ→内縁→塗りを続けて描く今まで通りの経路になる
+ * （単独行はこの経路を通す。見た目を 1 ピクセルも変えないため既存のコードのまま）。
+ * 連結行は 1 パーツずつこの経路を通すと、後のパーツの白い外フチが前のパーツの
+ * 塗りを削ってしまうので、呼び出し側が pass を指定して「全パーツの外フチ→
+ * 全パーツの内縁→全パーツの塗り」の 3 パスに分けて呼ぶ。
+ *
+ * left は連結行のパーツ用。textAlign: 'left' で描くため x がそのまま左端になり、
+ * グラデーションや下線の範囲もそこから直接わかる。
+ */
+function drawRowLine(ctx, row, text, x, y, pass, left) {
   if (!text) return;
   const w = row.strokeWidth || 0;
-  if (row.shadow > 0) {
-    ctx.shadowColor = `rgba(0,0,0,${row.shadow})`;
-    ctx.shadowBlur = row.size * 0.14;
-    ctx.shadowOffsetY = row.size * 0.05;
+  const outerOn = w > 0 && (row.outerScale ?? 0) > 0;
+  const innerOn = w > 0 && row.strokeOn !== false;
+
+  if (pass == null) {
+    if (row.shadow > 0) {
+      ctx.shadowColor = `rgba(0,0,0,${row.shadow})`;
+      ctx.shadowBlur = row.size * 0.14;
+      ctx.shadowOffsetY = row.size * 0.05;
+    }
+    // 外→内→塗り の順で重ねると YouTube 風の二重縁になる
+    if (outerOn) {
+      ctx.strokeStyle = row.outerStroke;
+      ctx.lineWidth = w * row.outerScale;
+      ctx.strokeText(text, x, y);
+    }
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    if (innerOn) {
+      ctx.strokeStyle = row.stroke;
+      ctx.lineWidth = w;
+      ctx.strokeText(text, x, y);
+    }
+    const fill = fillStyleFor(ctx, row, text, x, y, left);
+    ctx.fillStyle = fill;
+    ctx.fillText(text, x, y);
+    drawDecoration(ctx, row, text, x, y, fill, left);
+    return;
   }
-  // 外→内→塗り の順で重ねると YouTube 風の二重縁になる
-  if (w > 0 && (row.outerScale ?? 0) > 0) {
-    ctx.strokeStyle = row.outerStroke;
-    ctx.lineWidth = w * row.outerScale;
-    ctx.strokeText(text, x, y);
+
+  // 連結行のパス指定描画。影は「そのパーツが最初に絵を置くパス」で出す
+  // （外フチがあれば外フチと一緒に、無ければ内縁、それも無ければ塗りと一緒に）
+  const shadowPass = outerOn ? 'outer' : innerOn ? 'inner' : 'fill';
+  const withShadow = (draw) => {
+    if (row.shadow > 0 && pass === shadowPass) {
+      ctx.shadowColor = `rgba(0,0,0,${row.shadow})`;
+      ctx.shadowBlur = row.size * 0.14;
+      ctx.shadowOffsetY = row.size * 0.05;
+    }
+    draw();
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  };
+  if (pass === 'outer' && outerOn) {
+    withShadow(() => { ctx.strokeStyle = row.outerStroke; ctx.lineWidth = w * row.outerScale; ctx.strokeText(text, x, y); });
+  } else if (pass === 'inner' && innerOn) {
+    withShadow(() => { ctx.strokeStyle = row.stroke; ctx.lineWidth = w; ctx.strokeText(text, x, y); });
+  } else if (pass === 'fill') {
+    withShadow(() => {
+      const fill = fillStyleFor(ctx, row, text, x, y, left);
+      ctx.fillStyle = fill;
+      ctx.fillText(text, x, y);
+      drawDecoration(ctx, row, text, x, y, fill, left);
+    });
   }
-  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-  if (w > 0 && row.strokeOn !== false) {
-    ctx.strokeStyle = row.stroke;
-    ctx.lineWidth = w;
-    ctx.strokeText(text, x, y);
-  }
-  const fill = fillStyleFor(ctx, row, text, x, y);
-  ctx.fillStyle = fill;
-  ctx.fillText(text, x, y);
-  drawDecoration(ctx, row, text, x, y, fill);
 }
 
 /**
  * 下線と取り消し線。canvas には無いので自分で引く。
  * 文字と同じ二重の縁取りを掛けて、映像の上でも読めるようにする。
  */
-function drawDecoration(ctx, row, text, x, y, fill = row.fill) {
+function drawDecoration(ctx, row, text, x, y, fill = row.fill, left) {
   if (!row.underline && !row.strike) return;
   const w = inkWidth(ctx, row, text);
   if (w <= 0) return;
 
-  const left = lineLeft(row, x, w);
+  const leftEdge = lineLeft(row, x, w, left);
 
   const th = Math.max(2, row.size * 0.055);
   // フチは文字と同じ太さにすると線が帯になってしまうので、線の太さに見合わせる
@@ -382,7 +485,7 @@ function drawDecoration(ctx, row, text, x, y, fill = row.fill) {
     // 外フチ → 内縁 → 本体 の順。文字と同じ重ね方にする
     const bar = (g, color) => {
       ctx.fillStyle = color;
-      ctx.fillRect(left - g, cy - th / 2 - g, w + g * 2, th + g * 2);
+      ctx.fillRect(leftEdge - g, cy - th / 2 - g, w + g * 2, th + g * 2);
     };
     if (outer) bar(outer, row.outerStroke);
     if (inner) bar(inner, row.stroke);
@@ -448,12 +551,31 @@ export function drawTelop(ctx, t, imageLib = null) {
     const src = iconSourceRect(t, imageLib);
     if (bmp && src) ctx.drawImage(bmp, src.x, src.y, src.w, src.h, icon.x, icon.y, icon.w, icon.h);
   }
-  for (const r of rows) {
-    applyFont(ctx, r.row);
-    ctx.textAlign = r.row.hAlign || 'center';
-    const x = r.x + alignShift(r.row);
-    for (let i = 0; i < r.lines.length; i++) {
-      drawRowLine(ctx, r.row, r.lines[i], x, r.firstY + i * r.lh);
+  let i = 0;
+  while (i < rows.length) {
+    const r = rows[i];
+    if (r.joined) {
+      // 連結行: 帯の全パーツをまとめて 3 パス（外フチ→内縁→塗り）で描く。
+      // 1 パーツずつ 3 パス済ませると、後のパーツの白い外フチが前のパーツの
+      // 塗りを削ってしまうため
+      const seq = r.band;
+      const band = [];
+      while (i < rows.length && rows[i].joined && rows[i].band === seq) { band.push(rows[i]); i++; }
+      ctx.textAlign = 'left';
+      for (const pass of ['outer', 'inner', 'fill']) {
+        for (const p of band) {
+          applyFont(ctx, p.row);
+          drawRowLine(ctx, p.row, p.lines[0], p.x, p.firstY, pass, p.x);
+        }
+      }
+    } else {
+      applyFont(ctx, r.row);
+      ctx.textAlign = r.row.hAlign || 'center';
+      const x = r.x + alignShift(r.row);
+      for (let li = 0; li < r.lines.length; li++) {
+        drawRowLine(ctx, r.row, r.lines[li], x, r.firstY + li * r.lh);
+      }
+      i++;
     }
   }
   ctx.restore();
@@ -473,7 +595,9 @@ function rowsBounds(ctx, rows) {
     applyFont(ctx, r.row);
     let maxW = 0;
     for (const l of r.lines) maxW = Math.max(maxW, inkWidth(ctx, r.row, l));
-    const x = r.row.hAlign === 'left' ? r.x : r.row.hAlign === 'right' ? r.x - maxW : r.x - maxW / 2;
+    // 連結行のパーツは r.x がすでに絶対左端（textAlign: 'left' で描くため）
+    const x = r.joined ? r.x
+      : r.row.hAlign === 'left' ? r.x : r.row.hAlign === 'right' ? r.x - maxW : r.x - maxW / 2;
     const outer = (r.row.outerScale ?? 0) > 0 ? (r.row.outerScale || 1) : (r.row.strokeOn === false ? 0 : 1);
     const pad = (r.row.strokeWidth || 0) * outer * 0.5;
     left = Math.min(left, x - pad);

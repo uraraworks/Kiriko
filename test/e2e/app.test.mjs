@@ -39,7 +39,9 @@ describe('ブラウザ結合', { skip }, () => {
     assert.equal(await ev(`document.body.classList.contains('no-workdir')`), false);
     assert.equal(await ev(`document.getElementById('welcome').classList.contains('hidden')`), true);
     assert.equal(await ev(`document.getElementById('btnSaveProj').disabled`), false);
-    assert.equal(await ev(`document.getElementById('workDirName').textContent`), 'work');
+    assert.equal(await ev(`document.getElementById('workDirNameText').textContent`), 'work');
+    assert.equal(await ev(`!!document.getElementById('btnCloseWorkDir')`), true);
+    assert.equal(await ev(`document.getElementById('btnCloseWorkDir').disabled`), false);
   });
 
   test('「素材のフォルダを選ぶ」は保存先を変えない', async () => {
@@ -384,9 +386,13 @@ describe('ブラウザ結合', { skip }, () => {
         { ...at(x, y), bubbles: true, pointerId: 1, button: 0, buttons: 1, ...o }));
       const box0 = { ...tel.box };
       const cx = box0.x + box0.w / 2, cy = box0.y + box0.h / 2;
+      // altKey で吸着（スナップ）を切っている: 既定のテロップだと -40 動かした先が
+      // 縦中央そろえの吸着先とちょうど閾値(12px)ぴったりで、レイアウトのわずかな
+      // 変化（丸め誤差）だけで吸着の有無が反転してしまう。このテストが見たいのは
+      // 「枠ではなく中身だけが動くこと」なので、吸着自体は関係ない。
       ev2('pointerdown', cx, cy, { metaKey: true });
-      ev2('pointermove', cx + 120, cy - 40, { metaKey: true });
-      ev2('pointerup', cx + 120, cy - 40, { metaKey: true });
+      ev2('pointermove', cx + 120, cy - 40, { metaKey: true, altKey: true });
+      ev2('pointerup', cx + 120, cy - 40, { metaKey: true, altKey: true });
       await new Promise((r2) => setTimeout(r2, 200));
       return { box0, box: { ...tel.box }, textFree: tel.textFree,
                textX: tel.textX, textY: tel.textY };

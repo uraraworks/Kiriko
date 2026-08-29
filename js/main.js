@@ -2971,7 +2971,7 @@ function renderTelopForm(force = false) {
   form.innerHTML = `
     <div class="row-tabs" id="rowTabs">
       ${tel.rows.map((r, i) =>
-        `<button class="row-tab${i === S.telopRow ? ' on' : ''}" data-row="${i}" title="${esc(r.text || '（空）')}">${i + 1}</button>`).join('')}
+        `<button class="row-tab${i === S.telopRow ? ' on' : ''}" data-row="${i}" title="${esc(r.text || '（空）')}">${i > 0 && r.joinPrev ? '→' : ''}${i + 1}</button>`).join('')}
       <button class="row-tab add" id="rowAdd" title="行を追加">＋</button>
       ${tel.rows.length > 1 ? '<button class="row-tab del" id="rowDel" title="この行を削除">－</button>' : ''}
       ${tel.rows.length > 1 && S.telopRow > 0 ? '<button class="row-tab" id="rowUp" title="上へ">↑</button>' : ''}
@@ -2980,6 +2980,12 @@ function renderTelopForm(force = false) {
 
     <label>${tel.rows.length > 1 ? `${S.telopRow + 1} 行目の` : ''}テキスト
       <textarea id="telText" rows="2">${esc(row.text)}</textarea></label>
+
+    ${tel.rows.length > 1 ? `
+    <label class="chk"><input type="checkbox" id="telJoinPrev" ${row.joinPrev ? 'checked' : ''}${S.telopRow === 0 ? ' disabled' : ''}>
+      前の行に続ける（横に並べる）</label>
+    <div class="sub-label">チェックすると、前の行と同じ高さに横に並びます。色や大きさは行ごとに変えられるので、
+      「5件」を白、「2,529円」を赤、といった作り方ができます。</div>` : ''}
 
     <div class="preset-row">
       <select id="telPreset"><option value="">プリセットを適用…</option>
@@ -3154,6 +3160,12 @@ function renderTelopForm(force = false) {
     tel.rows.splice(S.telopRow + 1, 0, tel.rows.splice(S.telopRow, 1)[0]);
     S.telopRow++; renderTelopForm(true); live();
   };
+
+  $('telJoinPrev')?.addEventListener('change', (e) => {
+    commit('行の並べ方を変更');
+    row.joinPrev = e.target.checked;
+    renderTelopForm(true); live();
+  });
 
   // --- 行の書式 ---
   $('telText').addEventListener('input', (e) => {

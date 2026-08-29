@@ -139,6 +139,25 @@ test('プリセットは枠と縦寄せをセットで持つ', () => {
   }
 });
 
+test('createRow: 「前の行に続ける」フラグを持つ（既定 false）', () => {
+  assert.equal(T.createRow('あ').joinPrev, false);
+  // 元にした行が joinPrev: true でも、新しい行には引き継がない
+  assert.equal(T.createRow('い', { joinPrev: true }).joinPrev, false);
+});
+
+test('migrateTelop: 古い行にも joinPrev: false が補われる', () => {
+  const t = T.migrateTelop({ id: 'a', start: 0, end: 1, box: { x: 0, y: 0, w: 10, h: 10 },
+    rows: [{ text: 'あ' }] });
+  assert.equal(t.rows[0].joinPrev, false);
+});
+
+test('migrateTelop: joinPrev を持つ行はその値のまま通す', () => {
+  const t = T.migrateTelop({ id: 'a', start: 0, end: 1, box: { x: 0, y: 0, w: 10, h: 10 },
+    rows: [{ text: 'あ' }, { text: 'い', joinPrev: true }] });
+  assert.equal(t.rows[0].joinPrev, false);
+  assert.equal(t.rows[1].joinPrev, true);
+});
+
 test('既定の枠は 1920x1080 の中に収まっている', () => {
   const b = T.DEFAULT_BOX;
   assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.w <= 1920 && b.y + b.h <= 1080, JSON.stringify(b));

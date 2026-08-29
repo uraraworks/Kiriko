@@ -254,6 +254,39 @@ describe('ブラウザが要るモジュール', { skip: haveChrome() ? false : 
     assert.ok(blue(r.horz.right), `横: 右が 2 色目でない: ${JSON.stringify(r.horz)}`);
   });
 
+  test('テロップ: 連結行（前の行に続ける）は横に並ぶ', async () => {
+    const r = await ev(`(async () => {
+      const T = await import('/js/telop.js');
+      const ctx = new OffscreenCanvas(1920, 1080).getContext('2d');
+      const box = { x: 200, y: 700, w: 1000, h: 300 };
+      const mk = (join) => {
+        const t = T.createTelop(0, 3, { box, wrap: false, hAlign: 'left', vAlign: 'middle' }, '5件');
+        const r2 = T.createRow('2,529円', { hAlign: 'left', fill: '#ff0000' });
+        r2.joinPrev = join;
+        t.rows.push(r2);
+        return T.textOnlyBounds(ctx, t);
+      };
+      const stacked = mk(false);
+      const joined = mk(true);
+      return { sw: Math.round(stacked.w), sh: Math.round(stacked.h),
+               jw: Math.round(joined.w), jh: Math.round(joined.h) };
+    })()`);
+    assert.ok(r.jw > r.sw, `連結行の幅が縦積みより広がっていない: ${r.sw} → ${r.jw}`);
+    assert.ok(r.jh < r.sh, `連結行の高さが縦積みより低くなっていない: ${r.sh} → ${r.jh}`);
+  });
+
+  test('テロップ: 連結行の先頭が index 0 でなくても、行を消せば連結が壊れる側で先頭扱いになる', async () => {
+    const r = await ev(`(async () => {
+      const T = await import('/js/telop.js');
+      const ctx = new OffscreenCanvas(1920, 1080).getContext('2d');
+      const t = T.createTelop(0, 3, { box: { x: 0, y: 0, w: 1000, h: 300 }, wrap: false }, 'あ');
+      t.rows[0].joinPrev = true;   // index 0 は joinPrev が true でも先頭扱いになるはず
+      const lay = T.layoutTelop(ctx, t);
+      return { joined: !!lay.rows[0].joined };
+    })()`);
+    assert.equal(r.joined, false, 'index 0 は常に連結行の先頭（単独扱い）でなければならない');
+  });
+
   test('テロップ: 文字の外形が枠の中に収まる', async () => {
     const r = await ev(`(async () => {
       const T = await import('/js/telop.js');
