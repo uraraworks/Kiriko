@@ -291,6 +291,47 @@ server.registerTool('kiriko_notes', {
   a.notes === undefined ? await call('get_notes') : await call('set_notes', a)
 ));
 
+server.registerTool('kiriko_get_thumbnail', {
+  title: 'サムネの中身を見る',
+  description:
+    'YouTube 用サムネイル（1 枚絵）の中身。kiriko_get_project は重いので、サムネだけ軽く見る用。\n\n'
+    + 'レイアウト（座標・大きさ・書式・重ね順）は人がドラッグで作るもので、ここには書式は含まれない'
+    + '（文字と id だけ）。位置や大きさを変える API は無い。',
+  inputSchema: {},
+}, async () => asText(await call('get_thumbnail')));
+
+server.registerTool('kiriko_set_thumbnail_text', {
+  title: 'サムネの文字を差し替える',
+  description:
+    '既にあるサムネのテロップの文字だけを入れ替える。**位置・大きさ・書式・重ね順は一切触らない**'
+    + '（レイアウトは Kiriko 側でドラッグして決めるもの）。\n\n'
+    + 'id は kiriko_get_thumbnail が返したテロップの id。text（改行区切り）か rows（配列）の'
+    + 'どちらかを渡す。今の行数と渡した行数が違うとエラーになる（行ごとに書式が違うため）。\n\n'
+    + '1 件でもおかしければ何も書き換えずにエラーを返す。',
+  inputSchema: {
+    texts: z.array(z.object({
+      id: z.string().describe('kiriko_get_thumbnail が返したテロップの id'),
+      text: z.string().optional().describe('改行で行を分ける'),
+      rows: z.array(z.string()).optional().describe('行ごとに渡す。text と排他'),
+    })).describe('差し替える文字'),
+  },
+}, async (a) => asText(await call('set_thumbnail_text', a)));
+
+server.registerTool('kiriko_set_thumbnail_base', {
+  title: 'サムネの元画像を決める',
+  description:
+    'サムネに敷く元画像を決める。**位置や大きさは変えられない**（Kiriko 側でドラッグして決める）。\n\n'
+    + 'time / assetName / clear のうち、どれか 1 つだけを渡す。\n'
+    + '  time … タイムラインのその秒の場面を元画像にする\n'
+    + '  assetName … 画像素材から名前で探す\n'
+    + '  clear … 元画像を外す',
+  inputSchema: {
+    time: z.number().min(0).optional().describe('タイムライン上の秒'),
+    assetName: z.string().optional().describe('画像素材の名前'),
+    clear: z.boolean().optional().describe('true で元画像を外す'),
+  },
+}, async (a) => asText(await call('set_thumbnail_base', a)));
+
 server.registerTool('kiriko_seek', {
   title: '再生位置を動かす',
   description: 'Kiriko の再生位置を動かす。人間に見てほしい場所へ合わせる時に。',

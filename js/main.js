@@ -6601,11 +6601,12 @@ function restoreAt({ time, seconds = 0.5, side = 'head', tolerance = SEAM_TOL })
 
 const mcpCommands = createCommands({
   S, P, T, MARKER_KINDS,
-  commit, renderAll, status,
+  commit, renderAll, status, tc,
   applyProject, timelineLevels, frameAt, syncProjectUI,
   nextZ: () => zRange()[1] + 1,
   TR, cutRanges, restoreAt,
   seekTo: (t) => { setMode('program'); seekProgram(t, true); renderAll(); },
+  setThumbBase,
 });
 
 /**
@@ -6615,6 +6616,7 @@ const mcpCommands = createCommands({
 const WRITE_CMDS = new Set([
   'set_project', 'add_markers', 'add_telops', 'set_notes', 'set_subtitles',
   'cut_range', 'cut_outside_markers', 'restore_at',
+  'set_thumbnail_text', 'set_thumbnail_base',
 ]);
 
 /**

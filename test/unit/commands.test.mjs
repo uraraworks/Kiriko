@@ -129,3 +129,101 @@ test('get_subtitles: 長すぎ・速すぎに警告が付く', async () => {
   const b = r.subtitles.find((s) => s.id === 'b');
   assert.equal(b.warnings.length, 0);
 });
+
+// ---------------------------------------------------------------- サムネイル
+//
+// サムネは「文字は AI が入れる、レイアウトは人がドラッグで決める」という分担。
+// 書式や座標を壊さないことと、途中まで適用されないことを見る。
+
+/** テロップ 2 つ（1 行と 2 行）・画像 1 つのサムネを持つ ctx */
+function makeThumbCommands() {
+  const project = P.createProject();
+  project.clips.push({ id: 'c1', sourceId: 's1', in: 0, out: 100, volume: 1 });
+  project.imageAssets.push({ id: 'a_logo', name: 'ロゴ.png', width: 360, height: 360 });
+  project.thumbnail = {
+    base: null,
+    images: [{ id: 'i1', assetId: 'a_logo', start: 0, end: 3, box: { x: 10, y: 20, w: 100, h: 100 }, z: 1 }],
+    telops: [
+      { id: 't1', z: 2, box: { x: 0, y: 0, w: 100, h: 50 }, rows: [{ id: 'r1', text: '一行', size: 200 }] },
+      { id: 't2', z: 3, box: { x: 0, y: 0, w: 100, h: 50 }, rows: [{ id: 'r2', text: '上', size: 100 }, { id: 'r3', text: '下', size: 80 }] },
+    ],
+  };
+  const S = { project };
+  const base = [];
+  const ctx = {
+    S, P, T: null,
+    commit: () => {}, renderAll: () => {}, status: () => {},
+    tc: (t) => `${t}s`,
+    setThumbBase: (b) => { project.thumbnail.base = b; base.push(b); },
+  };
+  return { cmds: createCommands(ctx), S };
+}
+
+test('get_thumbnail: 文字と id は返すが、書式は返さない', async () => {
+  const { cmds } = makeThumbCommands();
+  const r = await cmds.get_thumbnail();
+  assert.deepEqual(r.telops, [
+    { id: 't1', z: 2, rows: ['一行'] },
+    { id: 't2', z: 3, rows: ['上', '下'] },
+  ]);
+  assert.equal(r.images[0].name, 'ロゴ.png');
+  assert.equal(r.base, null);
+});
+
+test('set_thumbnail_text: 文字だけ変わり、書式は残る', async () => {
+  const { cmds, S } = makeThumbCommands();
+  const r = await cmds.set_thumbnail_text({ texts: [{ id: 't1', text: '時給857円' }] });
+  assert.equal(r.updated, 1);
+  const tel = S.project.thumbnail.telops[0];
+  assert.equal(tel.rows[0].text, '時給857円');
+  assert.equal(tel.rows[0].size, 200);          // 書式はそのまま
+  assert.deepEqual(tel.box, { x: 0, y: 0, w: 100, h: 50 });
+});
+
+test('set_thumbnail_text: 改行で行に分かれる', async () => {
+  const { cmds, S } = makeThumbCommands();
+  await cmds.set_thumbnail_text({ texts: [{ id: 't2', text: '六甲\nアイランド' }] });
+  assert.deepEqual(S.project.thumbnail.telops[1].rows.map((r) => r.text), ['六甲', 'アイランド']);
+});
+
+test('set_thumbnail_text: 行数が合わなければエラー。何も書き換えない', async () => {
+  const { cmds, S } = makeThumbCommands();
+  await assert.rejects(
+    () => cmds.set_thumbnail_text({ texts: [{ id: 't1', text: 'あ\nい' }] }),
+    /1 行です（2 行が渡されました）/,
+  );
+  assert.equal(S.project.thumbnail.telops[0].rows[0].text, '一行');
+});
+
+test('set_thumbnail_text: 1 件でも駄目なら、他の件も適用されない', async () => {
+  const { cmds, S } = makeThumbCommands();
+  await assert.rejects(() => cmds.set_thumbnail_text({
+    texts: [{ id: 't1', text: '変わるはず' }, { id: 'no-such', text: 'x' }],
+  }), /見つかりません/);
+  assert.equal(S.project.thumbnail.telops[0].rows[0].text, '一行');
+});
+
+test('set_thumbnail_base: 時刻・素材名・外す', async () => {
+  const { cmds, S } = makeThumbCommands();
+  assert.deepEqual(await cmds.set_thumbnail_base({ time: 12.5 }), { kind: 'frame', time: 12.5 });
+  assert.deepEqual(await cmds.set_thumbnail_base({ assetName: 'ロゴ.png' }),
+    { kind: 'asset', assetId: 'a_logo', name: 'ロゴ.png' });
+  assert.equal(await cmds.set_thumbnail_base({ clear: true }), null);
+  assert.equal(S.project.thumbnail.base, null);
+});
+
+test('set_thumbnail_base: 名前は NFC / NFD の違いを吸収する', async () => {
+  const { cmds } = makeThumbCommands();
+  const nfd = 'ロゴ.png'.normalize('NFD');
+  assert.notEqual(nfd, 'ロゴ.png');   // 前提（濁点が分かれている）
+  assert.deepEqual(await cmds.set_thumbnail_base({ assetName: nfd }),
+    { kind: 'asset', assetId: 'a_logo', name: 'ロゴ.png' });
+});
+
+test('set_thumbnail_base: 尺の外や、2 つ以上渡すとエラー', async () => {
+  const { cmds } = makeThumbCommands();
+  await assert.rejects(() => cmds.set_thumbnail_base({ time: 999 }), /範囲内/);
+  await assert.rejects(() => cmds.set_thumbnail_base({ time: 1, clear: true }), /どれか 1 つだけ/);
+  await assert.rejects(() => cmds.set_thumbnail_base({}), /どれか 1 つだけ/);
+  await assert.rejects(() => cmds.set_thumbnail_base({ assetName: '無い.png' }), /見つかりません/);
+});

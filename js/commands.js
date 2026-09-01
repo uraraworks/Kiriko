@@ -59,6 +59,13 @@ export function createCommands(ctx) {
     return list.find((s) => s.id === key) ?? list.find((s) => s.name === key) ?? null;
   };
 
+  /** サムネの元画像を MCP へ返す形に揃える（get_thumbnail / set_thumbnail_base で共通） */
+  const thumbBaseView = (base, p) => {
+    if (!base) return null;
+    if (base.kind === 'frame') return { kind: 'frame', time: +base.time.toFixed(3) };
+    return { kind: 'asset', assetId: base.assetId, name: p.imageAssets.find((a) => a.id === base.assetId)?.name ?? null };
+  };
+
   const clipTimeline = () => {
     let t = 0;
     return proj().clips.map((c) => {
@@ -434,6 +441,94 @@ export function createCommands(ctx) {
     async seek({ time = 0 }) {
       ctx.seekTo(Number(time) || 0);
       return { playheadSec: +S.programTime.toFixed(3) };
+    },
+
+    /**
+     * サムネの中身を軽く見る。kiriko_get_project は重いので、これはサムネだけ。
+     * レイアウト（座標・大きさ・書式・重ね順）は返すだけで、MCP からは変えられない。
+     */
+    async get_thumbnail() {
+      const p = proj();
+      const th = p.thumbnail;
+      return {
+        output: { width: p.output.width, height: p.output.height },
+        base: thumbBaseView(th.base, p),
+        telops: th.telops.map((t) => ({ id: t.id, z: t.z ?? 0, rows: t.rows.map((r) => r.text) })),
+        images: th.images.map((im) => ({
+          id: im.id, z: im.z ?? 0, assetId: im.assetId,
+          name: p.imageAssets.find((a) => a.id === im.assetId)?.name ?? null,
+          box: { x: +im.box.x.toFixed(1), y: +im.box.y.toFixed(1), w: +im.box.w.toFixed(1), h: +im.box.h.toFixed(1) },
+        })),
+      };
+    },
+
+    /**
+     * 既にあるサムネのテロップの文字だけを差し替える。位置・大きさ・書式・重ね順は触らない
+     * （行ごとに書式が違うので、行数を勝手に増減させると書式が決まらない。1件でもおかしければ何も書き換えない）
+     */
+    async set_thumbnail_text({ texts }) {
+      if (!Array.isArray(texts)) throw new Error('texts は配列で渡してください');
+      const th = proj().thumbnail;
+      const plans = [];
+      for (const t of texts) {
+        if (t.id === undefined || t.id === null) throw new Error('id が要ります');
+        const tel = th.telops.find((x) => x.id === t.id);
+        if (!tel) throw new Error(`テロップ ${t.id} が見つかりません`);
+        if ((t.text === undefined) === (t.rows === undefined)) {
+          throw new Error(`テロップ ${t.id} は text か rows のどちらか一方が要ります`);
+        }
+        if (t.rows !== undefined && !Array.isArray(t.rows)) {
+          throw new Error(`テロップ ${t.id} の rows は文字列の配列で渡してください`);
+        }
+        const rows = t.rows !== undefined ? t.rows.map(String) : String(t.text).split('\n');
+        if (rows.length !== tel.rows.length) {
+          throw new Error(`テロップ ${t.id} は ${tel.rows.length} 行です（${rows.length} 行が渡されました）`);
+        }
+        plans.push({ tel, rows });
+      }
+
+      commit('MCP: サムネの文字を差し替え');
+      for (const { tel, rows } of plans) {
+        rows.forEach((text, i) => { tel.rows[i].text = text; });
+      }
+      ctx.renderAll();
+      status('MCP からサムネの文字を受け取りました');
+      return {
+        updated: plans.length,
+        telops: plans.map(({ tel }) => ({ id: tel.id, rows: tel.rows.map((r) => r.text) })),
+      };
+    },
+
+    /** サムネの元画像を決める（何を写すかだけ。位置や大きさは Kiriko 側でドラッグして決める） */
+    async set_thumbnail_base({ time, assetName, clear }) {
+      const given = [time !== undefined, assetName !== undefined, clear !== undefined].filter(Boolean).length;
+      if (given !== 1) throw new Error('time / assetName / clear のうち、どれか 1 つだけ渡してください');
+
+      let base;
+      let label;
+      if (clear !== undefined) {
+        if (!clear) throw new Error('clear は true で渡してください');
+        base = null;
+        label = '元画像を外しました';
+      } else if (time !== undefined) {
+        const t = Number(time) || 0;
+        const total = P.totalDuration(proj());
+        if (t < 0 || t > total) throw new Error(`time はタイムラインの範囲内（0〜${total.toFixed(3)}）で渡してください`);
+        base = { kind: 'frame', time: t };
+        label = `${ctx.tc(t, false)} の場面を元画像にしました`;
+      } else {
+        const want = String(assetName).normalize('NFC');
+        const asset = proj().imageAssets.find((a) => (a.name ?? '').normalize('NFC') === want);
+        if (!asset) {
+          const names = proj().imageAssets.map((a) => a.name).join('、');
+          throw new Error(`画像素材 ${assetName} が見つかりません（持っている素材: ${names || 'なし'}）`);
+        }
+        base = { kind: 'asset', assetId: asset.id };
+        label = `${asset.name} を元画像にしました`;
+      }
+
+      ctx.setThumbBase(base, label);
+      return thumbBaseView(base, proj());
     },
   };
 

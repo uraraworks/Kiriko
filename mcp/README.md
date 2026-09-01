@@ -87,6 +87,9 @@ MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1
 | `kiriko_get_project` | 編集内容の JSON を丸ごと取得する |
 | `kiriko_set_project` | 編集内容の JSON を丸ごと差し替える |
 | `kiriko_notes` | 作業メモの読み書き。次のセッションへの申し送りに使う |
+| `kiriko_get_thumbnail` | サムネの中身を軽く見る（文字と元画像。書式・位置は含まない） |
+| `kiriko_set_thumbnail_text` | サムネの既存テロップの文字だけを差し替える |
+| `kiriko_set_thumbnail_base` | サムネの元画像を決める（位置・大きさは変えられない） |
 | `kiriko_seek` | 再生位置を動かす |
 | `kiriko_whisper_models` | 使える音声認識モデルの一覧 |
 | `kiriko_transcribe` | **セリフを書き起こしてマーカーにする**（下記） |
