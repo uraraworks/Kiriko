@@ -1467,6 +1467,113 @@ function placeThumbImage(asset, placement = null) {
   status(`サムネに ${asset.name} を配置しました`);
 }
 
+/** 他のプロジェクトの .kiriko からサムネ（テロップ・画像）だけを取り込む */
+async function importThumbFromProject(file) {
+  const src = JSON.parse(await file.text());
+  const telops = src.thumbnail?.telops ?? [];
+  const images = src.thumbnail?.images ?? [];
+  if (!src.thumbnail || (!telops.length && !images.length)) {
+    return status('このプロジェクトにはサムネがありません', true);
+  }
+  // 元画像（thumbnail.base）は回ごとに違うものなので取り込まない。文字・画像だけが対象
+  const withImages = images.length > 0 && confirm('画像も一緒に取り込みますか？\n\n'
+    + '［OK］文字と画像を取り込みます\n'
+    + '［キャンセル］文字だけ取り込みます');
+  if (!telops.length && !(withImages && images.length)) {
+    return status('取り込めるものがありませんでした', true);
+  }
+
+  // 出力の解像度が違うと大きさがずれる（4K → 1080p でちょうど2倍になる、等）ので、比率をかけ直す
+  const so = src.output ?? { width: 1920, height: 1080 };
+  const sx = S.project.output.width / so.width;
+  const sy = S.project.output.height / so.height;
+  const s = Math.min(sx, sy);
+  const resized = sx !== 1 || sy !== 1;
+
+  // 画像素材は実体を持たない（id・名前・幅高さだけ）ので、名前で現在の素材を探して繋ぎ直す。
+  // 見つからなければ空の素材として登録する（実体が無いので「素材の再リンク」に出る）。
+  // macOS のファイル名は NFD で入ることがあるので、比較の前に正規化する
+  const relink = new Map();
+  let relinked = 0;
+  const remapAsset = (assetId) => {
+    if (relink.has(assetId)) return relink.get(assetId);
+    const meta = (src.imageAssets ?? []).find((a) => a.id === assetId);
+    if (!meta) { relink.set(assetId, null); return null; }
+    const wantName = (meta.name ?? '').normalize('NFC');
+    const existing = S.project.imageAssets.find((a) => (a.name ?? '').normalize('NFC') === wantName);
+    const id = existing ? existing.id : P.newId('img');
+    if (!existing) {
+      S.project.imageAssets.push({ id, name: meta.name, width: meta.width, height: meta.height });
+      relinked++;
+    }
+    relink.set(assetId, id);
+    return id;
+  };
+
+  commit('サムネを取り込み');
+
+  let last = null;
+  let z = zRange()[1];
+  let imgCount = 0;
+
+  // 取り込み元の重ね順（z）を崩さない。背景の画像を文字より上に乗せてしまうと、
+  // 文字が全部隠れて「取り込めていない」ように見える
+  const incoming = [
+    ...telops.map((x) => ({ kind: 'telop', src: x, z: x.z ?? 0 })),
+    ...(withImages ? images.map((x) => ({ kind: 'image', src: x, z: x.z ?? 0 })) : []),
+  ].sort((a, b) => a.z - b.z);
+
+  for (const { kind, src: from } of incoming) {
+    if (kind === 'telop') {
+      let tel = T.migrateTelop(JSON.parse(JSON.stringify(from)));
+      if (resized) {
+        tel = scaleStyle(tel, sx, sy);
+        if (tel.bgBox) tel.bgBox = { x: tel.bgBox.x * sx, y: tel.bgBox.y * sy, w: tel.bgBox.w * sx, h: tel.bgBox.h * sy };
+        tel.textX = (tel.textX ?? 0) * sx;
+        tel.textY = (tel.textY ?? 0) * sy;
+        tel.rowGap = (tel.rowGap ?? 0) * s;
+        if (tel.icon) {
+          tel.icon.size *= s; tel.icon.gap *= s; tel.icon.x *= sx; tel.icon.y *= sy;
+        }
+        tel.rows = (tel.rows ?? []).map((r) => scaleStyle(r, sx, sy));
+      }
+      tel.id = P.newId('tel');
+      tel.start = 0; tel.end = 3; tel.track = 0;
+      tel.z = ++z;
+      thumb().telops.push(tel);
+      last = ['telop', tel.id];
+    } else {
+      const assetId = remapAsset(from.assetId);
+      if (!assetId) continue;
+      const item = JSON.parse(JSON.stringify(from));
+      if (resized && item.box) {
+        item.box = { x: item.box.x * sx, y: item.box.y * sy, w: item.box.w * sx, h: item.box.h * sy };
+      }
+      item.id = P.newId('img');
+      item.assetId = assetId;
+      item.start = 0; item.end = 3;
+      item.z = ++z;
+      thumb().images.push(item);
+      last = ['image', item.id];
+      imgCount++;
+    }
+  }
+
+  // 画像しか無いのに素材が引けなかった場合、足したものが 1 つも無いことがある
+  if (!last) { history.undo(); return status('取り込めるものがありませんでした', true); }
+  select(...last);
+  S.focusArea = 'preview';
+  renderAll(); renderTelopForm(true); renderFxForm(true);
+
+  const parts = [];
+  if (telops.length) parts.push(`テロップ ${telops.length} 件`);
+  if (imgCount) parts.push(`画像 ${imgCount} 件`);
+  let msg = `${parts.join('・')}を取り込みました`;
+  if (relinked) msg += `（画像 ${relinked} 件は素材の再リンクが要ります）`;
+  if (resized) msg += '（解像度の違いを合わせました）';
+  status(msg);
+}
+
 /** 元画像がまだ無い時の下敷き（何もしていない事が分かる程度に） */
 function drawThumbPlaceholder(ctx, w, h) {
   ctx.fillStyle = '#1b1e24';
@@ -6109,6 +6216,13 @@ $('thGrabFrame').onclick = () => {
 $('thPickImage').onclick = () => pickThumbBaseImage().catch((e) => status(e.message, true));
 $('thClearBase').onclick = () => setThumbBase(null, '元画像を外しました');
 $('thSave').onclick = () => saveThumbnail();
+$('thImport').onclick = () => $('thImportInput').click();
+$('thImportInput').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try { await importThumbFromProject(file); } catch (err) { status(`読み込めませんでした: ${err.message}`, true); }
+};
 
 $('btnPlay').onclick = togglePlay;
 $('btnHome').onclick = () => { if (S.mode === 'program') seekProgram(0, true); else video.currentTime = 0; renderAll(); };

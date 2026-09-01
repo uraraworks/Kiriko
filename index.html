@@ -298,6 +298,7 @@
         <button id="thPickImage" class="mini" title="別に用意した画像を読み込んで敷く">画像を選ぶ…</button>
         <button id="thClearBase" class="mini" title="元画像を外す">外す</button>
         <span class="thumb-base" id="thBaseName">未設定</span>
+        <button id="thImport" class="mini" title="前に作ったプロジェクトのサムネから、文字と画像を取り込みます（解像度の違いは自動で合わせます）">他のプロジェクトから取り込む…</button>
         <span class="spacer"></span>
         <select id="thSize" title="書き出す大きさ。YouTube の推奨は 1280×720（上限 2MB）"></select>
         <select id="thFormat" title="JPEG は軽く写真向き。PNG は文字がくっきりする代わりに重い"></select>
@@ -591,6 +592,7 @@
 <input type="file" id="imageInput" accept="image/*,.png,.jpg,.jpeg,.webp" multiple hidden>
 <input type="file" id="thumbBaseInput" accept="image/*,.png,.jpg,.jpeg,.webp" hidden>
 <input type="file" id="libInput" accept=".kirikolib,application/json,.json" hidden>
+<input type="file" id="thImportInput" accept=".kiriko,.json" hidden>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>
