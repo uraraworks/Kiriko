@@ -4631,22 +4631,29 @@ function snapTargets(includePlayhead = true) {
   return list;
 }
 
-/** 置いてあるもの（テロップ・画像・音源・ぼかし）の先頭 */
-function elementStarts() {
+/** 置いてあるもの（テロップ・画像・音源・ぼかし）の先頭と終端 */
+function elementEdges() {
   const P0 = S.project;
-  return [...P0.telops, ...P0.images, ...P0.audioClips, ...P0.blurs, ...P0.subtitles].map((x) => x.start);
+  const list = [];
+  for (const x of [...P0.telops, ...P0.images, ...P0.audioClips, ...P0.blurs, ...P0.subtitles]) {
+    list.push(x.start);
+    // 音源だけ長さ持ち、他は end を持っている
+    const end = x.end ?? (x.start + (x.duration ?? 0));
+    if (end > x.start) list.push(end);
+  }
+  return list;
 }
 
 /**
  * 再生位置のドラッグも区切りに吸着させる。
  * 画像やテロップをカットの頭に合わせたい時、まずカーソルをそこへ置くので効いてくる。
- * 置いてあるものの先頭にも吸わせる（そこの絵を確かめたり、頭を揃えたりするため）。
+ * 置いてあるものの先頭・終端にも吸わせる（そこの絵を確かめたり、頭や尻を揃えたりするため）。
  * ここだけの吸着先で、ものを動かす時には使わない（自分自身の先頭に吸い付いてしまうため）。
  */
 function snapPlayhead(sec, alt) {
   S.snapLine = null;
   if (alt) return sec;
-  const targets = [...snapTargets(false), ...elementStarts()];
+  const targets = [...snapTargets(false), ...elementEdges()];
   if (S.zoneIn !== null) targets.push(S.zoneIn);
   if (S.zoneOut !== null) targets.push(S.zoneOut);
   const hit = snapOne(sec, targets);
