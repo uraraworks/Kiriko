@@ -66,6 +66,9 @@ Chrome 系か Firefox を使うこと。
 | `list_trims` | 切りすぎた分の在庫。どこで何秒戻せるか |
 | `restore_at` | 継ぎ目から秒単位で戻す（`side`: head / tail）|
 | `get_notes` / `set_notes` | 作業メモ |
+| `get_thumbnail` | サムネの中身を軽く見る（文字と元画像。書式・座標は含まない）|
+| `set_thumbnail_text` | サムネの既存テロップの文字だけ差し替える |
+| `set_thumbnail_base` | サムネの元画像を決める（`time` / `assetName` / `clear`）|
 | `seek` | 再生位置を動かす |
 
 ### 時間の掛かる処理は「素材の時刻」で持ち回る
@@ -153,6 +156,21 @@ await bme.call('set_subtitles', { subtitles: [{ id: needsFix[0].id, en: 'Short t
 
 字幕は 1 トラックで**重ならない**。`set_subtitles` は入れ終わると start 昇順に並べ替えて
 重なりを詰め、詰めた結果 0.3 秒未満になったものは落とす（返り値の `dropped`）。
+
+### サムネは文字だけ開ける
+
+サムネ作りの本体はテロップをドラッグして位置を決める作業で、これは人間がやった方が速くて
+正確。座標や大きさを数値で指定する API は、AI から使っても手探りになるだけなので作っていない。
+
+逆に、書き起こしや売上を読んでいる AI が得意なのは**文言を決めること**。そこだけ開けた。
+
+```js
+const { telops } = await bme.call('get_thumbnail');
+await bme.call('set_thumbnail_text', { texts: [{ id: telops[0].id, text: '新しい文言' }] });
+```
+
+行ごとに書式が違うので、行数が合わない差し替えはエラーにする。勝手に増減させると
+書式が決まらないため。1 件でも駄目なら何も書き換えない。
 
 ## 直接いじる場合
 
