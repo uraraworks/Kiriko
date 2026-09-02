@@ -125,16 +125,39 @@ export async function resolveFile(name, ask = false) {
     const f = await useHandle(h, ask);
     if (f) return f;
   }
-  // ② 覚えているフォルダの中から探す（直下 → 1 階層下）
+  // ② 覚えているフォルダの中から探す（直下 → 3 階層下まで）。
+  // 素材フォルダの下にさらにサブフォルダを掘って整理しているケースがあるため、
+  // 1 階層下だけでは届かないことがある
   for (const dir of await listDirs()) {
     if (!(await can(dir)) && !(ask && await request(dir))) continue;
-    const f = await findInDir(dir, name, 1);
+    const f = await findInDir(dir, name, 3);
     if (f) {
       await rememberFile(name, f.handle);
       return f.file;
     }
   }
   return null;
+}
+
+/**
+ * 必要な素材の許可を、ユーザー操作の直後に 1 回でまとめて取っておく。
+ *
+ * requestPermission は「transient user activation」（クリックなどの直後）が無いと
+ * 通らない仕様で、動画のデコードなどに時間がかかった後でこっそり呼ぶと、
+ * ダイアログすら出ずに黙って拒否される。なので resolveFile を1件ずつ呼ぶ前に、
+ * ボタンが押された直後のこの関数でまとめて await しておく。
+ * @param {string[]} names 読み直したいファイル名
+ */
+export async function ensureAccess(names = []) {
+  // フォルダを先に処理する（フォルダを 1 つ許可すれば、中の素材は全部読めるようになるため）
+  for (const dir of await listDirs()) {
+    if (!(await can(dir))) await request(dir);
+  }
+  // 直接ファイルハンドルを覚えているものは、フォルダの許可だけではカバーできないので個別に
+  for (const name of names) {
+    const h = await getFileHandle(name);
+    if (h && !(await can(h))) await request(h);
+  }
 }
 
 async function useHandle(h, ask) {

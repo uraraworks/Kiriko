@@ -91,6 +91,7 @@ const queueTimelineRedraw = () => {
 const thumbs = new ThumbCache(queueTimelineRedraw);
 const waves = new WaveformCache(queueTimelineRedraw);
 const bgmPeaks = new Map(); // assetId -> Float32Array（SE / BGM 用。メモリ上なので即時）
+const assetErrors = new Map(); // name -> 読み込み失敗の理由（再リンクの失敗を帯に出すため）
 const video = $('video');
 
 // ---------------------------------------------------------------- ユーティリティ
@@ -5696,6 +5697,11 @@ async function reloadMissingAssets(ask = false) {
   const want = missingAssets();
   if (!want.length) { renderMissingBar(); return { loaded: 0, missing: [] }; }
 
+  // 許可要求はボタンから呼ばれた直後（＝ユーザー操作の直後）にまとめて済ませる。
+  // このあとの読み込みループは動画のデコード等で時間がかかり、requestPermission が
+  // 必要な transient user activation を使い切ってしまうと、黙って拒否されるため
+  if (ask) await FS.ensureAccess(want.map((a) => a.name));
+
   let loaded = 0, fromLib = 0;
   for (const a of want) {
     let file = await FS.resolveFile(a.name, ask);
@@ -5708,7 +5714,9 @@ async function reloadMissingAssets(ask = false) {
         if (file) fromLib++;
       }
     }
-    if (!file) continue;
+    // 前回は読み込みに失敗し、今回はファイルごと見つからない、という時に
+    // 古い理由が残り続けないようにする（「見つかりません」に戻す）
+    if (!file) { assetErrors.delete(a.name); continue; }
     status(`${a.name} を読み込んでいます…`);
     try {
       if (a.kind === 'video') {
@@ -5728,8 +5736,10 @@ async function reloadMissingAssets(ask = false) {
         if (thumb().base?.assetId === a.id) S.thumbBaseKey = null;   // 元画像が戻ったので作り直す
       }
       loaded++;
+      assetErrors.delete(a.name);
     } catch (e) {
       console.error(e);
+      assetErrors.set(a.name, e.message);
     }
   }
 
@@ -5739,16 +5749,28 @@ async function reloadMissingAssets(ask = false) {
     $('monName').textContent = curSource()?.name ?? '—';
   }
   const missing = missingAssets();
+  // 「見つからなかった」（ファイル自体に辿り着けない）と「読み込めなかった」（ファイルは
+  // 見つかったが読み込みに失敗した＝assetErrors に理由が残る）を分けて伝える
+  const failed = missing.filter((a) => assetErrors.has(a.name));
+  const notFound = missing.length - failed.length;
   refreshProgram();
   renderAll();
   renderMissingBar();
   if (loaded) {
     const via = fromLib ? `（うち ${fromLib} 件はテロップライブラリから）` : '';
-    status(missing.length
-      ? `素材 ${loaded} 件を読み直しました${via}。${missing.length} 件は見つかりませんでした`
-      : `素材 ${loaded} 件を読み直しました${via}`);
+    let msg = `素材 ${loaded} 件を読み直しました${via}`;
+    if (missing.length) {
+      const parts = [];
+      if (notFound) parts.push(`見つからなかった素材 ${notFound} 件`);
+      if (failed.length) parts.push(`読み込めなかった素材 ${failed.length} 件（${failed[0].name}: ${assetErrors.get(failed[0].name)}）`);
+      msg += `。${parts.join('、')}`;
+    }
+    status(msg);
   } else if (missing.length) {
-    status(`${missing.length} 件の素材が見つかりません。［素材を探す］から選んでください`, true);
+    const parts = [];
+    if (notFound) parts.push(`${notFound} 件の素材が見つかりません`);
+    if (failed.length) parts.push(`${failed.length} 件の素材が読み込めませんでした（${failed[0].name}: ${assetErrors.get(failed[0].name)}）`);
+    status(`${parts.join('、')}。［素材を探す］から選んでください`, true);
   }
   return { loaded, missing };
 }
@@ -5805,8 +5827,10 @@ function renderMissingBar() {
     + ' — 素材の入ったフォルダを選ぶと、次回から自動でつながります';
   const names = document.createElement('div');
   names.className = 'mb-names';
-  names.textContent = want.map((x) => x.name).join('、');
-  names.title = want.map((x) => x.name).join('\n');   // 全部は指したら見える
+  // 読み込みまで失敗した素材は、名前だけでは「探しても無駄」と分からないので理由を添える
+  const label = (x) => assetErrors.has(x.name) ? `${x.name}（読み込めませんでした: ${assetErrors.get(x.name)}）` : x.name;
+  names.textContent = want.map(label).join('、');
+  names.title = want.map(label).join('\n');   // 全部は指したら見える
   el.append(head, names);
 }
 
@@ -5817,6 +5841,29 @@ async function doExport() {
   const clips = S.project.clips.filter((c) => P.clipDuration(c) > 0.001);
   if (!clips.length) return status('書き出すクリップがありません', true);
   for (const c of clips) if (!S.sources.has(c.sourceId)) return status('素材が未接続のクリップがあります', true);
+
+  // 未接続の音源・画像があると、波形やサムネはタイムラインに残ったまま
+  // 「無音・透明」で書き出されてしまう。実際に書き出しで使われている分だけを
+  // missingAssets() から絞り込んで確認する（サムネイル用素材は書き出しに関係ないため対象外）
+  {
+    const usedAudioIds = new Set(S.project.audioClips.map((a) => a.assetId));
+    const usedImageIds = new Set([
+      ...S.project.images.map((im) => im.assetId),
+      ...S.project.telops.map((t) => t.bgAssetId).filter(Boolean),
+      ...S.project.telops.map((t) => t.icon?.assetId).filter(Boolean),
+    ]);
+    const missingUsed = missingAssets().filter((a) =>
+      (a.kind === 'audio' && usedAudioIds.has(a.id))
+      || (a.kind === 'image' && usedImageIds.has(a.id)));
+    if (missingUsed.length) {
+      const names = missingUsed.map((a) => a.name).join('、');
+      const ok = confirm(
+        `未接続の素材が ${missingUsed.length} 件あります（${names}）。\n\n`
+        + 'このまま書き出すと、その音や画像は入りません。\n続けますか？');
+      // 素材が二度と手に入らないケースもあるので、ハードブロックにはせず確認だけにする
+      if (!ok) return status('書き出しを中止しました');
+    }
+  }
 
   // 出力設定を反映
   const [w, h] = $('optRes').value.split('x').map(Number);
