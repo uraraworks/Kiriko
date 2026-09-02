@@ -236,8 +236,48 @@ describe('ブラウザが要るモジュール', { skip: haveChrome() ? false : 
           strokeWidth: 0, outerScale: 0, shadow: 0,
           box: { x: 0, y: 0, w: 600, h: 200 }, vAlign: 'middle' }, '■■■');
         T.drawTelop(ctx, t);
-        const at = (x, y) => [...ctx.getImageData(x, y, 1, 1).data].slice(0, 3);
-        return { top: at(300, 62), bottom: at(300, 138), left: at(200, 100), right: at(400, 100) };
+        // CI の ubuntu ランナーには日本語フォントが無く「■」が別フォントに
+        // フォールバックしてグリフの縦幅が変わるので、決め打ち座標ではサンプリング点が
+        // 字の外に出ることがある。実際に塗られている画素の外接矩形を測ってから、
+        // その中の相対位置でサンプリングする
+        const data = ctx.getImageData(0, 0, 600, 200).data;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (let y = 0; y < 200; y++) {
+          for (let x = 0; x < 600; x++) {
+            const a = data[(y * 600 + x) * 4 + 3];
+            if (a > 200) {
+              if (x < x0) x0 = x; if (x > x1) x1 = x;
+              if (y < y0) y0 = y; if (y > y1) y1 = y;
+            }
+          }
+        }
+        if (x1 < x0) return { bounds: null }; // 1 画素も塗られていない
+        const w = x1 - x0, h = y1 - y0;
+        const cx = x0 + w / 2, cy = y0 + h / 2;
+        // 目標点ちょうどだと ■ と ■ の隙間やアンチエイリアスを踏むことがあるので、
+        // 目標点を中心にした窓の中で、アルファが十分ある画素だけを平均する。
+        // 窓は字の大きさに比例させる（固定幅にすると、字が小さいフォントでは
+        // 窓がグラデーションの端まで届いてしまい、色が混ざって判定できなくなる）
+        const rad = Math.max(2, Math.min(10, Math.round(Math.min(w, h) * 0.08)));
+        const sample = (tx, ty) => {
+          let r = 0, g = 0, b = 0, n = 0;
+          const sx0 = Math.max(0, Math.round(tx) - rad), sx1 = Math.min(599, Math.round(tx) + rad);
+          const sy0 = Math.max(0, Math.round(ty) - rad), sy1 = Math.min(199, Math.round(ty) + rad);
+          for (let y = sy0; y <= sy1; y++) {
+            for (let x = sx0; x <= sx1; x++) {
+              const i = (y * 600 + x) * 4;
+              if (data[i + 3] > 200) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
+            }
+          }
+          return n === 0 ? null : [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
+        };
+        return {
+          bounds: { x0, y0, x1, y1 },
+          top: sample(cx, y0 + h * 0.2),
+          bottom: sample(cx, y0 + h * 0.8),
+          left: sample(x0 + w * 0.2, cy),
+          right: sample(x0 + w * 0.8, cy),
+        };
       };
       return {
         solid: draw({ fill: '#ff0000' }),
@@ -245,9 +285,12 @@ describe('ブラウザが要るモジュール', { skip: haveChrome() ? false : 
         horz: draw({ fill: '#ff0000', fill2: '#0000ff', fillMode: 'gradient', fillDir: 'h' }),
       };
     })()`);
-    const red = (c) => c[0] > 150 && c[2] < 100;
-    const blue = (c) => c[2] > 150 && c[0] < 100;
-    assert.ok(red(r.solid.top) && red(r.solid.bottom), `単色が塗れていない: ${JSON.stringify(r.solid)}`);
+    // sample() は窓の中に塗られた画素が無いと null を返す。色判定の前に弾いて、
+    // 「色が違う」のか「そもそも拾えていない」のかを assert メッセージで区別できるようにする
+    const red = (c) => !!c && c[0] > 150 && c[2] < 100;
+    const blue = (c) => !!c && c[2] > 150 && c[0] < 100;
+    assert.ok(red(r.solid.top) && red(r.solid.bottom),
+      `単色が塗れていない: ${JSON.stringify(r.solid)}`);
     assert.ok(red(r.vert.top), `縦: 上が 1 色目でない: ${JSON.stringify(r.vert)}`);
     assert.ok(blue(r.vert.bottom), `縦: 下が 2 色目でない: ${JSON.stringify(r.vert)}`);
     assert.ok(red(r.horz.left), `横: 左が 1 色目でない: ${JSON.stringify(r.horz)}`);
