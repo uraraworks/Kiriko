@@ -352,16 +352,25 @@ export function createCommands(ctx) {
      * tail は発話の終わりに残す余韻秒。dryRun なら切らずに見積もりだけ返す。
      */
     async cut_before_markers({ lead = 0.4, tail = 0.6, kind = 'start', minGapSec = 0,
-                                threshold = 0.06, minSec = 1.0, dryRun = false }) {
+                                threshold = 0.06, minSec = 1.0, from = 0, to = null,
+                                dryRun = false }) {
       const total = P.totalDuration(proj());
+      const f = Math.max(0, Number(from) || 0);
+      const t = to === null || to === undefined ? total : Math.min(total, Number(to) || total);
+      if (f >= t) throw new Error(`from(${f}) は to(${t}) より小さくしてください`);
+
       const starts = proj().markers
         .filter((m) => (m.kind ?? 'note') === kind)
+        .filter((m) => m.time >= f && m.time < t)
         .map((m) => m.time);
-      if (!starts.length) throw new Error(`${kind} マーカーがありません`);
+      if (!starts.length) throw new Error(`${f}〜${t} 秒の範囲に ${kind} マーカーがありません`);
 
-      const { silence } = await cmds.find_silence({ threshold, minSec });
-      const keep = keepRangesFromStarts(starts, silence, total, Math.max(0, Number(lead) || 0),
+      const { silence } = await cmds.find_silence({ threshold, minSec, from: f, to: t });
+      const keep = keepRangesFromStarts(starts, silence, t, Math.max(0, Number(lead) || 0),
         Math.max(0, Number(tail) || 0));
+      // [from, to) の外は絶対に切らない。守りたい区間を「残す区間」として足しておく
+      if (f > 0) keep.push([0, f]);
+      if (t < total) keep.push([t, total]);
       const ranges = cutRangesFromKeep(keep, total, 0, Math.max(0, Number(minGapSec) || 0));
       const removedSec = ranges.reduce((a, [x, y]) => a + (y - x), 0);
       const plan = {
@@ -370,6 +379,8 @@ export function createCommands(ctx) {
         beforeSec: +total.toFixed(3),
         durationSec: +(total - removedSec).toFixed(3),
         startMarkers: starts.length,
+        from: +f.toFixed(3),
+        to: +t.toFixed(3),
       };
       if (dryRun) return { ...plan, dryRun: true, ranges: ranges.map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]) };
       if (!ranges.length) return { ...plan, note: '切る所がありませんでした' };

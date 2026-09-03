@@ -139,3 +139,49 @@ test('しゃべり出しの点: lead で 0 を下回らない', () => {
   const ranges = keepRangesFromStarts([0.1], [], 100, 0.4, 0.6);
   assert.equal(ranges[0][0], 0);
 });
+
+// cut_before_markers の範囲指定（from/to）ガード。
+// 書き起こしを一部だけ流すとマーカーもその範囲にしか無いので、
+// [from, to) の外を「残す区間」として足しておかないと丸ごとカット対象になってしまう。
+test('cut_before_markers の範囲ガード: [from, to) の外は切られない', () => {
+  const total = 600;
+  const from = 100;
+  const to = 300;
+  const starts = [150, 200];   // from〜to の範囲内のしゃべり出しだけ
+  const silence = [];
+  const keep = keepRangesFromStarts(starts, silence, to, 0.4, 0.6);
+  if (from > 0) keep.push([0, from]);
+  if (to < total) keep.push([to, total]);
+  const ranges = cutRangesFromKeep(keep, total, 0, 0);
+  for (const [a, b] of ranges) {
+    assert.ok(a >= from - 0.01 && b <= to + 0.01,
+      `範囲外が切られた: [${a}, ${b}]（守るべき範囲は [${from}, ${to}]）`);
+  }
+});
+
+test('cut_before_markers の範囲ガード: from=0 のときは [0, from] を足さない', () => {
+  const total = 600;
+  const from = 0;
+  const to = 300;
+  const starts = [150];
+  const keep = keepRangesFromStarts(starts, [], to, 0.4, 0.6);
+  if (from > 0) keep.push([0, from]);
+  if (to < total) keep.push([to, total]);
+  // 冒頭（0〜149.6）はしゃべり出しの手前として普通に切られてよい
+  const ranges = cutRangesFromKeep(keep, total, 0, 0);
+  assert.ok(ranges.some(([a, b]) => a === 0), '冒頭の無音は切られるはず');
+});
+
+test('cut_before_markers の範囲ガード: to=total のときは [to, total] を足さない（長さ0を混入させない）', () => {
+  const total = 600;
+  const from = 100;
+  const to = total;
+  const starts = [150];
+  const keep = keepRangesFromStarts(starts, [], to, 0.4, 0.6);
+  if (from > 0) keep.push([0, from]);
+  if (to < total) keep.push([to, total]);
+  const ranges = cutRangesFromKeep(keep, total, 0, 0);
+  for (const [a, b] of ranges) {
+    assert.ok(a >= from - 0.01, `from より手前が切られた: [${a}, ${b}]`);
+  }
+});

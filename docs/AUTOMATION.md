@@ -63,7 +63,7 @@ Chrome 系か Firefox を使うこと。
 | `get_frame` | 指定時刻の完成フレームを PNG dataURL で |
 | `cut_range` | 範囲を切り取る（複数まとめて可）。消した分は在庫に残る |
 | `cut_outside_markers` | 「残す」区間マーカーの外を切る（block 方式。`pad` / `minGapSec` / `dryRun`）|
-| `cut_before_markers` | しゃべり出しマーカーの手前を詰める（onset 方式・本命。`lead` / `tail` / `minGapSec` / `dryRun`）|
+| `cut_before_markers` | しゃべり出しマーカーの手前を詰める（onset 方式・本命。`lead` / `tail` / `minGapSec` / `from` / `to` / `dryRun`）|
 | `list_trims` | 切りすぎた分の在庫。どこで何秒戻せるか |
 | `restore_at` | 継ぎ目から秒単位で戻す（`side`: head / tail）|
 | `get_notes` / `set_notes` | 作業メモ |

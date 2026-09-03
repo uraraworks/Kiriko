@@ -77,7 +77,7 @@ MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1
 | `kiriko_get_audio_levels` | 音量エンベロープを取得する |
 | `kiriko_cut_range` | 範囲を切り取る（複数まとめて可）。**消した分は戻せる** |
 | `kiriko_cut_outside_markers` | 「残す」マーカーの外を切る（block 方式） |
-| `kiriko_cut_before_markers` | しゃべり出しマーカーの手前を詰める（onset 方式・本命） |
+| `kiriko_cut_before_markers` | しゃべり出しマーカーの手前を詰める（onset 方式・本命。`from` / `to` で範囲限定可） |
 | `kiriko_list_trims` | 切った分の在庫。どこで何秒戻せるか |
 | `kiriko_restore_at` | 継ぎ目から秒単位で戻す（切りすぎた時） |
 | `kiriko_add_markers` | マーカーを一括で立てる（素材の時刻でも渡せる／のりしろ指定可）|

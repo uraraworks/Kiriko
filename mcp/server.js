@@ -245,7 +245,9 @@ server.registerTool('kiriko_cut_before_markers', {
     + '**cut_outside_markers と違い、検出漏れは「その手前が詰まらないだけ」で済む**'
     + '（区間ごと消えることがない）ので、ノイズの多い素材ではこちらの方が安全に振れる。\n\n'
     + 'minGapSec より短い隙間は切らずに残す（細切れになるのを防ぐ）。\n'
-    + 'dryRun: true で、切らずに何箇所・何秒切ることになるかだけ確認できる。',
+    + 'dryRun: true で、切らずに何箇所・何秒切ることになるかだけ確認できる。\n\n'
+    + 'kiriko_transcribe を from / to で一部だけ流した時は、ここにも同じ範囲を渡すこと。'
+    + '渡さないと、マーカーが無い残りの区間が丸ごとカット対象になる。',
   inputSchema: {
     lead: z.number().min(0).max(10).optional().describe('しゃべり出しの手前に残す秒（既定 0.4）'),
     tail: z.number().min(0).max(10).optional().describe('発話の終わりに残す余韻秒（既定 0.6）'),
@@ -253,6 +255,8 @@ server.registerTool('kiriko_cut_before_markers', {
     minGapSec: z.number().min(0).optional().describe('これより短い隙間は切らない（既定 0）'),
     threshold: z.number().min(0).max(1).optional().describe('音があるとみなす音量（既定 0.06）'),
     minSec: z.number().min(0).optional().describe('これより短い静かさは区切りにしない（既定 1.0）'),
+    from: z.number().min(0).optional().describe('タイムライン上の開始秒（既定 0）'),
+    to: z.number().min(0).optional().describe('タイムライン上の終了秒（既定は最後まで）'),
     dryRun: z.boolean().optional().describe('true なら切らずに結果の見積もりだけ返す'),
   },
 }, async (a) => asText(await call('cut_before_markers', a, 300000)));
