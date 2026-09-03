@@ -461,21 +461,26 @@ server.registerTool('kiriko_transcribe', {
 
   const markerStyle = a.markerStyle ?? 'onset';
   let markers = null;
+  let skippedRegions = 0;
   if (a.addMarkers && segments.length) {
     if (markerStyle === 'onset') {
       // しゃべり出しの点マーカー。位置は sil.sound[] の各区間の start（タイムライン時刻）を使う。
-      // whisper の segment はどこに重なるか（text を拾うため）だけに使う
+      // whisper の segment はどこに重なるか（text を拾うため）だけに使う。
+      // 幻聴として落とした区間・そもそも何も聞き取れなかった区間にはマーカーを立てない。
+      // 立ててしまうと走行ノイズだけの所が残って、後段のカットが効かなくなる。
       const sorted = [...segments].sort((x, y) => x.timeAtStart - y.timeAtStart);
-      markers = await call('add_markers', {
-        markers: sil.sound.map((region) => {
-          const hit = sorted.find((s) => s.timeAtStart >= region.start && s.timeAtStart < region.end);
-          return {
-            time: region.start, duration: 0,
-            text: (hit?.text ?? '').slice(0, 20),
-            kind: a.markerKind ?? 'start',
-          };
-        }),
-      });
+      const onsets = [];
+      for (const region of sil.sound) {
+        const hit = sorted.find((s) => s.timeAtStart >= region.start && s.timeAtStart < region.end);
+        if (!hit || !hit.text.trim()) continue;   // 声と認められなかった区間は飛ばす
+        onsets.push({
+          time: region.start, duration: 0,
+          text: hit.text.slice(0, 20),
+          kind: a.markerKind ?? 'start',
+        });
+      }
+      skippedRegions = sil.sound.length - onsets.length;
+      markers = onsets.length ? await call('add_markers', { markers: onsets }) : { added: 0 };
     } else {
       // 素材の時刻のまま渡す。タイムライン時刻への変換はブラウザ側が今の並びで行う
       markers = await call('add_markers', {
@@ -494,8 +499,11 @@ server.registerTool('kiriko_transcribe', {
     droppedAsNoise: segments.dropped ?? 0,
     segments,
     markers,
+    skippedRegions,
     note: 'sourceFrom / sourceTo は素材の時刻。timeAtStart は書き起こし開始時点の'
-      + 'タイムライン時刻で、その後の編集で動くので当てにしないこと',
+      + 'タイムライン時刻で、その後の編集で動くので当てにしないこと。'
+      + "skippedRegions は markerStyle: 'onset' で、音はあるが声と認められず"
+      + 'マーカーを立てなかった区間の数（走行ノイズなど）',
   });
 });
 
