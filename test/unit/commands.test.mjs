@@ -227,3 +227,41 @@ test('set_thumbnail_base: 尺の外や、2 つ以上渡すとエラー', async (
   await assert.rejects(() => cmds.set_thumbnail_base({}), /どれか 1 つだけ/);
   await assert.rejects(() => cmds.set_thumbnail_base({ assetName: '無い.png' }), /見つかりません/);
 });
+
+test('save_project: ハンドルが無ければ、保存せずに分かりやすいエラーを投げる', async () => {
+  const { cmds, S } = makeCommands();
+  S.projectFile = null;
+  await assert.rejects(() => cmds.save_project(), /名前を付けて保存/);
+});
+
+test('save_project: ハンドルがあれば ctx.writeToOpenHandle だけを呼び、マーカー数を返す（履歴には積まない）', async () => {
+  const { S } = makeCommands();
+  S.project.markers = [{ id: 'm1', time: 1, kind: 'keep' }, { id: 'm2', time: 2, kind: 'keep' }];
+  S.projectFile = { name: 'テスト.kiriko', handle: {} };
+  let called = 0;
+  const ctx = {
+    S, P, T: null,
+    commit: () => { throw new Error('save_project は commit してはいけない'); },
+    renderAll: () => {}, status: () => {},
+    writeToOpenHandle: async () => { called++; return true; },
+  };
+  const cmds = createCommands(ctx);
+  const r = await cmds.save_project();
+  assert.equal(called, 1);
+  assert.equal(r.ok, true);
+  assert.equal(r.name, 'テスト.kiriko');
+  assert.equal(r.markers, 2);
+  assert.ok(typeof r.savedAt === 'string');
+});
+
+test('save_project: 書き込みに失敗したらエラーを投げる', async () => {
+  const { S } = makeCommands();
+  S.projectFile = { name: 'テスト.kiriko', handle: {} };
+  const ctx = {
+    S, P, T: null,
+    commit: () => {}, renderAll: () => {}, status: () => {},
+    writeToOpenHandle: async () => false,
+  };
+  const cmds = createCommands(ctx);
+  await assert.rejects(() => cmds.save_project(), /保存に失敗/);
+});

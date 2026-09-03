@@ -327,6 +327,16 @@ server.registerTool('kiriko_set_project', {
   inputSchema: { project: z.record(z.any()).describe('kiriko_get_project で取れる形の JSON') },
 }, async (a) => asText(await call('set_project', a, 120000)));
 
+server.registerTool('kiriko_save', {
+  title: 'プロジェクトを保存する',
+  description:
+    '開いているプロジェクトファイルへ上書き保存する。'
+    + 'まだ一度もファイルとして保存していない場合は使えない（人が先に「名前を付けて保存」する必要がある）。'
+    + '長い書き起こしを何回かに分けて流す時は、1 回ごとにこれを呼ぶとよい。'
+    + '接続が切れるとそこまでのマーカーが失われるため。',
+  inputSchema: {},
+}, async () => asText(await call('save_project')));
+
 server.registerTool('kiriko_notes', {
   title: '作業メモの読み書き',
   description: 'プロジェクトの作業メモ。notes を渡すと書き込み、省略すると読み取り。',

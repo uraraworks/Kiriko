@@ -5328,6 +5328,26 @@ const isUntitled = (title) => !title || title === '無題プロジェクト';
  */
 const defaultProjectTitle = () => S.workDir?.name || '無題プロジェクト';
 
+/**
+ * 開いているファイルハンドルへ黙って書き戻す（経路①のみ）。
+ * confirm() が絡む経路（②③）には踏み込まない。
+ * MCP からの保存はこれだけを使う ―― 人がいない時にダイアログで止まると困るため。
+ * @returns {Promise<boolean>} 書けたら true。ハンドルが無い/書けなければ false
+ */
+async function writeToOpenHandle() {
+  const h0 = S.projectFile?.handle;
+  if (!h0) return false;
+  if (isUntitled(S.project.title)) S.project.title = defaultProjectTitle();
+  const text = P.serialize(S.project);
+  try {
+    const w = await h0.createWritable();
+    await w.write(text); await w.close();
+    return true;
+  } catch {
+    return false; // 移動・削除された等
+  }
+}
+
 async function saveProject() {
   if (isUntitled(S.project.title)) S.project.title = defaultProjectTitle();
   const text = P.serialize(S.project);
@@ -5337,14 +5357,9 @@ async function saveProject() {
   const name = S.projectFile?.name ?? `${S.project.title}.kiriko`;
 
   // ① 開いたファイルそのものへ書き戻す
-  const h0 = S.projectFile?.handle;
-  if (h0) {
-    try {
-      const w = await h0.createWritable();
-      await w.write(text); await w.close();
-      status(`${name} に保存しました`);
-      return;
-    } catch { /* 移動・削除された等。下の経路へ */ }
+  if (await writeToOpenHandle()) {
+    status(`${name} に保存しました`);
+    return;
   }
   // ② 作業フォルダを開いていれば、そこへそのまま保存する（毎回選ばなくてよい）
   const dir = await FS.writableDir().catch(() => null);
@@ -6655,6 +6670,7 @@ const mcpCommands = createCommands({
   TR, cutRanges, restoreAt,
   seekTo: (t) => { setMode('program'); seekProgram(t, true); renderAll(); },
   setThumbBase,
+  writeToOpenHandle,
 });
 
 /**

@@ -109,6 +109,27 @@ export function createCommands(ctx) {
     /** プロジェクト全体（大きいので明示的に呼ぶ用） */
     async get_project() { return proj(); },
 
+    /**
+     * 開いているプロジェクトファイルへ黙って上書き保存する。
+     *
+     * confirm() が出る経路（作業フォルダへの初回保存・showSaveFilePicker）には入らない。
+     * 「まだ一度もファイルとして保存していない」状態は人に一度保存してもらう必要がある。
+     * 長い書き起こしを何回かに分けて流す時に、区切りごとにこれを呼んで
+     * 接続断でのマーカー消失を防ぐのが主な用途。履歴には積まない（保存は編集ではない）。
+     */
+    async save_project() {
+      if (!S.projectFile?.handle) {
+        throw new Error('まだファイルとして保存されていません。Kiriko で一度「名前を付けて保存」してから呼んでください');
+      }
+      const ok = await ctx.writeToOpenHandle();
+      if (!ok) throw new Error('保存に失敗しました（ファイルが移動・削除された可能性があります）。Kiriko で一度「名前を付けて保存」し直してください');
+      const name = S.projectFile.name;
+      const markers = proj().markers.length;
+      const savedAt = new Date().toISOString();
+      status(`MCP: ${name} に保存しました（マーカー ${markers} 件）`);
+      return { ok: true, name, markers, savedAt };
+    },
+
     /** プロジェクト全体を差し替える。素材の対応付けは名前で取り直す */
     async set_project({ project }) {
       if (!project || typeof project !== 'object') throw new Error('project が要ります');
