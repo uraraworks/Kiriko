@@ -204,6 +204,8 @@ export function autoThresholds(levels, binsPerSec, {
 
   // 節の間を線形補間
   const out = new Array(n);
+  // 節が 1 つしか無い（levels がごく短い）時は補間する相手がいないので、そのまま埋める
+  if (nodeIdx.length === 1) return out.fill(nodeThresholds[0]);
   for (let k = 0; k < nodeIdx.length - 1; k++) {
     const i0 = nodeIdx[k], i1 = nodeIdx[k + 1];
     const t0 = nodeThresholds[k], t1 = nodeThresholds[k + 1];
