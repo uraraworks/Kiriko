@@ -173,19 +173,31 @@ async function request(h) {
   try { return (await h.requestPermission?.({ mode: 'read' })) === 'granted'; } catch { return false; }
 }
 
-async function findInDir(dir, name, depth) {
+// dir.entries() は 1 回だけまわす。ファイルはその場で照合し、フォルダは配列に貯めて後で潜る
+// （「同じ階層を先に全部見てから、サブフォルダへ降りる」という探索順は維持する）。
+// 1 エントリごとに catch するのがポイント：macOS の .key/.app などパッケージ形式のフォルダが
+// 混ざっていると、そのエントリだけで例外が出ることがある。ここで全体を諦めると、列挙順で
+// たまたま後ろに来た兄弟フォルダ（本当に探したいファイルがある方）ごと巻き添えで
+// 見つからなくなってしまう。
+export async function findInDir(dir, name, depth) {
+  const subs = [];
   try {
     for await (const [key, entry] of dir.entries()) {
-      if (entry.kind === 'file' && key === name) return { file: await entry.getFile(), handle: entry };
+      try {
+        if (entry.kind === 'file') {
+          if (key === name) return { file: await entry.getFile(), handle: entry };
+        } else if (depth > 0) {
+          subs.push(entry);
+        }
+      } catch { /* このエントリだけ読めない（壊れたパッケージ等）ので飛ばす */ }
     }
-    if (depth > 0) {
-      for await (const [, entry] of dir.entries()) {
-        if (entry.kind !== 'directory') continue;
-        const hit = await findInDir(entry, name, depth - 1);
-        if (hit) return hit;
-      }
-    }
-  } catch { /* 許可が無い等 */ }
+  } catch { /* 列挙そのものができない（許可が無い等） */ }
+  for (const sub of subs) {
+    try {
+      const hit = await findInDir(sub, name, depth - 1);
+      if (hit) return hit;
+    } catch { /* このサブフォルダだけ飛ばして次を試す */ }
+  }
   return null;
 }
 
