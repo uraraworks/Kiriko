@@ -99,12 +99,21 @@ server.registerTool('kiriko_find_silence', {
     + 'しゃべっている所だけ残す作業の下ごしらえに使う。'
     + 'sound（音がある区間）に kind=keep で立てるか、'
     + 'silence（静かな区間）に kind=cut で立てるか、どちらでもよい。'
-    + 'どちらでも Kiriko 側で 1 つずつ確認しながら消していける。',
+    + 'どちらでも Kiriko 側で 1 つずつ確認しながら消していける。\n\n'
+    + '**走行中と停車中が混ざる素材では固定のしきい値が効かない。** '
+    + '実測では 0.06 だと走行中の暗騒音がずっと閾値を超え無音が一切見つからず、'
+    + '0.12 だと今度は停車中の落ち着いた声を無音と誤判定して冒頭の挨拶が丸ごとカット対象になった。'
+    + 'threshold に \'auto\' を渡すと、前後 30 秒の暗騒音を基準にしきい値を自動で作る'
+    + '（静かな所では下がり、うるさい所では自動で上がる）。',
   inputSchema: {
-    threshold: z.number().min(0).max(1).optional().describe('無音とみなす音量（0〜1、既定 0.06）'),
+    threshold: z.union([z.number().min(0).max(1), z.literal('auto')]).optional()
+      .describe("無音とみなす音量（0〜1、既定 0.06）。'auto' で前後の暗騒音から自動調整する"),
     minSec: z.number().min(0).optional().describe('これより短い静かさは無視（秒、既定 1.0）'),
     from: z.number().min(0).optional(),
     to: z.number().min(0).optional(),
+    autoWindowSec: z.number().min(1).optional().describe("threshold: 'auto' 時の判定窓（秒、既定 30）"),
+    autoPercentile: z.number().min(0).max(1).optional().describe("threshold: 'auto' 時の暗騒音の分位（既定 0.2）"),
+    autoMult: z.number().min(0).optional().describe("threshold: 'auto' 時、暗騒音に掛ける倍率（既定 2.0）"),
   },
 }, async (a) => asText(await call('find_silence', a, 300000)));
 
@@ -253,10 +262,14 @@ server.registerTool('kiriko_cut_before_markers', {
     tail: z.number().min(0).max(10).optional().describe('発話の終わりに残す余韻秒（既定 0.6）'),
     kind: z.enum(['start', 'keep', 'cut', 'note']).optional().describe("対象のマーカー種別（既定 'start'）"),
     minGapSec: z.number().min(0).optional().describe('これより短い隙間は切らない（既定 0）'),
-    threshold: z.number().min(0).max(1).optional().describe('音があるとみなす音量（既定 0.06）'),
+    threshold: z.union([z.number().min(0).max(1), z.literal('auto')]).optional()
+      .describe("音があるとみなす音量（既定 0.06）。'auto' で前後の暗騒音から自動調整する"),
     minSec: z.number().min(0).optional().describe('これより短い静かさは区切りにしない（既定 1.0）'),
     from: z.number().min(0).optional().describe('タイムライン上の開始秒（既定 0）'),
     to: z.number().min(0).optional().describe('タイムライン上の終了秒（既定は最後まで）'),
+    autoWindowSec: z.number().min(1).optional().describe("threshold: 'auto' 時の判定窓（秒、既定 30）"),
+    autoPercentile: z.number().min(0).max(1).optional().describe("threshold: 'auto' 時の暗騒音の分位（既定 0.2）"),
+    autoMult: z.number().min(0).optional().describe("threshold: 'auto' 時、暗騒音に掛ける倍率（既定 2.0）"),
     dryRun: z.boolean().optional().describe('true なら切らずに結果の見積もりだけ返す'),
   },
 }, async (a) => asText(await call('cut_before_markers', a, 300000)));
@@ -401,8 +414,12 @@ server.registerTool('kiriko_transcribe', {
     to: z.number().min(0).optional().describe('タイムライン上の終了秒（既定は最後まで）'),
     language: z.string().optional().describe("言語（既定 'ja'）"),
     model: z.string().optional().describe('モデル名。kiriko_whisper_models で確認できる'),
-    threshold: z.number().min(0).max(1).optional().describe('音があるとみなす音量（既定 0.06）'),
+    threshold: z.union([z.number().min(0).max(1), z.literal('auto')]).optional()
+      .describe("音があるとみなす音量（既定 0.06）。'auto' で前後の暗騒音から自動調整する"),
     minSec: z.number().min(0).optional().describe('これより短い静かさは区切りにしない（既定 0.6）'),
+    autoWindowSec: z.number().min(1).optional().describe("threshold: 'auto' 時の判定窓（秒、既定 30）"),
+    autoPercentile: z.number().min(0).max(1).optional().describe("threshold: 'auto' 時の暗騒音の分位（既定 0.2）"),
+    autoMult: z.number().min(0).optional().describe("threshold: 'auto' 時、暗騒音に掛ける倍率（既定 2.0）"),
     addMarkers: z.boolean().optional().describe('true なら結果をそのままマーカーにする'),
     markerStyle: z.enum(['onset', 'block']).optional().describe(
       "マーカーの形。'onset'（既定）はしゃべり出しの点、'block' は従来の区間マーカー"),
@@ -423,6 +440,7 @@ server.registerTool('kiriko_transcribe', {
   // 1) 音がある区間を Kiriko に聞く（無音を渡さないため）
   const sil = await call('find_silence', {
     threshold: a.threshold ?? 0.06, minSec: a.minSec ?? 0.6, from: a.from ?? 0, to: a.to ?? null,
+    autoWindowSec: a.autoWindowSec, autoPercentile: a.autoPercentile, autoMult: a.autoMult,
   }, 300000);
   if (!sil.sound.length) return asText({ model: model.name, segments: [], note: '音がある区間が見つかりませんでした' });
 

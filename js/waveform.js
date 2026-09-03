@@ -165,3 +165,53 @@ export function bufferPeaks(buf, binsPerSec = BINS_PER_SEC) {
   }
   return { peaks, scale: 1 / Math.max(0.06, top) };
 }
+
+/**
+ * 区間ごとの「暗騒音」を基準にした、可変のしきい値を作る。
+ *
+ * 固定値だと、走行中（暗騒音が高い）と停車中（静か）の両方は面倒見られない。
+ * その前後 windowSec の音量分布の下側 percentile を「そこでの暗騒音」とみなし、
+ * その mult 倍をしきい値にする。静かな所では下がり、うるさい所では自動で上がる。
+ *
+ * @param {number[]} levels 音量（0〜1）
+ * @param {number} binsPerSec levels の 1 秒あたりの点数
+ * @param {object} opt
+ * @returns {number[]} levels と同じ長さの、点ごとのしきい値
+ */
+export function autoThresholds(levels, binsPerSec, {
+  windowSec = 30, percentile = 0.2, mult = 2.0, min = 0.03, max = 0.5,
+} = {}) {
+  if (!levels.length) return [];
+  const n = levels.length;
+  const clamp = (v) => Math.min(max, Math.max(min, v));
+
+  // 全点で窓のソートをすると重いので、1 秒ごとの「節」でだけ分位を計算し、
+  // 節の間は線形補間する。素材が短くて節が 1 つしかない場合も破綻しないようにする。
+  const nodeStep = Math.max(1, Math.round(binsPerSec));
+  const nodeIdx = [];
+  for (let i = 0; i < n; i += nodeStep) nodeIdx.push(i);
+  if (nodeIdx[nodeIdx.length - 1] !== n - 1) nodeIdx.push(n - 1);
+
+  const halfWin = Math.max(1, Math.round((windowSec / 2) * binsPerSec));
+  const nodeThresholds = nodeIdx.map((i) => {
+    const lo = Math.max(0, i - halfWin);
+    const hi = Math.min(n, i + halfWin + 1);
+    const window = Array.from(levels.slice(lo, hi)).sort((a, b) => a - b);
+    const p = Math.min(window.length - 1, Math.max(0, Math.round(percentile * (window.length - 1))));
+    const noiseFloor = window[p];
+    return clamp(noiseFloor * mult);
+  });
+
+  // 節の間を線形補間
+  const out = new Array(n);
+  for (let k = 0; k < nodeIdx.length - 1; k++) {
+    const i0 = nodeIdx[k], i1 = nodeIdx[k + 1];
+    const t0 = nodeThresholds[k], t1 = nodeThresholds[k + 1];
+    const span = i1 - i0;
+    for (let i = i0; i <= i1; i++) {
+      const f = span === 0 ? 0 : (i - i0) / span;
+      out[i] = t0 + (t1 - t0) * f;
+    }
+  }
+  return out;
+}

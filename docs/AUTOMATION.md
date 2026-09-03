@@ -58,7 +58,7 @@ Chrome 系か Firefox を使うこと。
 | `add_telops` | テロップを一括で追加（プリセット指定・複数行可）|
 | `get_subtitles` | 字幕（SRT）一覧。長すぎ・速すぎの警告付き |
 | `set_subtitles` | 字幕（SRT）をまとめて入れる・更新する（`mode`: replace / merge、`autoSplit`）|
-| `find_silence` | 無音／有音の区間を音量から求める |
+| `find_silence` | 無音／有音の区間を音量から求める（`threshold: 'auto'` で前後の暗騒音から自動調整）|
 | `get_audio_levels` | 音量エンベロープ（0〜1）|
 | `get_frame` | 指定時刻の完成フレームを PNG dataURL で |
 | `cut_range` | 範囲を切り取る（複数まとめて可）。消した分は在庫に残る |

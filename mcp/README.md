@@ -73,7 +73,7 @@ MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1
 | `kiriko_summary` | 編集内容の要約（長さ・クリップ数・テロップ・マーカーなど）。**まずこれを呼ぶ** |
 | `kiriko_get_clips` | カットの並びを取得する |
 | `kiriko_get_markers` | マーカー一覧を取得する |
-| `kiriko_find_silence` | 無音／有音の区間を調べる。カットの下ごしらえの起点 |
+| `kiriko_find_silence` | 無音／有音の区間を調べる。カットの下ごしらえの起点（`threshold: 'auto'` で前後の暗騒音から自動調整）|
 | `kiriko_get_audio_levels` | 音量エンベロープを取得する |
 | `kiriko_cut_range` | 範囲を切り取る（複数まとめて可）。**消した分は戻せる** |
 | `kiriko_cut_outside_markers` | 「残す」マーカーの外を切る（block 方式） |

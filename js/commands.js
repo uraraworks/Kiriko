@@ -4,7 +4,7 @@
 //  - 読み取りは軽い要約を既定にする（プロジェクト全体は明示的に要求された時だけ）
 //  - 書き込みは必ず履歴に積んで、人間が Cmd+Z で戻せるようにする
 
-import { BINS_PER_SEC } from './waveform.js';
+import { BINS_PER_SEC, autoThresholds } from './waveform.js';
 import { cutRangesFromKeep, keepRangesFromStarts } from './edit.js';
 import * as SUB from './subtitles.js';
 
@@ -353,6 +353,7 @@ export function createCommands(ctx) {
      */
     async cut_before_markers({ lead = 0.4, tail = 0.6, kind = 'start', minGapSec = 0,
                                 threshold = 0.06, minSec = 1.0, from = 0, to = null,
+                                autoWindowSec, autoPercentile, autoMult,
                                 dryRun = false }) {
       const total = P.totalDuration(proj());
       const f = Math.max(0, Number(from) || 0);
@@ -365,7 +366,9 @@ export function createCommands(ctx) {
         .map((m) => m.time);
       if (!starts.length) throw new Error(`${f}〜${t} 秒の範囲に ${kind} マーカーがありません`);
 
-      const { silence } = await cmds.find_silence({ threshold, minSec, from: f, to: t });
+      const { silence } = await cmds.find_silence({
+        threshold, minSec, from: f, to: t, autoWindowSec, autoPercentile, autoMult,
+      });
       const keep = keepRangesFromStarts(starts, silence, t, Math.max(0, Number(lead) || 0),
         Math.max(0, Number(tail) || 0));
       // [from, to) の外は絶対に切らない。守りたい区間を「残す区間」として足しておく
@@ -451,17 +454,32 @@ export function createCommands(ctx) {
 
     /**
      * 無音（しゃべっていない）区間を探す。
-     * threshold は 0〜1。minSec より短い静かさは無視する。
+     * threshold は 0〜1、または 'auto'。minSec より短い静かさは無視する。
+     *
+     * threshold: 'auto' は前後の暗騒音を基準にした可変しきい値（autoThresholds）を使う。
+     * 走行中と停車中が混ざる素材では固定値がどちらかで必ず壊れるため
+     * （実測: 0.06 だと走行中に無音が見つからず、0.12 だと停車中の声を無音と誤判定した）。
      */
-    async find_silence({ threshold = 0.06, minSec = 1.0, from = 0, to = null }) {
+    async find_silence({ threshold = 0.06, minSec = 1.0, from = 0, to = null,
+                          autoWindowSec, autoPercentile, autoMult }) {
       const total = P.totalDuration(proj());
       const t1 = Math.min(total, to ?? total);
       const bps = 20;
       const levels = await ctx.timelineLevels(from, t1, bps);
+
+      const isAuto = threshold === 'auto';
+      const autoOpt = {
+        ...(autoWindowSec != null ? { windowSec: autoWindowSec } : {}),
+        ...(autoPercentile != null ? { percentile: autoPercentile } : {}),
+        ...(autoMult != null ? { mult: autoMult } : {}),
+      };
+      const th = isAuto ? autoThresholds(levels, bps, autoOpt) : null;
+      const quietAt = (i) => (isAuto ? levels[i] < th[i] : levels[i] < threshold);
+
       const out = [];
       let start = null;
       for (let i = 0; i < levels.length; i++) {
-        const quiet = levels[i] < threshold;
+        const quiet = quietAt(i);
         if (quiet && start === null) start = from + i / bps;
         if (!quiet && start !== null) {
           const end = from + i / bps;
@@ -478,7 +496,26 @@ export function createCommands(ctx) {
         prev = s.end;
       }
       if (t1 - prev > 0.05) loud.push({ start: +prev.toFixed(2), end: +t1.toFixed(2) });
-      return { threshold, minSec, silence: out, sound: loud };
+
+      const result = { threshold, minSec, silence: out, sound: loud };
+      if (isAuto) {
+        // 人が「どのくらいの値になったか」を見るための代表値。長い素材でも肥大しないよう間引く
+        const stepSec = Math.max(10, Math.ceil((t1 - from) / 60 / 10) * 10);
+        const sample = [];
+        for (let tSec = from; tSec <= t1 && sample.length < 60; tSec += stepSec) {
+          const i = Math.min(th.length - 1, Math.round((tSec - from) * bps));
+          sample.push({ at: +tSec.toFixed(1), threshold: +th[i].toFixed(4) });
+        }
+        result.autoThreshold = {
+          windowSec: autoOpt.windowSec ?? 30,
+          percentile: autoOpt.percentile ?? 0.2,
+          mult: autoOpt.mult ?? 2.0,
+          min: autoOpt.min ?? 0.03,
+          max: autoOpt.max ?? 0.5,
+          sample,
+        };
+      }
+      return result;
     },
 
     /** 指定時刻のフレームを PNG（base64）で返す。AI が中身を見るため */
