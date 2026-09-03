@@ -821,18 +821,33 @@ MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1
 
 「セリフの所に keep」でも「無音の所に cut」でも、Kiriko 側は同じ流れで処理できる。
 
-**本命の流れ**（書き起こしから）
+**本命の流れ**（書き起こしから・しゃべり出しマーカー方式）
 
 ```
-kiriko_transcribe { addMarkers: true, pad: 3 }   → セリフに「残す」区間マーカー
+kiriko_transcribe { addMarkers: true }                → しゃべり出しに点マーカー（markerStyle: 'onset' が既定）
+kiriko_cut_before_markers { dryRun: true }             → まず見積もりを出す
+kiriko_cut_before_markers { minGapSec: 5 }             → 実行（手前の無音だけを詰める）
+[ ] キー / ボタン                                       → 切りすぎた所を戻す
+```
+
+区間マーカー（block 方式）は「セリフの区間ごと」whisper の検出漏れの影響を受けるが、
+点マーカー（onset 方式）なら検出漏れは「その手前が詰まらないだけ」で済む。
+しゃべり終わりは無音区間から自動で判定するので、指定は要らない。
+`lead`（既定 0.4 秒）はしゃべり出しの手前に残すのりしろ。子音は音量の立ち上がりが
+実際より遅れるので、0 にすると語頭が欠ける。`dryRun` は実行前に人間へ見積もりを見せるためのもの。
+
+**従来の流れ**（区間マーカー・block 方式）
+
+```
+kiriko_transcribe { addMarkers: true, markerStyle: 'block', pad: 3 }   → セリフに「残す」区間マーカー
 kiriko_cut_outside_markers { pad: 3, dryRun: true }  → まず見積もりを出す
 kiriko_cut_outside_markers { pad: 3, minGapSec: 5 }  → 実行
 [ ] キー / ボタン                                → 切りすぎた所を戻す
 ```
 
 `pad`（のりしろ）が要る。whisper のマーカーはセリフにぴったり張り付くので、
-0 のままだと語頭・語尾が欠ける。`dryRun` は「95 分の素材から 79 分消します」を
-実行前に人間へ見せるためのもの。
+0 のままだと語頭・語尾が欠ける。ノイズの多い素材では検出漏れがそのまま
+「セリフが丸ごと消える」になりうるので、いまは onset 方式を優先する。
 
 セリフの書き起こしは `whisper.cpp` をローカルで回す（音声はマシンから出ない）。
 **無音には whisper をかけない** — 何も言っていない所に文章を作ってしまうため、

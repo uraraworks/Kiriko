@@ -5,7 +5,7 @@
 //  - 書き込みは必ず履歴に積んで、人間が Cmd+Z で戻せるようにする
 
 import { BINS_PER_SEC } from './waveform.js';
-import { cutRangesFromKeep } from './edit.js';
+import { cutRangesFromKeep, keepRangesFromStarts } from './edit.js';
 import * as SUB from './subtitles.js';
 
 /**
@@ -337,6 +337,45 @@ export function createCommands(ctx) {
 
       const r = ctx.cutRanges(ranges, 'マーカー区間の外', 'outside-markers');
       status(`MCP: マーカー区間の外 ${ranges.length} 箇所（${removedSec.toFixed(1)} 秒）を切り取りました`);
+      return { ...plan, ...r, hint: '切りすぎた所は restore_at で秒単位に戻せます' };
+    },
+
+    /**
+     * しゃべり出しの点マーカーの手前の無音だけを詰める。
+     *
+     * cut_outside_markers と違い、しゃべり出しさえ検出できていれば、
+     * しゃべり終わりは無音区間から自動で決まる。検出漏れがあっても
+     * 「その手前が詰まらないだけ」で済むので、ノイズの多い素材で安全に振れる。
+     *
+     * lead はしゃべり出しの手前に残す秒（子音は音量が小さく、音量の立ち上がりは
+     * 実際のしゃべり出しより遅れるので、0 にすると語頭が欠ける）。
+     * tail は発話の終わりに残す余韻秒。dryRun なら切らずに見積もりだけ返す。
+     */
+    async cut_before_markers({ lead = 0.4, tail = 0.6, kind = 'start', minGapSec = 0,
+                                threshold = 0.06, minSec = 1.0, dryRun = false }) {
+      const total = P.totalDuration(proj());
+      const starts = proj().markers
+        .filter((m) => (m.kind ?? 'note') === kind)
+        .map((m) => m.time);
+      if (!starts.length) throw new Error(`${kind} マーカーがありません`);
+
+      const { silence } = await cmds.find_silence({ threshold, minSec });
+      const keep = keepRangesFromStarts(starts, silence, total, Math.max(0, Number(lead) || 0),
+        Math.max(0, Number(tail) || 0));
+      const ranges = cutRangesFromKeep(keep, total, 0, Math.max(0, Number(minGapSec) || 0));
+      const removedSec = ranges.reduce((a, [x, y]) => a + (y - x), 0);
+      const plan = {
+        cut: ranges.length,
+        removedSec: +removedSec.toFixed(3),
+        beforeSec: +total.toFixed(3),
+        durationSec: +(total - removedSec).toFixed(3),
+        startMarkers: starts.length,
+      };
+      if (dryRun) return { ...plan, dryRun: true, ranges: ranges.map(([x, y]) => [+x.toFixed(2), +y.toFixed(2)]) };
+      if (!ranges.length) return { ...plan, note: '切る所がありませんでした' };
+
+      const r = ctx.cutRanges(ranges, 'しゃべり出しの手前', 'before-markers');
+      status(`MCP: しゃべり出しの手前 ${ranges.length} 箇所（${removedSec.toFixed(1)} 秒）を切り取りました`);
       return { ...plan, ...r, hint: '切りすぎた所は restore_at で秒単位に戻せます' };
     },
 

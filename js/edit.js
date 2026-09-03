@@ -85,3 +85,39 @@ export function cutRangesFromKeep(keep, total, pad = 0, minGapSec = 0) {
   if (total - prev > 0.02) gaps.push([prev, total]);
   return gaps.filter(([a, b]) => b - a >= minGapSec);
 }
+
+/**
+ * しゃべり出しの点から「残す区間」を組み立てる。
+ *
+ * 区間マーカー方式と違い、しゃべり出しだけを点で持つ。検出漏れがあっても
+ * 「その手前が詰まらないだけ」で済む（区間ごと消えることがない）ので、
+ * ノイズの多い素材ではこちらを本命にする。
+ *
+ * @param {number[]} starts しゃべり出しのタイムライン秒（順不同でよい）
+ * @param {Array<{start:number,end:number}>} silence 無音区間（find_silence の silence）
+ * @param {number} total 全体の尺
+ * @param {number} lead しゃべり出しの手前に残す秒
+ * @param {number} tail 発話の終わりに残す余韻秒
+ * @returns {Array<[number,number]>} 残す区間（時刻順）
+ */
+export function keepRangesFromStarts(starts, silence, total, lead = 0.4, tail = 0.6) {
+  const uniq = [...new Set(starts)].sort((a, b) => a - b);
+  if (!uniq.length) return [];
+  const sil = [...silence].sort((a, b) => a.start - b.start);
+
+  const out = [];
+  for (let i = 0; i < uniq.length; i++) {
+    const s = uniq[i];
+    const a = Math.max(0, s - lead);
+    let end = total;
+    const nextSilence = sil.find((x) => x.start > s);
+    if (nextSilence) end = Math.min(total, nextSilence.start + tail);
+    const sNext = uniq[i + 1];
+    if (sNext !== undefined) {
+      const cap = Math.max(s, sNext - lead);
+      end = Math.min(end, cap);
+    }
+    out.push([a, end]);
+  }
+  return out;
+}

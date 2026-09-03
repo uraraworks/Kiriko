@@ -1,7 +1,9 @@
 // タイムラインの時刻計算。ここが狂うとテロップや音が映像とずれる。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dropIndex, rippleTime, insertTime, trimShift, cutRangesFromKeep } from '../../js/edit.js';
+import {
+  dropIndex, rippleTime, insertTime, trimShift, cutRangesFromKeep, keepRangesFromStarts,
+} from '../../js/edit.js';
 
 test('dropIndex: 枠の前半なら手前、後半なら次へ', () => {
   const others = [4, 4, 4];   // 0-4, 4-8, 8-12
@@ -93,4 +95,47 @@ test('残す区間から切る区間を求める（マーカーの外を切る�
 
   // 重なったマーカーは 1 つにまとめる
   assert.deepEqual(cutRangesFromKeep([[10, 30], [20, 40]], 100), [[0, 10], [40, 100]]);
+});
+
+test('しゃべり出しの点から残す区間を組み立てる（基本形）', () => {
+  // 10 秒でしゃべり出し、20 秒から無音。次のしゃべり出しは 40 秒
+  const starts = [10, 40];
+  const silence = [{ start: 20, end: 35 }];
+  // 10 秒のしゃべり出し: 手前 lead=0.4 を残し、20 秒の無音開始 + tail=0.6 で終わる
+  // 40 秒のしゃべり出し: 手前は同じく lead
+  assert.deepEqual(keepRangesFromStarts(starts, silence, 100, 0.4, 0.6), [
+    [9.6, 20.6],
+    [39.6, 100],
+  ]);
+});
+
+test('しゃべり出しの点: 無音が見つからなければ total まで伸びる', () => {
+  assert.deepEqual(keepRangesFromStarts([10], [], 100, 0.4, 0.6), [[9.6, 100]]);
+});
+
+test('しゃべり出しの点: 次のしゃべり出しの手前で打ち切られる', () => {
+  // 無音が見つかっても、次のしゃべり出しの lead 手前より後ろには伸びない
+  const starts = [10, 15];
+  const silence = [{ start: 30, end: 50 }];   // 無音は遠くにしかなく…
+  assert.deepEqual(keepRangesFromStarts(starts, silence, 100, 0.4, 0.6), [
+    [9.6, 14.6],    // 次のしゃべり出し(15) - lead(0.4) で打ち切り
+    [14.6, 30.6],   // 15 秒側は遠くの無音(30) + tail(0.6) まで伸びる
+  ]);
+});
+
+test('しゃべり出しの点: 次のしゃべり出しが近すぎても s 自体は下限にする', () => {
+  // s=10, s_next=10.2 のとき s_next-lead(9.8) は s(10) より小さいので、下限は s
+  const starts = [10, 10.2];
+  const silence = [];
+  const ranges = keepRangesFromStarts(starts, silence, 100, 0.4, 0.6);
+  assert.equal(ranges[0][1], 10);   // s を下回らない
+});
+
+test('しゃべり出しの点: starts が空なら空配列', () => {
+  assert.deepEqual(keepRangesFromStarts([], [], 100), []);
+});
+
+test('しゃべり出しの点: lead で 0 を下回らない', () => {
+  const ranges = keepRangesFromStarts([0.1], [], 100, 0.4, 0.6);
+  assert.equal(ranges[0][0], 0);
 });

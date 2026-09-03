@@ -1163,6 +1163,7 @@ function addSubtitle() {
 
 const MARKER_KINDS = {
   keep: { name: '残す', color: '#4bd18a' },
+  start: { name: 'しゃべり出し', color: '#4bb8d1' },
   cut: { name: '消す', color: '#e0574f' },
   note: { name: 'メモ', color: '#e0b84c' },
 };

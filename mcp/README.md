@@ -76,7 +76,8 @@ MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1
 | `kiriko_find_silence` | 無音／有音の区間を調べる。カットの下ごしらえの起点 |
 | `kiriko_get_audio_levels` | 音量エンベロープを取得する |
 | `kiriko_cut_range` | 範囲を切り取る（複数まとめて可）。**消した分は戻せる** |
-| `kiriko_cut_outside_markers` | 「残す」マーカーの外を切る。書き起こしからの本命の流れ |
+| `kiriko_cut_outside_markers` | 「残す」マーカーの外を切る（block 方式） |
+| `kiriko_cut_before_markers` | しゃべり出しマーカーの手前を詰める（onset 方式・本命） |
 | `kiriko_list_trims` | 切った分の在庫。どこで何秒戻せるか |
 | `kiriko_restore_at` | 継ぎ目から秒単位で戻す（切りすぎた時） |
 | `kiriko_add_markers` | マーカーを一括で立てる（素材の時刻でも渡せる／のりしろ指定可）|
@@ -96,7 +97,10 @@ MCP クライアント ──stdio── mcp/server.js ──WebSocket(127.0.0.1
 
 使用例（AI への指示イメージ）:
 「`kiriko_find_silence` で無音を調べて、3 秒以上の所に切り取り用のマーカーを立てて」
-「書き起こしてマーカーを立てて、のりしろ 3 秒でその外を切って」
+「書き起こしてしゃべり出しにマーカーを立てて、その手前の無音を詰めて」
+（`kiriko_transcribe`（既定 `markerStyle: 'onset'`）→ `kiriko_cut_before_markers` の流れ。
+従来の区間マーカー方式は「書き起こしてマーカーを立てて、のりしろ 3 秒でその外を切って」
+（`markerStyle: 'block'` → `kiriko_cut_outside_markers`）で使える）
 
 ### どのくらい任せられるか（実測）
 

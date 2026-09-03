@@ -232,6 +232,31 @@ server.registerTool('kiriko_cut_outside_markers', {
   },
 }, async (a) => asText(await call('cut_outside_markers', a, 300000)));
 
+server.registerTool('kiriko_cut_before_markers', {
+  title: 'しゃべり出しマーカーの手前を詰める',
+  description:
+    'しゃべり出しの点マーカーの手前にある無音だけを詰める。'
+    + "kiriko_transcribe（markerStyle: 'onset'、既定）でしゃべり出しマーカーを立ててから、"
+    + 'これを呼ぶのが本命の流れ。\n\n'
+    + 'しゃべり終わりは音量から自動で判定するので、指定しなくてよい'
+    + '（次のしゃべり出しの手前で打ち切られる）。\n\n'
+    + 'lead は 0.4 秒が既定。子音は音量が小さく、音量の立ち上がりは'
+    + '実際のしゃべり出しより遅れるので、0 にすると語頭が欠ける。\n\n'
+    + '**cut_outside_markers と違い、検出漏れは「その手前が詰まらないだけ」で済む**'
+    + '（区間ごと消えることがない）ので、ノイズの多い素材ではこちらの方が安全に振れる。\n\n'
+    + 'minGapSec より短い隙間は切らずに残す（細切れになるのを防ぐ）。\n'
+    + 'dryRun: true で、切らずに何箇所・何秒切ることになるかだけ確認できる。',
+  inputSchema: {
+    lead: z.number().min(0).max(10).optional().describe('しゃべり出しの手前に残す秒（既定 0.4）'),
+    tail: z.number().min(0).max(10).optional().describe('発話の終わりに残す余韻秒（既定 0.6）'),
+    kind: z.enum(['start', 'keep', 'cut', 'note']).optional().describe("対象のマーカー種別（既定 'start'）"),
+    minGapSec: z.number().min(0).optional().describe('これより短い隙間は切らない（既定 0）'),
+    threshold: z.number().min(0).max(1).optional().describe('音があるとみなす音量（既定 0.06）'),
+    minSec: z.number().min(0).optional().describe('これより短い静かさは区切りにしない（既定 1.0）'),
+    dryRun: z.boolean().optional().describe('true なら切らずに結果の見積もりだけ返す'),
+  },
+}, async (a) => asText(await call('cut_before_markers', a, 300000)));
+
 server.registerTool('kiriko_list_trims', {
   title: 'カットで消した分の在庫',
   description:
@@ -352,7 +377,9 @@ server.registerTool('kiriko_transcribe', {
     + '**音がある区間だけを渡す**ので、無音での幻聴（何も言っていない所に文が出る）を避けられ、'
     + '処理時間も喋っていない分だけ減る。\n\n'
     + 'sourcePaths に素材の絶対パスを渡すこと（ブラウザ側はファイルの場所を知らないため）。\n'
-    + 'addMarkers: true にすると、そのまま「残す」区間マーカーとして立てる。\n\n'
+    + "addMarkers: true にすると、そのまま結果をマーカーにする。markerStyle は既定が 'onset'"
+    + '（しゃべり出しの点マーカー。次は kiriko_cut_before_markers を呼ぶのが本命の流れ）で、'
+    + "'block' を渡すと従来通り「残す」区間マーカーになる（次は kiriko_cut_outside_markers）。\n\n"
     + '**結果は素材の時刻で返す**ので、書き起こしの最中に人間がカットを進めていても、'
     + 'マーカーはずれた場所に着地しない（タイムライン時刻への変換は立てる直前に行う）。'
     + '素材が切られてしまった箇所のマーカーは落ちる。\n\n'
@@ -372,9 +399,13 @@ server.registerTool('kiriko_transcribe', {
     model: z.string().optional().describe('モデル名。kiriko_whisper_models で確認できる'),
     threshold: z.number().min(0).max(1).optional().describe('音があるとみなす音量（既定 0.06）'),
     minSec: z.number().min(0).optional().describe('これより短い静かさは区切りにしない（既定 0.6）'),
-    addMarkers: z.boolean().optional().describe('true なら結果をそのまま区間マーカーにする'),
-    pad: z.number().min(0).max(30).optional().describe('マーカーの前後に付けるのりしろ秒（既定 0）'),
-    markerKind: z.enum(['keep', 'cut', 'note']).optional().describe("マーカーの種別（既定 'keep'）"),
+    addMarkers: z.boolean().optional().describe('true なら結果をそのままマーカーにする'),
+    markerStyle: z.enum(['onset', 'block']).optional().describe(
+      "マーカーの形。'onset'（既定）はしゃべり出しの点、'block' は従来の区間マーカー"),
+    pad: z.number().min(0).max(30).optional().describe(
+      "マーカーの前後に付けるのりしろ秒（既定 0。markerStyle: 'block' の時だけ使う）"),
+    markerKind: z.enum(['start', 'keep', 'cut', 'note']).optional().describe(
+      "マーカーの種別（既定は markerStyle に合わせて 'start' か 'keep'）"),
   },
 }, async (a) => {
   const model = pickModel(a.model);
@@ -428,16 +459,33 @@ server.registerTool('kiriko_transcribe', {
     ),
   });
 
+  const markerStyle = a.markerStyle ?? 'onset';
   let markers = null;
   if (a.addMarkers && segments.length) {
-    // 素材の時刻のまま渡す。タイムライン時刻への変換はブラウザ側が今の並びで行う
-    markers = await call('add_markers', {
-      markers: segments.map((s) => ({
-        source: s.source, sourceFrom: s.sourceFrom, sourceTo: s.sourceTo,
-        text: s.text, kind: a.markerKind ?? 'keep',
-      })),
-      pad: a.pad ?? 0,
-    });
+    if (markerStyle === 'onset') {
+      // しゃべり出しの点マーカー。位置は sil.sound[] の各区間の start（タイムライン時刻）を使う。
+      // whisper の segment はどこに重なるか（text を拾うため）だけに使う
+      const sorted = [...segments].sort((x, y) => x.timeAtStart - y.timeAtStart);
+      markers = await call('add_markers', {
+        markers: sil.sound.map((region) => {
+          const hit = sorted.find((s) => s.timeAtStart >= region.start && s.timeAtStart < region.end);
+          return {
+            time: region.start, duration: 0,
+            text: (hit?.text ?? '').slice(0, 20),
+            kind: a.markerKind ?? 'start',
+          };
+        }),
+      });
+    } else {
+      // 素材の時刻のまま渡す。タイムライン時刻への変換はブラウザ側が今の並びで行う
+      markers = await call('add_markers', {
+        markers: segments.map((s) => ({
+          source: s.source, sourceFrom: s.sourceFrom, sourceTo: s.sourceTo,
+          text: s.text, kind: a.markerKind ?? 'keep',
+        })),
+        pad: a.pad ?? 0,
+      });
+    }
   }
 
   return asText({

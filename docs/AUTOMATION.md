@@ -54,7 +54,7 @@ Chrome 系か Firefox を使うこと。
 | `get_clips` | タイムライン上のクリップの並び（どの素材のどこを使っているか）|
 | `get_markers` | マーカー一覧 |
 | `get_project` / `set_project` | 編集内容の JSON を丸ごと |
-| `add_markers` | マーカーを一括で立てる（`kind`: keep / cut / note、`pad` でのりしろ）|
+| `add_markers` | マーカーを一括で立てる（`kind`: start / keep / cut / note、`pad` でのりしろ）|
 | `add_telops` | テロップを一括で追加（プリセット指定・複数行可）|
 | `get_subtitles` | 字幕（SRT）一覧。長すぎ・速すぎの警告付き |
 | `set_subtitles` | 字幕（SRT）をまとめて入れる・更新する（`mode`: replace / merge、`autoSplit`）|
@@ -62,7 +62,8 @@ Chrome 系か Firefox を使うこと。
 | `get_audio_levels` | 音量エンベロープ（0〜1）|
 | `get_frame` | 指定時刻の完成フレームを PNG dataURL で |
 | `cut_range` | 範囲を切り取る（複数まとめて可）。消した分は在庫に残る |
-| `cut_outside_markers` | 「残す」区間マーカーの外を切る（`pad` / `minGapSec` / `dryRun`）|
+| `cut_outside_markers` | 「残す」区間マーカーの外を切る（block 方式。`pad` / `minGapSec` / `dryRun`）|
+| `cut_before_markers` | しゃべり出しマーカーの手前を詰める（onset 方式・本命。`lead` / `tail` / `minGapSec` / `dryRun`）|
 | `list_trims` | 切りすぎた分の在庫。どこで何秒戻せるか |
 | `restore_at` | 継ぎ目から秒単位で戻す（`side`: head / tail）|
 | `get_notes` / `set_notes` | 作業メモ |
