@@ -17,11 +17,18 @@ const FILES = STORE.fileHandles;
 const DIRS = STORE.dirHandles;
 const tx = (db, store, mode, fn) => withStore(db, store, mode, fn);
 
-/** 開いたファイルのハンドルを覚える（名前で引く） */
+/**
+ * ファイル名を比べるための正規化。
+ * macOS のファイル名は NFD（ト+濁点）、ブラウザや保存経路によっては NFC（ド）になり、
+ * 見た目が同じでも === では一致しない。濁点・半濁点を含む素材名で実際に踏んだ。
+ */
+export const normName = (s) => String(s ?? '').normalize('NFC');
+
+/** 開いたファイルのハンドルを覚える（名前で引く。正規化した名前をキーにする） */
 export async function rememberFile(name, handle) {
   if (!handle) return;
   const db = await open();
-  await tx(db, FILES, 'readwrite', (st) => st.put(handle, name));
+  await tx(db, FILES, 'readwrite', (st) => st.put(handle, normName(name)));
   db.close();
 }
 
@@ -105,7 +112,17 @@ export async function listDirs() {
 
 async function getFileHandle(name) {
   const db = await open();
-  const h = await tx(db, FILES, 'readonly', (st) => st.get(name));
+  // 読み出しはまず正規化キーで引く。見つからなければ元の名前でも引く
+  // （すでに古い形式（未正規化）で保存されている人のデータを取りこぼさないため）。
+  let key = normName(name);
+  let h = await tx(db, FILES, 'readonly', (st) => st.get(key));
+  if (!h && key !== name) {
+    h = await tx(db, FILES, 'readonly', (st) => st.get(name));
+    if (h) {
+      // 見つかった古いキーは、正規化キーで覚え直しておく
+      await tx(db, FILES, 'readwrite', (st) => st.put(h, key));
+    }
+  }
   db.close();
   return h ?? null;
 }
@@ -185,7 +202,7 @@ export async function findInDir(dir, name, depth) {
     for await (const [key, entry] of dir.entries()) {
       try {
         if (entry.kind === 'file') {
-          if (key === name) return { file: await entry.getFile(), handle: entry };
+          if (normName(key) === normName(name)) return { file: await entry.getFile(), handle: entry };
         } else if (depth > 0) {
           subs.push(entry);
         }

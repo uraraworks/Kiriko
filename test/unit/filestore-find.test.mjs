@@ -89,3 +89,33 @@ test('findInDir: サブフォルダの探索が失敗しても別のサブフォ
   assert.ok(hit);
   assert.equal(hit.file.name, 'found.txt');
 });
+
+// Unicode 正規化のゆれ。macOS のファイル名は歴史的に NFD（ト+濁点）、ブラウザや保存経路
+// によっては NFC（ド）になり、見た目が同じでも === では一致しない。
+// エスケープで書くことで、ソース上でも NFC/NFD の違いが分かるようにしておく。
+const NFC = 'ド';        // ド（濁点結合済み・1コードポイント）
+const NFD = 'ド';  // ト + 濁点（2コードポイント）
+
+test('findInDir: ディスク側が NFC、探す名前が NFD でも見つかる', async () => {
+  const target = fakeFile(`${NFC}ンドンパフパフ.mp3`);
+  const root = fakeDir('root', [target]);
+
+  const hit = await findInDir(root, `${NFD}ンドンパフパフ.mp3`, 3);
+  assert.ok(hit);
+});
+
+test('findInDir: ディスク側が NFD、探す名前が NFC でも見つかる', async () => {
+  const target = fakeFile(`${NFD}ンドンパフパフ.mp3`);
+  const root = fakeDir('root', [target]);
+
+  const hit = await findInDir(root, `${NFC}ンドンパフパフ.mp3`, 3);
+  assert.ok(hit);
+});
+
+test('findInDir: 無関係な名前は正規化しても見つからない', async () => {
+  const target = fakeFile(`${NFC}ンドンパフパフ.mp3`);
+  const root = fakeDir('root', [target]);
+
+  const hit = await findInDir(root, '和太鼓でカカッ.mp3', 3);
+  assert.equal(hit, null);
+});

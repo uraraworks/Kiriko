@@ -346,7 +346,7 @@ async function addFiles(files) {
       const src = new Mp4Source(file);
       await src.load((m) => status(`${file.name}: ${m}`));
       // 同じ名前で「未接続」の枠があればそこへ繋ぐ（プロジェクトを開いた直後の再接続）
-      const slot = S.project.sources.find((x) => x.name === src.name && !S.sources.has(x.id));
+      const slot = S.project.sources.find((x) => FS.normName(x.name) === FS.normName(src.name) && !S.sources.has(x.id));
       const id = slot?.id ?? P.newId('src');
       S.sources.set(id, src);
       if (slot) Object.assign(slot, { size: file.size, duration: src.duration });
@@ -1347,7 +1347,7 @@ async function addAudioAssets(files) {
   const lib = library();
   for (const f of files) {
     try {
-      const slot = S.project.audioAssets.find((x) => x.name === f.name && !lib.has(x.id));
+      const slot = S.project.audioAssets.find((x) => FS.normName(x.name) === FS.normName(f.name) && !lib.has(x.id));
       const id = slot?.id ?? P.newId('aud');
       const meta = await lib.add(f, id);
       if (slot) Object.assign(slot, meta);
@@ -1395,7 +1395,7 @@ async function addImageAssets(files) {
   const added = [];
   for (const f of files) {
     try {
-      const slot = S.project.imageAssets.find((x) => x.name === f.name && !S.imageLib.get(x.id));
+      const slot = S.project.imageAssets.find((x) => FS.normName(x.name) === FS.normName(f.name) && !S.imageLib.get(x.id));
       const id = slot?.id ?? P.newId('img');
       const meta = await S.imageLib.add(f, id);
       if (slot) Object.assign(slot, meta);
@@ -1501,8 +1501,8 @@ async function importThumbFromProject(file) {
     if (relink.has(assetId)) return relink.get(assetId);
     const meta = (src.imageAssets ?? []).find((a) => a.id === assetId);
     if (!meta) { relink.set(assetId, null); return null; }
-    const wantName = (meta.name ?? '').normalize('NFC');
-    const existing = S.project.imageAssets.find((a) => (a.name ?? '').normalize('NFC') === wantName);
+    const wantName = FS.normName(meta.name);
+    const existing = S.project.imageAssets.find((a) => FS.normName(a.name) === wantName);
     const id = existing ? existing.id : P.newId('img');
     if (!existing) {
       S.project.imageAssets.push({ id, name: meta.name, width: meta.width, height: meta.height });
@@ -2824,7 +2824,7 @@ async function placeLibrarySet(entry) {
   const dir = await FS.writableDir().catch(() => null);
   let copied = 0;
   for (const a of entry.assets ?? []) {
-    const existing = S.project.imageAssets.find((x) => x.name === a.name);
+    const existing = S.project.imageAssets.find((x) => FS.normName(x.name) === FS.normName(a.name));
     if (existing) { remap.set(a.id, existing.id); continue; }
     const file = await Lib.assetToFile(a);
     if (!file) { status(`${a.name} が見つかりません（ライブラリフォルダを確認してください）`, true); continue; }
