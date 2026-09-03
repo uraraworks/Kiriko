@@ -363,12 +363,17 @@ export function createCommands(ctx) {
       const starts = proj().markers
         .filter((m) => (m.kind ?? 'note') === kind)
         .filter((m) => m.time >= f && m.time < t)
-        .map((m) => m.time);
+        .map((m) => ({ time: m.time, duration: m.duration ?? 0 }));
       if (!starts.length) throw new Error(`${f}〜${t} 秒の範囲に ${kind} マーカーがありません`);
 
-      const { silence } = await cmds.find_silence({
-        threshold, minSec, from: f, to: t, autoWindowSec, autoPercentile, autoMult,
-      });
+      // マーカーが全部しゃべり終わりの長さ（duration）を持っているなら、
+      // find_silence を呼び直さない（transcribe 時の判定とずれさせないため、無駄な再計算を避ける）
+      const withDuration = starts.filter((s) => s.duration > 0).length;
+      const silence = withDuration === starts.length
+        ? []
+        : (await cmds.find_silence({
+          threshold, minSec, from: f, to: t, autoWindowSec, autoPercentile, autoMult,
+        })).silence;
       const keep = keepRangesFromStarts(starts, silence, t, Math.max(0, Number(lead) || 0),
         Math.max(0, Number(tail) || 0));
       // [from, to) の外は絶対に切らない。守りたい区間を「残す区間」として足しておく
@@ -382,6 +387,7 @@ export function createCommands(ctx) {
         beforeSec: +total.toFixed(3),
         durationSec: +(total - removedSec).toFixed(3),
         startMarkers: starts.length,
+        withDuration,
         from: +f.toFixed(3),
         to: +t.toFixed(3),
       };

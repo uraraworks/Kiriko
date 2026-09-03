@@ -93,28 +93,40 @@ export function cutRangesFromKeep(keep, total, pad = 0, minGapSec = 0) {
  * 「その手前が詰まらないだけ」で済む（区間ごと消えることがない）ので、
  * ノイズの多い素材ではこちらを本命にする。
  *
- * @param {number[]} starts しゃべり出しのタイムライン秒（順不同でよい）
- * @param {Array<{start:number,end:number}>} silence 無音区間（find_silence の silence）
+ * しゃべり終わりの決め方：**duration があればそれを使う。無い時だけ音量（silence）
+ * から推測する。** duration は kiriko_transcribe の onset マーカーが、区間を切った
+ * その場で記録した「本当のしゃべり終わり」なので、後から silence を計算し直すより正確
+ * （threshold / minSec を書き起こし時と揃え忘れてもずれない）。
+ *
+ * @param {Array<{time:number, duration?:number}>} starts しゃべり出し（time: タイムライン秒、
+ *   duration: 発話の長さ。無ければ 0 として silence から求める）。順不同でよい
+ * @param {Array<{start:number,end:number}>} silence 無音区間（find_silence の silence）。
+ *   duration の無いマーカーの終わり判定にだけ使う
  * @param {number} total 全体の尺
  * @param {number} lead しゃべり出しの手前に残す秒
  * @param {number} tail 発話の終わりに残す余韻秒
  * @returns {Array<[number,number]>} 残す区間（時刻順）
  */
 export function keepRangesFromStarts(starts, silence, total, lead = 0.4, tail = 0.6) {
-  const uniq = [...new Set(starts)].sort((a, b) => a - b);
+  const uniq = [...starts].sort((a, b) => a.time - b.time);
   if (!uniq.length) return [];
   const sil = [...silence].sort((a, b) => a.start - b.start);
 
   const out = [];
   for (let i = 0; i < uniq.length; i++) {
-    const s = uniq[i];
+    const { time: s, duration } = uniq[i];
     const a = Math.max(0, s - lead);
     let end = total;
-    const nextSilence = sil.find((x) => x.start > s);
-    if (nextSilence) end = Math.min(total, nextSilence.start + tail);
+    if (duration > 0) {
+      // 記録された発話の長さを最優先で使う（silence を計算し直さない）
+      end = Math.min(total, s + duration + tail);
+    } else {
+      const nextSilence = sil.find((x) => x.start > s);
+      if (nextSilence) end = Math.min(total, nextSilence.start + tail);
+    }
     const sNext = uniq[i + 1];
     if (sNext !== undefined) {
-      const cap = Math.max(s, sNext - lead);
+      const cap = Math.max(s, sNext.time - lead);
       end = Math.min(end, cap);
     }
     out.push([a, end]);

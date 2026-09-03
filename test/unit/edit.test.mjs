@@ -97,9 +97,13 @@ test('残す区間から切る区間を求める（マーカーの外を切る�
   assert.deepEqual(cutRangesFromKeep([[10, 30], [20, 40]], 100), [[0, 10], [40, 100]]);
 });
 
-test('しゃべり出しの点から残す区間を組み立てる（基本形）', () => {
+// starts は {time, duration} の配列。duration を持たない（従来どおり silence から
+// 推測させたい）テストのための省略記法
+const pts = (times) => times.map((time) => ({ time, duration: 0 }));
+
+test('しゃべり出しの点から残す区間を組み立てる（基本形・duration 無し）', () => {
   // 10 秒でしゃべり出し、20 秒から無音。次のしゃべり出しは 40 秒
-  const starts = [10, 40];
+  const starts = pts([10, 40]);
   const silence = [{ start: 20, end: 35 }];
   // 10 秒のしゃべり出し: 手前 lead=0.4 を残し、20 秒の無音開始 + tail=0.6 で終わる
   // 40 秒のしゃべり出し: 手前は同じく lead
@@ -110,12 +114,12 @@ test('しゃべり出しの点から残す区間を組み立てる（基本形�
 });
 
 test('しゃべり出しの点: 無音が見つからなければ total まで伸びる', () => {
-  assert.deepEqual(keepRangesFromStarts([10], [], 100, 0.4, 0.6), [[9.6, 100]]);
+  assert.deepEqual(keepRangesFromStarts(pts([10]), [], 100, 0.4, 0.6), [[9.6, 100]]);
 });
 
 test('しゃべり出しの点: 次のしゃべり出しの手前で打ち切られる', () => {
   // 無音が見つかっても、次のしゃべり出しの lead 手前より後ろには伸びない
-  const starts = [10, 15];
+  const starts = pts([10, 15]);
   const silence = [{ start: 30, end: 50 }];   // 無音は遠くにしかなく…
   assert.deepEqual(keepRangesFromStarts(starts, silence, 100, 0.4, 0.6), [
     [9.6, 14.6],    // 次のしゃべり出し(15) - lead(0.4) で打ち切り
@@ -125,7 +129,7 @@ test('しゃべり出しの点: 次のしゃべり出しの手前で打ち切ら
 
 test('しゃべり出しの点: 次のしゃべり出しが近すぎても s 自体は下限にする', () => {
   // s=10, s_next=10.2 のとき s_next-lead(9.8) は s(10) より小さいので、下限は s
-  const starts = [10, 10.2];
+  const starts = pts([10, 10.2]);
   const silence = [];
   const ranges = keepRangesFromStarts(starts, silence, 100, 0.4, 0.6);
   assert.equal(ranges[0][1], 10);   // s を下回らない
@@ -136,8 +140,49 @@ test('しゃべり出しの点: starts が空なら空配列', () => {
 });
 
 test('しゃべり出しの点: lead で 0 を下回らない', () => {
-  const ranges = keepRangesFromStarts([0.1], [], 100, 0.4, 0.6);
+  const ranges = keepRangesFromStarts(pts([0.1]), [], 100, 0.4, 0.6);
   assert.equal(ranges[0][0], 0);
+});
+
+// duration がある時は、silence が別の答えを示していても duration を優先する。
+// これが本命：transcribe が区間を切ったその場で記録した長さを使い、
+// cut_before_markers 側で threshold / minSec を別に指定してもずれないようにする。
+test('しゃべり出しの点: duration があればそれを最優先で使う（silence は無視）', () => {
+  const starts = [{ time: 10, duration: 3 }];   // 10〜13 秒がしゃべっている区間
+  const silence = [{ start: 11, end: 50 }];     // silence だけ見ると 11 秒で終わったように見える
+  const ranges = keepRangesFromStarts(starts, silence, 100, 0.4, 0.6);
+  // duration(3) + tail(0.6) を使うので、silence の 11 秒は無視されて 13.6 まで残る
+  assert.deepEqual(ranges, [[9.6, 13.6]]);
+});
+
+test('しゃべり出しの点: duration が 0 のマーカーは従来どおり silence から求める', () => {
+  const starts = [{ time: 10, duration: 0 }];
+  const silence = [{ start: 20, end: 35 }];
+  const ranges = keepRangesFromStarts(starts, silence, 100, 0.4, 0.6);
+  assert.deepEqual(ranges, [[9.6, 20.6]]);
+});
+
+test('しゃべり出しの点: duration ありと無しが混ざっていても正しく処理される', () => {
+  const starts = [
+    { time: 10, duration: 3 },     // duration 優先 → 13.6 まで
+    { time: 40, duration: 0 },     // silence から → 50.6 まで
+  ];
+  const silence = [{ start: 50, end: 60 }];
+  const ranges = keepRangesFromStarts(starts, silence, 100, 0.4, 0.6);
+  assert.deepEqual(ranges, [
+    [9.6, 13.6],
+    [39.6, 50.6],
+  ]);
+});
+
+test('しゃべり出しの点: duration があっても次のしゃべり出しの手前で打ち切られる', () => {
+  // duration(3) + tail(0.6) だと 13.6 まで伸びるはずだが、次の出し(12) - lead(0.4) = 11.6 で打ち切り
+  const starts = [
+    { time: 10, duration: 3 },
+    { time: 12, duration: 0 },
+  ];
+  const ranges = keepRangesFromStarts(starts, [], 100, 0.4, 0.6);
+  assert.equal(ranges[0][1], 11.6);
 });
 
 // cut_before_markers の範囲指定（from/to）ガード。
@@ -147,7 +192,7 @@ test('cut_before_markers の範囲ガード: [from, to) の外は切られない
   const total = 600;
   const from = 100;
   const to = 300;
-  const starts = [150, 200];   // from〜to の範囲内のしゃべり出しだけ
+  const starts = pts([150, 200]);   // from〜to の範囲内のしゃべり出しだけ
   const silence = [];
   const keep = keepRangesFromStarts(starts, silence, to, 0.4, 0.6);
   if (from > 0) keep.push([0, from]);
@@ -163,7 +208,7 @@ test('cut_before_markers の範囲ガード: from=0 のときは [0, from] を�
   const total = 600;
   const from = 0;
   const to = 300;
-  const starts = [150];
+  const starts = pts([150]);
   const keep = keepRangesFromStarts(starts, [], to, 0.4, 0.6);
   if (from > 0) keep.push([0, from]);
   if (to < total) keep.push([to, total]);
@@ -176,7 +221,7 @@ test('cut_before_markers の範囲ガード: to=total のときは [to, total] �
   const total = 600;
   const from = 100;
   const to = total;
-  const starts = [150];
+  const starts = pts([150]);
   const keep = keepRangesFromStarts(starts, [], to, 0.4, 0.6);
   if (from > 0) keep.push([0, from]);
   if (to < total) keep.push([to, total]);

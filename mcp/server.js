@@ -249,6 +249,8 @@ server.registerTool('kiriko_cut_before_markers', {
     + 'これを呼ぶのが本命の流れ。\n\n'
     + 'しゃべり終わりは音量から自動で判定するので、指定しなくてよい'
     + '（次のしゃべり出しの手前で打ち切られる）。\n\n'
+    + 'マーカーが発話の長さ（duration）を持っていればそれを使い、無い時だけ音量から推測する。'
+    + 'そのため kiriko_transcribe と threshold を揃え忘れても、書き起こした時の区間とずれない。\n\n'
     + 'lead は 0.4 秒が既定。子音は音量が小さく、音量の立ち上がりは'
     + '実際のしゃべり出しより遅れるので、0 にすると語頭が欠ける。\n\n'
     + '**cut_outside_markers と違い、検出漏れは「その手前が詰まらないだけ」で済む**'
@@ -422,7 +424,9 @@ server.registerTool('kiriko_transcribe', {
     autoMult: z.number().min(0).optional().describe("threshold: 'auto' 時、暗騒音に掛ける倍率（既定 2.0）"),
     addMarkers: z.boolean().optional().describe('true なら結果をそのままマーカーにする'),
     markerStyle: z.enum(['onset', 'block']).optional().describe(
-      "マーカーの形。'onset'（既定）はしゃべり出しの点、'block' は従来の区間マーカー"),
+      "マーカーの形。'onset'（既定）はしゃべり出しの点（発話の長さも duration として記録する。"
+      + 'cut_before_markers はこれを使うので、しゃべり終わりの判定がずれない）、'
+      + "'block' は従来の区間マーカー"),
     pad: z.number().min(0).max(30).optional().describe(
       "マーカーの前後に付けるのりしろ秒（既定 0。markerStyle: 'block' の時だけ使う）"),
     markerKind: z.enum(['start', 'keep', 'cut', 'note']).optional().describe(
@@ -496,7 +500,9 @@ server.registerTool('kiriko_transcribe', {
         const hit = sorted.find((s) => s.timeAtStart >= region.start && s.timeAtStart < region.end);
         if (!hit || !hit.text.trim()) continue;   // 声と認められなかった区間は飛ばす
         onsets.push({
-          time: region.start, duration: 0,
+          // duration はしゃべり終わり（region.end、無音が始まる位置）までの長さ。
+          // cut_before_markers がここから同じ量を計算し直さずに済むように記録しておく。
+          time: region.start, duration: Math.max(0, region.end - region.start),
           text: hit.text.slice(0, 20),
           kind: a.markerKind ?? 'start',
         });
